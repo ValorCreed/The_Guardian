@@ -1,137 +1,232 @@
-import { Colors } from '@/constants/theme';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
-import { TextInput, StyleSheet, Text, View, TouchableOpacity, ScrollView, useColorScheme } from 'react-native';
+import {
+  StyleSheet,
+  Text,
+  View,
+  TouchableOpacity,
+  TextInput,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
-const Signup: React.FC = () => {
-  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+const RegisterScreen = () => {
   const router = useRouter();
-  const [step, setStep] = useState(1);
-  // Step 1 - Personal Info
-const [firstName, setFirstName] = useState('');
-const [lastName, setLastName] = useState('');
-const [otherName, setOtherName] = useState('');
-const [username, setUsername] = useState('');
-const [email, setEmail] = useState('');
-const [recoveryEmail, setRecoveryEmail] = useState('');
-const [dateOfBirth, setDateOfBirth] = useState('');
 
-// Step 2 - Security
-const [password, setPassword] = useState('');
-const [confirmPassword, setConfirmPassword] = useState('');
-const [pin, setPin] = useState('');
-
-// Step 3 - Recovery
-const [securityQuestion, setSecurityQuestion] = useState('');
-const [customQuestion, setCustomQuestion] = useState('');
-const [securityAnswer, setSecurityAnswer] = useState('');
-
-// Step 4 - Terms
-const [termsAccepted, setTermsAccepted] = useState(false);
-const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
 
   return (
-    <LinearGradient
-      colors={[
-        Colors[colorScheme].background,
-        Colors[colorScheme].backgroundElement,
-        Colors[colorScheme].background,
-      ]}
-      style={styles.container}
-    >
-      <ScrollView showsVerticalScrollIndicator={false}>
-      {step === 1 && (
-  <View style={styles.stepContainer}>
-    <Text style={[styles.title, { color: Colors[colorScheme].text }]}>Personal Info</Text>
-    <Text style={[styles.subtitle, { color: Colors[colorScheme].textSecondary }]}>Step 1 of 4</Text>
-  </View>
-)}
+    <SafeAreaView style={styles.container}>
 
-<View style={styles.inputWrapper}>
-  <Ionicons name="person-outline" size={20} color={Colors[colorScheme].textSecondary} />
-  <TextInput
-    style={[styles.input, { color: Colors[colorScheme].text }]}
-    placeholder="First Name"
-    placeholderTextColor={Colors[colorScheme].textSecondary}
-    value={firstName}
-    onChangeText={setFirstName}
-  />
-</View>
+      {/* Back button */}
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <Text style={styles.backText}>← Back</Text>
+      </TouchableOpacity>
 
-<View style={styles.inputWrapper}>
-  <Ionicons name="person-outline" size={20} color={Colors[colorScheme].textSecondary} />
-  <TextInput
-    style={[styles.input, { color: Colors[colorScheme].text }]}
-    placeholder="Last Name"
-    placeholderTextColor={Colors[colorScheme].textSecondary}
-    value={lastName}
-    onChangeText={setLastName}
-  />
-</View>
+      {/* Shield icon box */}
+      <View style={styles.iconBox}>
+        <View style={styles.shield}>
+          <View style={styles.checkLeft} />
+          <View style={styles.checkRight} />
+        </View>
+      </View>
 
-<View style={styles.inputWrapper}>
-  <Ionicons name="person-outline" size={20} color={Colors[colorScheme].textSecondary} />
-  <TextInput
-    style={[styles.input, { color: Colors[colorScheme].text }]}
-    placeholder="Other Name (optional)"
-    placeholderTextColor={Colors[colorScheme].textSecondary}
-    value={otherName}
-    onChangeText={setOtherName}
-  />
-</View>
+      {/* Title and subtitle */}
+      <Text style={styles.title}>Create your account</Text>
+      <Text style={styles.subtitle}>
+        Your master password is the only key. We can never see it.
+      </Text>
 
+      {/* Email field */}
+      <Text style={styles.label}>Email</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="alex.morgan@gmail.com"
+        placeholderTextColor="#aaa"
+        value={email}
+        onChangeText={setEmail}
+        keyboardType="email-address"
+        autoCapitalize="none"
+      />
 
+      {/* Master Password field */}
+      <Text style={styles.label}>Master Password</Text>
+      <View style={styles.passwordBox}>
+        <TextInput
+          style={styles.passwordInput}
+          placeholder="Enter master password"
+          placeholderTextColor="#aaa"
+          value={password}
+          onChangeText={setPassword}
+          secureTextEntry={!showPassword}
+        />
+        {/* Eye toggle */}
+        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+          <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁️'}</Text>
+        </TouchableOpacity>
+      </View>
 
+      {/* Confirm Password field */}
+      <Text style={styles.label}>Confirm Password</Text>
+      <TextInput
+        style={styles.input}
+        placeholder="Re-enter master password"
+        placeholderTextColor="#aaa"
+        value={confirmPassword}
+        onChangeText={setConfirmPassword}
+        secureTextEntry={true}
+      />
 
+      {/* Continue button */}
+      <View style={styles.bottomSection}>
+        <TouchableOpacity
+          style={styles.continueButton}
+          onPress={() => router.replace('/verification')}
+        >
+          <Text style={styles.continueText}>Continue</Text>
+        </TouchableOpacity>
+      </View>
 
-
-
-      </ScrollView>
-    </LinearGradient>
+    </SafeAreaView>
   );
 };
 
-export default Signup;
+export default RegisterScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#f0f4f0',
+    paddingHorizontal: 24,
+    paddingBottom: 20,
   },
+
+  backButton: {
+    marginTop: 8,
+    marginBottom: 20,
+  },
+
+  backText: {
+    fontSize: 16,
+    color: '#333',
+  },
+
+  // Small green icon box
+  iconBox: {
+    width: 60,
+    height: 60,
+    backgroundColor: '#1a5c35',
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+
+  shield: {
+    width: 30,
+    height: 34,
+    borderColor: '#ffffff',
+    borderWidth: 2.5,
+    borderRadius: 4,
+    borderBottomLeftRadius: 15,
+    borderBottomRightRadius: 15,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  checkLeft: {
+    position: 'absolute',
+    width: 2.5,
+    height: 8,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '45deg' }, { translateX: -4 }, { translateY: 2 }],
+  },
+
+  checkRight: {
+    position: 'absolute',
+    width: 2.5,
+    height: 14,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '-45deg' }, { translateX: 4 }, { translateY: -1 }],
+  },
+
   title: {
-    alignSelf: 'center',
-    fontSize: 25,
+    fontSize: 26,
     fontWeight: 'bold',
-    marginTop: 60,
+    color: '#0f2d1f',
+    marginBottom: 8,
   },
 
-  stepContainer: {
-  padding: 24,
-},
-subtitle: {
-  alignSelf: 'center',
-  fontSize: 14,
-  marginTop: 5,
-  marginBottom: 20,
-},
+  subtitle: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 20,
+    marginBottom: 28,
+  },
 
-inputWrapper: {
-  flexDirection: 'row',
-  alignItems: 'center',
-  borderWidth: 1,
-  borderColor: Colors.light.textSecondary,
-  borderRadius: 10,
-  paddingHorizontal: 10,
-  marginTop: 15,
-},
-input: {
-  flex: 1,
-  padding: 14,
-  fontSize: 16,
-},
+  label: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
 
+  input: {
+    backgroundColor: '#ffffff',
+    borderRadius: 50,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
 
+  // Password field with eye icon
+  passwordBox: {
+    backgroundColor: '#ffffff',
+    borderRadius: 50,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
 
+  passwordInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#333',
+  },
 
+  eyeIcon: {
+    fontSize: 18,
+    marginLeft: 10,
+  },
+
+  bottomSection: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+
+  continueButton: {
+    backgroundColor: '#1a5c35',
+    paddingVertical: 18,
+    borderRadius: 50,
+    alignItems: 'center',
+  },
+
+  continueText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 });

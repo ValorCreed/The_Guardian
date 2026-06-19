@@ -1,70 +1,95 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import '@/global.css';
-
-import { Platform } from 'react-native';
-
 export const Colors = {
   light: {
-    text: '#3f597e',
-    background: '#a1d3e9',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#95a9d2',
-    backgroundIdea: '#4c6e9d',
-    backgroundbutton: '#062958'
+    // Text
+    text: '#111827',
+    textSecondary: '#6B7280',
+
+    // Backgrounds
+    background: '#F8FAF9',
+    backgroundElement: '#FFFFFF',
+    backgroundSelected: '#E8F2EC',
+
+    // Brand Colors
+    primary: '#065F46',
+    primaryLight: '#10B981',
+
+    // Buttons
+    backgroundbutton: '#065F46',
+
+    // Status Colors
+    success: '#10B981',
+    warning: '#F59E0B',
+    danger: '#EF4444',
+    info: '#3B82F6',
+
+    // Dashboard Cards
+    securityScore: '#F5B93D',
+    securityScoreBg: '#FEF3C7',
+
+    // Quick Actions
+    actionCard: '#EDF4F0',
+    actionIconBg: '#065F46',
+
+    // Alerts
+    alertDangerBg: '#FEE2E2',
+    alertWarningBg: '#FEF3C7',
+
+    // Borders
+    border: '#E5E7EB',
+
+    // Inputs
+    inputBackground: '#FFFFFF',
+    inputBorder: '#D1D5DB',
+
+    // Tab Bar
+    tabInactive: '#9CA3AF',
+    tabActive: '#065F46',
   },
+
   dark: {
-    text: 'white',
-    background: '#011023',
-    backgroundElement: '#102036',
-    backgroundIdea: '#4c6e9d',
-    backgroundSelected: '#0a213fc7',
-    textSecondary: '#b0b4ba81',
-    backgroundbutton: '#062958'
+    // Text
+    text: '#FFFFFF',
+    textSecondary: '#9CA3AF',
+
+    // Backgrounds
+    background: '#0A0F14',
+    backgroundElement: '#111827',
+    backgroundSelected: '#1F2937',
+
+    // Brand Colors
+    primary: '#10B981',
+    primaryLight: '#34D399',
+
+    // Buttons
+    backgroundbutton: '#065F46',
+
+    // Status Colors
+    success: '#10B981',
+    warning: '#FBBF24',
+    danger: '#EF4444',
+    info: '#60A5FA',
+
+    // Dashboard Cards
+    securityScore: '#F5B93D',
+    securityScoreBg: '#3D2C06',
+
+    // Quick Actions
+    actionCard: '#161F2B',
+    actionIconBg: '#065F46',
+
+    // Alerts
+    alertDangerBg: '#3B1212',
+    alertWarningBg: '#3D2C06',
+
+    // Borders
+    border: '#2A3441',
+
+    // Inputs
+    inputBackground: '#111827',
+    inputBorder: '#374151',
+
+    // Tab Bar
+    tabInactive: '#6B7280',
+    tabActive: '#10B981',
   },
 } as const;
-
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
-
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
-
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
-} as const;
-
-
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;

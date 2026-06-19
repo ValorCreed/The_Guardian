@@ -1,257 +1,175 @@
-import { Colors } from '@/constants/theme';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useState, useRef, useEffect } from 'react';
-import { Image, StyleSheet, Text, TextInput, useColorScheme, View, TouchableOpacity, Animated } from 'react-native';
-import Logo from '../../assets/logo.png';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter} from 'expo-router';
+import React from 'react';
+import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
+const LoginScreen = () => {
+  const router = useRouter();
 
-const Login: React.FC = () => {
-    const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light'
-    const [email, setEmail] = useState('')
-    const [password, setPassword]= useState('')
-    const [showPassword, setShowPassword] = useState(false)
-    const shimmerAnim = useRef(new Animated.Value(-400)).current;
-    const router = useRouter();
-    
-    
-      useEffect(() => {
-  Animated.loop(
-    Animated.timing(shimmerAnim, {
-      toValue: 400,
-      duration: 5000,  // slower than home screen so it's more subtle
-      useNativeDriver: true,
-    })
-  ).start();
-}, []);
-  
-    
-    
-    
-    return (
+  return (
+    <SafeAreaView style={styles.container}>
 
+      {/* Top section - logo and text */}
+      <View style={styles.topSection}>
 
-    
+        {/* Shield icon box */}
+        <View style={styles.iconBox}>
+          <View style={styles.shield}>
+            <View style={styles.checkLeft} />
+            <View style={styles.checkRight} />
+          </View>
+        </View>
 
-       <LinearGradient
-       colors={[
-            Colors[colorScheme].background,
-    Colors[colorScheme].backgroundElement,
-    Colors[colorScheme].background,
-         ]}
-         style = {styles.container}>
+        {/* Title */}
+        <Text style={styles.title}>The Guardian</Text>
 
-          
-<Image
-  source={Logo}
-  style={styles.logo}
-  resizeMode="contain"
-/>
+        {/* Subtitle */}
+        <Text style={styles.subtitle}>
+          Store your most sensitive life data in one secure place protected by zero-knowledge encryption.
+        </Text>
 
-<Text style ={[styles.title, {color: Colors[colorScheme].text}]}>Welcome Back</Text>
+      </View>
 
-<View style={styles.inputWrapper}>
-  <Ionicons name="mail-outline" size={20} color={Colors[colorScheme].textSecondary} />
-  <TextInput
-    style={[styles.input, { color: Colors[colorScheme].text }]}
-    placeholder="Email"
-    placeholderTextColor={Colors[colorScheme].textSecondary}
-    value={email}
-    onChangeText={setEmail}
-    keyboardType="email-address"
-    autoCapitalize="none"
-  />
-</View>
+      {/* Bottom section - buttons */}
+      <View style={styles.bottomSection}>
 
+        {/* Create Account button */}
+        <TouchableOpacity
+          style={styles.createButton}
+          onPress={() => router.push('/signup')}
+        >
+          <Text style={styles.createButtonText}>Create Account</Text>
+        </TouchableOpacity>
 
+        {/* Sign In button */}
+        <TouchableOpacity
+          style={styles.signInButton}
+          onPress={() => router.push('/signin')}
+        >
+          <Text style={styles.signInButtonText}>Sign In</Text>
+        </TouchableOpacity>
 
+      </View>
 
-<View style={styles.inputWrapper}>
-  <Ionicons name="lock-closed-outline" size={20} color={Colors[colorScheme].textSecondary} />
-  <TextInput
-    style={[styles.input, { color: Colors[colorScheme].text }]}
-    placeholder="Password"
-    placeholderTextColor={Colors[colorScheme].textSecondary}
-    value={password}
-    onChangeText={setPassword}
-    secureTextEntry={!showPassword}
-  />
-  <TouchableOpacity onPress ={() => setShowPassword(!showPassword)}>
-   <Ionicons
-    name={showPassword ? 'eye-outline' : 'eye-off-outline'}
-    size={20}
-    color={Colors[colorScheme].textSecondary}
-    onPress={() => setShowPassword(!showPassword)}
-  />
-  </TouchableOpacity>
-</View>
+    </SafeAreaView>
+  );
+};
 
-
-<TouchableOpacity style={styles.forgotPassword}>
-  <Text style={{ color: Colors[colorScheme].textSecondary }}>Forgot Password?</Text>
-</TouchableOpacity>
-
-
-
-<TouchableOpacity style={styles.loginButton}>
-  <LinearGradient
-    colors={['#062958', '#4c6e9d', '#062958']}
-    start={{ x: 0, y: 0 }}
-    end={{ x: 1, y: 0 }}
-    style={styles.loginButtonGradient}
-  >
-    <Text style={styles.loginButtonText}>Login</Text>
-  </LinearGradient>
-    </TouchableOpacity>
-
-
-
-<View style={styles.signUpWrapper}>
-  <Text style={{ color: Colors[colorScheme].textSecondary }}>Don't have an account? </Text>
-  <TouchableOpacity onPress={() => router.push('/signup')}>
-    <Text style={{ color: Colors[colorScheme].text, fontWeight: 'bold' }}>Sign Up</Text>
-  </TouchableOpacity>
-</View>
-
-
-
-<Animated.View
-  style={[
-    styles.screenShimmer,
-    { transform: [{ translateX: shimmerAnim }] },
-  ]}
-  pointerEvents="none"
->
-  <LinearGradient
-    colors={['transparent', 'rgba(255, 255, 255, 0)', 'transparent']}
-    start={{ x: 0, y: 0 }}
-    end={{ x: 1, y: 0 }}
-    style={styles.screenShimmerGradient}
-  />
-</Animated.View>
-
-
-
-
-<Animated.View
-  style={[
-    styles.screenShimmer,
-    { transform: [{ translateX: shimmerAnim }] },
-  ]}
-  pointerEvents="none"
->
-  <LinearGradient
-    colors={['transparent', 'rgba(255, 255, 255, 0.03)', 'transparent']}
-    start={{ x: 0, y: 0 }}
-    end={{ x: 1, y: 0 }}
-    style={styles.screenShimmerGradient}
-  />
-</Animated.View>
-
-
-
-
-        </LinearGradient>
-      
-        
-    )
-}
-export default Login;
+export default LoginScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 24,
+    backgroundColor: '#f0f4f0', // light greenish white background
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingBottom: 20,
   },
 
-  logo: {
-  width: 300,
-  height: 300,
-  alignSelf: 'center',
-  marginTop: 50,
-  
-},
+  topSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 60,
+  },
 
-title: {
-  alignSelf: 'center',
-  fontSize: 35,
-  fontWeight: 'bold',
-  marginTop: -125,
-},
+  // Green rounded square behind shield
+  iconBox: {
+    width: 100,
+    height: 100,
+    backgroundColor: '#1a5c35',
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 32,
+    // shadow
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
 
-inputWrapper: {
-  width: '100%',
-  alignSelf: 'center',
-  flexDirection: 'row',
-  alignItems: 'center',
-  borderWidth: 1,
-  borderColor: Colors.light.textSecondary,
-  borderRadius: 10,
-  paddingHorizontal: 20,
-  marginTop: 20,
-},
-input: {
-  flex: 1,
-  padding: 14,
-  fontSize: 16,
-},
+  // Shield border shape
+  shield: {
+    width: 48,
+    height: 54,
+    borderColor: '#ffffff',
+    borderWidth: 3,
+    borderRadius: 6,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 
+  // Left stroke of checkmark
+  checkLeft: {
+    position: 'absolute',
+    width: 3,
+    height: 13,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '45deg' }, { translateX: -6 }, { translateY: 3 }],
+  },
 
-forgotPassword: {
-  alignSelf: 'flex-end',
-  marginRight: '7.5%',
-  marginTop: 8,
-},
+  // Right stroke of checkmark
+  checkRight: {
+    position: 'absolute',
+    width: 3,
+    height: 22,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '-45deg' }, { translateX: 6 }, { translateY: -1 }],
+  },
 
+  title: {
+    fontSize: 34,
+    fontWeight: 'bold',
+    color: '#0f2d1f',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
 
-loginButton: {
-  width: '100%',
-  alignSelf: 'center',
-  padding: 16,
-  borderRadius: 10,
-  marginTop: 30,
-  overflow: 'hidden'
-},
+  subtitle: {
+    fontSize: 16,
+    color: '#555',
+    textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: 10,
+  },
 
-loginButtonText: {
-  fontSize: 18,
-  fontWeight: 'bold',
-},
+  bottomSection: {
+    gap: 12,
+  },
 
-loginButtonGradient: {
-  padding: 16,
-  alignItems: 'center',
-  borderRadius: 10,
-  overflow: 'hidden'
-},
+  // Dark green filled button
+  createButton: {
+    backgroundColor: '#1a5c35',
+    paddingVertical: 18,
+    borderRadius: 50,
+    alignItems: 'center',
+  },
 
-signUpWrapper: {
-  flexDirection: 'row',
-  alignSelf: 'center',
-  marginTop: 180,
-},
+  createButtonText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
 
+  // White outlined button
+  signInButton: {
+    backgroundColor: '#ffffff',
+    paddingVertical: 18,
+    borderRadius: 50,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
 
-card: {
-  width: '90%',
-  alignSelf: 'center',
-  borderRadius: 100,
-  padding: 20,
-  marginTop: 60,
-},
-
-screenShimmer: {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  width: 150,
-  height: '100%',
-},
-screenShimmerGradient: {
-  flex: 1,
-},
-
-
-
+  signInButtonText: {
+    color: '#0f2d1f',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

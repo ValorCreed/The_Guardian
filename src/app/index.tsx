@@ -1,122 +1,100 @@
-import { Colors } from '@/constants/theme';
-import { Orbitron_700Bold, useFonts } from '@expo-google-fonts/orbitron';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect } from 'react';
+import { StyleSheet, View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { Animated, Dimensions, StyleSheet, useColorScheme, View } from 'react-native';
-import Logo from '../../assets/logo.png';
 
-const { width } = Dimensions.get('window');
-
-const HomeScreen = () => {
-  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const [fontsLoaded] = useFonts({ Orbitron_700Bold });
-
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.3)).current;
-  const shimmerAnim = useRef(new Animated.Value(-500)).current;
+const SplashScreen = () => {
   const router = useRouter();
 
   useEffect(() => {
-    setTimeout(() => {
+    const timer = setTimeout(() => {
       router.replace('/login');
-    }, 8000);
+    }, 3000); // 3 seconds
 
-    // shimmer loops across full screen
-    Animated.loop(
-      Animated.timing(shimmerAnim, {
-        toValue: 500,
-        duration: 4000,
-        useNativeDriver: true,
-      })
-    ).start();
-
-    // entrance animations
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 5000,
-        useNativeDriver: true,
-      }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 5,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    return () => clearTimeout(timer); // cleanup
   }, []);
 
-  if (!fontsLoaded) return null;
-
   return (
-    <LinearGradient
-      colors={[
-        Colors[colorScheme].background,
-        Colors[colorScheme].backgroundElement,
-        Colors[colorScheme].background,
-        Colors[colorScheme].backgroundIdea
-      ]}
-      style={styles.container}
-    >
-      {/* logo */}
-      <View style={styles.logoWrapper}>
-        <Animated.Image
-          source={Logo}
-          style={[
-            styles.logo,
-            {
-              opacity: fadeAnim,
-              transform: [{ scale: scaleAnim }],
-            },
-          ]}
-        />
+    <View style={styles.container}>
+
+      {/* Shield icon box */}
+      <View style={styles.iconBox}>
+        <View style={styles.shield}>
+          <View style={styles.checkLeft} />
+          <View style={styles.checkRight} />
+        </View>
       </View>
 
-      {/* full screen shimmer overlay */}
-      <Animated.View
-        style={[
-          styles.screenShimmer,
-          { transform: [{ translateX: shimmerAnim }] },
-        ]}
-        pointerEvents="none"
-      >
-        <LinearGradient
-          colors={['transparent', 'rgba(255,255,255,0.15)', 'transparent']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.screenShimmerGradient}
-        />
-      </Animated.View>
-    </LinearGradient>
+      {/* App name */}
+      <Text style={styles.title}>The Guardian</Text>
+
+      {/* Tagline */}
+      <Text style={styles.subtitle}>Your Life. Protected.</Text>
+
+    </View>
   );
 };
 
-export default HomeScreen;
+export default SplashScreen;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0d4a2f',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  logoWrapper: {
-    width: 400,
-    height: 400,
-    alignSelf: 'center',
-    marginTop: 150,
-    overflow: 'hidden',
+
+  iconBox: {
+    width: 90,
+    height: 90,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
   },
-  logo: {
-    marginTop: 50,
-    width: 400,
-    height: 400,
+
+  shield: {
+    width: 44,
+    height: 50,
+    borderColor: '#ffffff',
+    borderWidth: 3,
+    borderRadius: 4,
+    borderBottomLeftRadius: 22,
+    borderBottomRightRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  screenShimmer: {
+
+  checkLeft: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    width: 150,       // width of the shimmer streak
-    height: '100%',   // full screen height
+    width: 3,
+    height: 12,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '45deg' }, { translateX: -5 }, { translateY: 3 }],
   },
-  screenShimmerGradient: {
-    flex: 1,
+
+  checkRight: {
+    position: 'absolute',
+    width: 3,
+    height: 20,
+    backgroundColor: '#ffffff',
+    borderRadius: 2,
+    transform: [{ rotate: '-45deg' }, { translateX: 5 }, { translateY: -1 }],
+  },
+
+  title: {
+    color: '#ffffff',
+    fontSize: 26,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+
+  subtitle: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 14,
+    letterSpacing: 1,
   },
 });
