@@ -1,95 +1,95 @@
 export const Colors = {
   light: {
     // Text
-    text: '#111827',
-    textSecondary: '#6B7280',
+    text: '#0f2d1f',
+    textSecondary: '#777',
 
     // Backgrounds
-    background: '#F8FAF9',
-    backgroundElement: '#FFFFFF',
-    backgroundSelected: '#E8F2EC',
+    background: '#f0f4f0',
+    backgroundElement: '#ffffff',
+    backgroundSelected: '#e8f2ec',
 
     // Brand Colors
-    primary: '#065F46',
-    primaryLight: '#10B981',
+    primary: '#1a5c35',
+    primaryLight: '#2e7d52',
 
     // Buttons
-    backgroundbutton: '#065F46',
+    backgroundbutton: '#1a5c35',
 
     // Status Colors
-    success: '#10B981',
-    warning: '#F59E0B',
-    danger: '#EF4444',
-    info: '#3B82F6',
+    success: '#22c55e',
+    warning: '#f0a000',
+    danger: '#e53935',
+    info: '#1e88e5',
 
     // Dashboard Cards
-    securityScore: '#F5B93D',
-    securityScoreBg: '#FEF3C7',
+    securityScore: '#f5c842',
+    securityScoreBg: '#fef4e4',
 
     // Quick Actions
-    actionCard: '#EDF4F0',
-    actionIconBg: '#065F46',
+    actionCard: '#edf4f0',
+    actionIconBg: '#1a5c35',
 
     // Alerts
-    alertDangerBg: '#FEE2E2',
-    alertWarningBg: '#FEF3C7',
+    alertDangerBg: '#fde8e8',
+    alertWarningBg: '#fef0e0',
 
     // Borders
-    border: '#E5E7EB',
+    border: '#e0e0e0',
 
     // Inputs
-    inputBackground: '#FFFFFF',
-    inputBorder: '#D1D5DB',
+    inputBackground: '#ffffff',
+    inputBorder: '#d1d5db',
 
     // Tab Bar
-    tabInactive: '#9CA3AF',
-    tabActive: '#065F46',
+    tabInactive: '#888',
+    tabActive: '#1a5c35',
   },
 
   dark: {
     // Text
-    text: '#FFFFFF',
-    textSecondary: '#9CA3AF',
+    text: '#e8f5ee',
+    textSecondary: '#8aab97',
 
     // Backgrounds
-    background: '#0A0F14',
-    backgroundElement: '#111827',
-    backgroundSelected: '#1F2937',
+    background: '#0a1a10',
+    backgroundElement: '#112318',
+    backgroundSelected: '#1a3326',
 
     // Brand Colors
-    primary: '#10B981',
-    primaryLight: '#34D399',
+    primary: '#2e7d52',
+    primaryLight: '#3da668',
 
     // Buttons
-    backgroundbutton: '#065F46',
+    backgroundbutton: '#1a5c35',
 
     // Status Colors
-    success: '#10B981',
-    warning: '#FBBF24',
-    danger: '#EF4444',
-    info: '#60A5FA',
+    success: '#22c55e',
+    warning: '#f0a000',
+    danger: '#e53935',
+    info: '#1e88e5',
 
     // Dashboard Cards
-    securityScore: '#F5B93D',
-    securityScoreBg: '#3D2C06',
+    securityScore: '#f5c842',
+    securityScoreBg: '#2e2206',
 
     // Quick Actions
-    actionCard: '#161F2B',
-    actionIconBg: '#065F46',
+    actionCard: '#1a2e22',
+    actionIconBg: '#1a5c35',
 
     // Alerts
-    alertDangerBg: '#3B1212',
-    alertWarningBg: '#3D2C06',
+    alertDangerBg: '#2e1010',
+    alertWarningBg: '#2e1f06',
 
     // Borders
-    border: '#2A3441',
+    border: '#1e3d2a',
 
     // Inputs
-    inputBackground: '#111827',
-    inputBorder: '#374151',
+    inputBackground: '#112318',
+    inputBorder: '#1e3d2a',
 
     // Tab Bar
-    tabInactive: '#6B7280',
-    tabActive: '#10B981',
+    tabInactive: '#bcd6c7',
+    tabActive: '#2e7d52',
   },
 } as const;

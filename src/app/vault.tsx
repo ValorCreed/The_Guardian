@@ -8,9 +8,11 @@ import {
   ScrollView,
   TextInput,
   Dimensions,
+  useColorScheme,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { Colors } from '../constants/theme';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
@@ -46,6 +48,9 @@ const cardList = [
 const VaultScreen = () => {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
+  const scheme = useColorScheme();
+  const colorScheme = scheme === 'dark' ? 'dark' : 'light';
+  const C = Colors[colorScheme];
 
   const [activeTab, setActiveTab] = useState('Passwords');
   const [activeFilter, setActiveFilter] = useState('All');
@@ -58,17 +63,7 @@ const VaultScreen = () => {
     else setActiveTab('Passwords');
   }, [tab]);
 
-  const getStrengthStyle = (strength: string) => {
-    if (strength === 'Strong') return styles.strengthStrong;
-    if (strength === 'Weak') return styles.strengthWeak;
-    return styles.strengthMedium;
-  };
-
-  const getStrengthTextStyle = (strength: string) => {
-    if (strength === 'Strong') return styles.strengthTextStrong;
-    if (strength === 'Weak') return styles.strengthTextWeak;
-    return styles.strengthTextMedium;
-  };
+  const styles = makeStyles(C);
 
   const filteredPasswords = passwordList.filter((item) => {
     const matchesSearch =
@@ -83,8 +78,7 @@ const VaultScreen = () => {
     const matchesSearch =
       item.name.toLowerCase().includes(search.toLowerCase()) ||
       item.category.toLowerCase().includes(search.toLowerCase());
-    const matchesFilter =
-      activeDocFilter === 'All' || item.category === activeDocFilter;
+    const matchesFilter = activeDocFilter === 'All' || item.category === activeDocFilter;
     return matchesSearch && matchesFilter;
   });
 
@@ -96,7 +90,6 @@ const VaultScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-
       {/* Header */}
       <View style={styles.header}>
         <View>
@@ -117,17 +110,17 @@ const VaultScreen = () => {
 
       {/* Search bar */}
       <View style={styles.searchBar}>
-        <Ionicons name="search-outline" size={18} color="#aaa" />
+        <Ionicons name="search-outline" size={18} color={C.tabInactive} />
         <TextInput
           style={styles.searchInput}
           placeholder={`Search ${activeTab.toLowerCase()}`}
-          placeholderTextColor="#aaa"
+          placeholderTextColor={C.tabInactive}
           value={search}
           onChangeText={setSearch}
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch('')}>
-            <Ionicons name="close-circle" size={18} color="#aaa" />
+            <Ionicons name="close-circle" size={18} color={C.tabInactive} />
           </TouchableOpacity>
         )}
       </View>
@@ -154,7 +147,7 @@ const VaultScreen = () => {
                   : 'card-outline'
               }
               size={15}
-              color={activeTab === tabItem ? '#0f2d1f' : '#888'}
+              color={activeTab === tabItem ? C.text : C.tabInactive}
             />
             <Text style={[styles.tabText, activeTab === tabItem && styles.tabTextActive]}>
               {tabItem}
@@ -163,7 +156,7 @@ const VaultScreen = () => {
         ))}
       </View>
 
-      {/* Passwords filter - outside scroll */}
+      {/* Passwords filter */}
       {activeTab === 'Passwords' && (
         <View style={styles.filterRow}>
           {['All', 'Favorites'].map((filter) => (
@@ -176,7 +169,7 @@ const VaultScreen = () => {
                 <Ionicons
                   name="star-outline"
                   size={13}
-                  color={activeFilter === filter ? '#fff' : '#555'}
+                  color={activeFilter === filter ? '#fff' : C.textSecondary}
                   style={{ marginRight: 4 }}
                 />
               )}
@@ -188,13 +181,13 @@ const VaultScreen = () => {
         </View>
       )}
 
-      {/* ── PASSWORDS ── */}
+      {/* Passwords */}
       {activeTab === 'Passwords' && (
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.list}>
             {filteredPasswords.length === 0 ? (
               <View style={styles.emptyState}>
-                <Ionicons name="key-outline" size={48} color="#ccc" />
+                <Ionicons name="key-outline" size={48} color={C.border} />
                 <Text style={styles.emptyText}>No passwords found</Text>
               </View>
             ) : (
@@ -212,8 +205,22 @@ const VaultScreen = () => {
                     </View>
                     <Text style={styles.cardSub}>{item.sub}</Text>
                   </View>
-                  <View style={[styles.strengthBadge, getStrengthStyle(item.strength)]}>
-                    <Text style={[styles.strengthText, getStrengthTextStyle(item.strength)]}>
+                  <View style={[
+                    styles.strengthBadge,
+                    item.strength === 'Strong'
+                      ? { backgroundColor: C.actionCard }
+                      : item.strength === 'Weak'
+                      ? { backgroundColor: C.alertDangerBg }
+                      : { backgroundColor: C.alertWarningBg },
+                  ]}>
+                    <Text style={[
+                      styles.strengthText,
+                      item.strength === 'Strong'
+                        ? { color: C.primary }
+                        : item.strength === 'Weak'
+                        ? { color: C.danger }
+                        : { color: C.warning },
+                    ]}>
                       {item.strength}
                     </Text>
                   </View>
@@ -225,11 +232,9 @@ const VaultScreen = () => {
         </ScrollView>
       )}
 
-      {/* ── DOCUMENTS ── filter chips + grid live in same ScrollView */}
+      {/* Documents */}
       {activeTab === 'Documents' && (
         <ScrollView showsVerticalScrollIndicator={false}>
-
-          {/* Filter chips INSIDE the scroll */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -249,10 +254,9 @@ const VaultScreen = () => {
             ))}
           </ScrollView>
 
-          {/* Document grid */}
           {filteredDocuments.length === 0 ? (
             <View style={styles.emptyState}>
-              <Ionicons name="document-outline" size={48} color="#ccc" />
+              <Ionicons name="document-outline" size={48} color={C.border} />
               <Text style={styles.emptyText}>No documents found</Text>
             </View>
           ) : (
@@ -261,9 +265,9 @@ const VaultScreen = () => {
                 <TouchableOpacity key={index} style={styles.docCard}>
                   <View style={styles.docCardTop}>
                     <View style={styles.docIconCircle}>
-                      <Ionicons name={item.icon as any} size={24} color="#5B9BD5" />
+                      <Ionicons name={item.icon as any} size={24} color={C.info} />
                     </View>
-                    <Ionicons name="lock-closed-outline" size={16} color="#5B9BD5" />
+                    <Ionicons name="lock-closed-outline" size={16} color={C.info} />
                   </View>
                   <Text style={styles.docName}>{item.name}</Text>
                   <Text style={styles.docMeta}>{item.category} · {item.size}</Text>
@@ -275,7 +279,7 @@ const VaultScreen = () => {
         </ScrollView>
       )}
 
-      {/* ── CARDS ── */}
+      {/* Cards */}
       {activeTab === 'Cards' && (
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.list}>
@@ -288,7 +292,7 @@ const VaultScreen = () => {
                   <Text style={styles.cardName}>{card.name}</Text>
                   <Text style={styles.cardSub}>{card.bank} · •••• {card.last4}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+                <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
               </TouchableOpacity>
             ))}
           </View>
@@ -299,27 +303,23 @@ const VaultScreen = () => {
       {/* Bottom nav */}
       <View style={styles.bottomNav}>
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/home')}>
-          <Ionicons name="home-outline" size={22} color="#888" />
+          <Ionicons name="home-outline" size={22} color={C.tabInactive} />
           <Text style={styles.navLabel}>Home</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem}>
-          <Ionicons name="key" size={22} color="#1a5c35" />
+          <Ionicons name="key" size={22} color={C.tabActive} />
           <Text style={styles.navLabelActive}>Vault</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/security')}>
-          <Ionicons name="shield-outline" size={22} color="#888" />
+          <Ionicons name="shield-outline" size={22} color={C.tabInactive} />
           <Text style={styles.navLabel}>Security</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/family')}>
-          <Ionicons name="people-outline" size={22} color="#888" />
+          <Ionicons name="people-outline" size={22} color={C.tabInactive} />
           <Text style={styles.navLabel}>Family</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={styles.navItem} onPress={() => router.push('/settings')}>
-          <Ionicons name="settings-outline" size={22} color="#888" />
+          <Ionicons name="settings-outline" size={22} color={C.tabInactive} />
           <Text style={styles.navLabel}>Settings</Text>
         </TouchableOpacity>
       </View>
@@ -329,249 +329,164 @@ const VaultScreen = () => {
 
 export default VaultScreen;
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f0f4f0',
-  },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  headerCount: {
-    fontSize: 13,
-    color: '#666',
-  },
-  headerTitle: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#0f2d1f',
-  },
-  addBtn: {
-    width: 44,
-    height: 44,
-    backgroundColor: '#1a5c35',
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 50,
-    marginHorizontal: 20,
-    marginBottom: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#333',
-  },
-  tabRow: {
-    flexDirection: 'row',
-    backgroundColor: '#e8ede8',
-    borderRadius: 50,
-    marginHorizontal: 20,
-    marginBottom: 14,
-    padding: 4,
-    gap: 4,
-  },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    borderRadius: 50,
-    gap: 5,
-  },
-  tabActive: {
-    backgroundColor: '#ffffff',
-  },
-  tabText: {
-    fontSize: 13,
-    color: '#888',
-    fontWeight: '500',
-  },
-  tabTextActive: {
-    color: '#0f2d1f',
-    fontWeight: '600',
-  },
-  filterRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    marginBottom: 14,
-    gap: 10,
-  },
-  docFilterScroll: {
-    marginBottom: 14,
-  },
-  docFilterRow: {
-    paddingHorizontal: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  filterBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 22,
-    backgroundColor: '#e8ede8',
-  },
-  filterBtnActive: {
-    backgroundColor: '#1a5c35',
-  },
-  filterText: {
-    fontSize: 13,
-    color: '#555',
-    fontWeight: '500',
-  },
-  filterTextActive: {
-    color: '#ffffff',
-    fontWeight: '600',
-  },
-  list: {
-    paddingHorizontal: 20,
-    gap: 10,
-  },
-  passwordCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  avatarText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 17,
-  },
-  cardText: {
-    flex: 1,
-  },
-  nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  cardName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0f2d1f',
-  },
-  cardSub: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 2,
-  },
-  strengthBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  strengthStrong: { backgroundColor: '#e0f5e9' },
-  strengthWeak: { backgroundColor: '#fde8e8' },
-  strengthMedium: { backgroundColor: '#fef0e0' },
-  strengthText: { fontSize: 12, fontWeight: '600' },
-  strengthTextStrong: { color: '#1a5c35' },
-  strengthTextWeak: { color: '#e53935' },
-  strengthTextMedium: { color: '#f0a000' },
-  cardChip: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  docGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    paddingHorizontal: SCREEN_PADDING,
-    gap: CARD_GAP,
-    marginTop: 2,
-  },
-  docCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    padding: 16,
-    width: DOC_CARD_WIDTH,
-  },
-  docCardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 20,
-  },
-  docIconCircle: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#EAF2FB',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  docName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0f2d1f',
-    marginBottom: 4,
-  },
-  docMeta: {
-    fontSize: 12,
-    color: '#888',
-  },
-  emptyState: {
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 60,
-  },
-  emptyText: {
-    fontSize: 15,
-    color: '#aaa',
-  },
-  bottomNav: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: '#ffffff',
-    flexDirection: 'row',
-    paddingVertical: 10,
-    paddingBottom: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 4,
-  },
-  navLabel: {
-    fontSize: 11,
-    color: '#888',
-  },
-  navLabelActive: {
-    fontSize: 11,
-    color: '#1a5c35',
-    fontWeight: '600',
-  },
-});
+const makeStyles = (C: (typeof Colors)[keyof typeof Colors]) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: C.background },
+    header: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      paddingHorizontal: 20,
+      paddingTop: 16,
+      paddingBottom: 12,
+    },
+    headerCount: { fontSize: 13, color: C.textSecondary },
+    headerTitle: { fontSize: 26, fontWeight: 'bold', color: C.text },
+    addBtn: {
+      width: 44,
+      height: 44,
+      backgroundColor: C.primary,
+      borderRadius: 22,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    searchBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 50,
+      marginHorizontal: 20,
+      marginBottom: 14,
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+      gap: 8,
+    },
+    searchInput: { flex: 1, fontSize: 15, color: C.text },
+    tabRow: {
+      flexDirection: 'row',
+      backgroundColor: C.backgroundSelected,
+      borderRadius: 50,
+      marginHorizontal: 20,
+      marginBottom: 14,
+      padding: 4,
+      gap: 4,
+    },
+    tab: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 8,
+      borderRadius: 50,
+      gap: 5,
+    },
+    tabActive: { backgroundColor: C.backgroundElement },
+    tabText: { fontSize: 13, color: C.tabInactive, fontWeight: '500' },
+    tabTextActive: { color: C.text, fontWeight: '600' },
+    filterRow: {
+      flexDirection: 'row',
+      paddingHorizontal: 20,
+      marginBottom: 14,
+      gap: 10,
+    },
+    docFilterScroll: { marginBottom: 14 },
+    docFilterRow: {
+      paddingHorizontal: 20,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+    },
+    filterBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 22,
+      backgroundColor: C.backgroundSelected,
+    },
+    filterBtnActive: { backgroundColor: C.primary },
+    filterText: { fontSize: 13, color: C.textSecondary, fontWeight: '500' },
+    filterTextActive: { color: '#ffffff', fontWeight: '600' },
+    list: { paddingHorizontal: 20, gap: 10 },
+    passwordCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 16,
+      padding: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    avatar: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    avatarText: { color: '#fff', fontWeight: 'bold', fontSize: 17 },
+    cardText: { flex: 1 },
+    nameRow: { flexDirection: 'row', alignItems: 'center' },
+    cardName: { fontSize: 15, fontWeight: '600', color: C.text },
+    cardSub: { fontSize: 12, color: C.textSecondary, marginTop: 2 },
+    strengthBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+    strengthText: { fontSize: 12, fontWeight: '600' },
+    cardChip: {
+      width: 44,
+      height: 44,
+      borderRadius: 12,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    docGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      justifyContent: 'flex-start',
+      paddingHorizontal: SCREEN_PADDING,
+      gap: CARD_GAP,
+      marginTop: 2,
+    },
+    docCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 16,
+      padding: 16,
+      width: DOC_CARD_WIDTH,
+    },
+    docCardTop: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      marginBottom: 20,
+    },
+    docIconCircle: {
+      width: 48,
+      height: 48,
+      borderRadius: 24,
+      backgroundColor: C.backgroundSelected,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    docName: { fontSize: 15, fontWeight: '600', color: C.text, marginBottom: 4 },
+    docMeta: { fontSize: 12, color: C.textSecondary },
+    emptyState: {
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 60,
+    },
+    emptyText: { fontSize: 15, color: C.tabInactive },
+    bottomNav: {
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: C.backgroundElement,
+      flexDirection: 'row',
+      paddingVertical: 10,
+      paddingBottom: 24,
+      borderTopWidth: 1,
+      borderTopColor: C.border,
+    },
+    navItem: { flex: 1, alignItems: 'center', gap: 4 },
+    navLabel: { fontSize: 11, color: C.tabInactive },
+    navLabelActive: { fontSize: 11, color: C.tabActive, fontWeight: '600' },
+  });

@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   TextInput,
@@ -9,14 +8,53 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import * as LocalAuthentication from 'expo-local-authentication';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export default function UnlockScreen() {
+export default function SignInScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+
+  // check if biometrics are available and enabled by user in settings
+  useEffect(() => {
+    const checkBiometric = async () => {
+      const compatible = await LocalAuthentication.hasHardwareAsync();
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      const saved = await AsyncStorage.getItem('biometricUnlock');
+      setBiometricEnabled(compatible && enrolled && saved === 'true');
+    };
+    checkBiometric();
+  }, []);
+
+  const handleBiometricAuth = async () => {
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Unlock The Guardian',
+      fallbackLabel: 'Use Password',
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: false,
+    });
+
+    if (result.success) {
+      router.replace('/home');
+    } else {
+      Alert.alert('Authentication Failed', 'Could not verify your identity. Please use your password.');
+    }
+  };
+
+  const handleUnlock = () => {
+    if (!email || !password) {
+      Alert.alert('Error', 'Please enter your email and master password.');
+      return;
+    }
+    router.replace('/home');
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -92,18 +130,33 @@ export default function UnlockScreen() {
           </View>
 
           {/* Forgot password */}
-          <TouchableOpacity activeOpacity={0.6} onPress={() => {}}>
+          <TouchableOpacity
+            activeOpacity={0.6}
+            onPress={() => router.push('/forgotpassword')}
+          >
             <Text style={styles.forgotText}>Forgot password?</Text>
           </TouchableOpacity>
 
+          {/* Biometric button — only shows if enabled in settings */}
+          {biometricEnabled && (
+            <TouchableOpacity
+              style={styles.biometricBtn}
+              onPress={handleBiometricAuth}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="finger-print-outline" size={26} color="#1B4332" />
+              <Text style={styles.biometricText}>Use Face ID / Fingerprint</Text>
+            </TouchableOpacity>
+          )}
+
         </View>
 
-        {/* Unlock button pinned to bottom */}
+        {/* Unlock button */}
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.unlockButton}
             activeOpacity={0.85}
-            onPress={() => router.replace('/home')}
+            onPress={handleUnlock}
           >
             <Text style={styles.unlockButtonText}>Unlock Vault</Text>
           </TouchableOpacity>
@@ -197,6 +250,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1B4332',
     marginTop: 4,
+  },
+
+  biometricBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginTop: 24,
+    padding: 14,
+    backgroundColor: '#e8f0e8',
+    borderRadius: 16,
+  },
+
+  biometricText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#1B4332',
   },
 
   footer: {

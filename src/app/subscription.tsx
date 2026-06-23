@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   View,
   Text,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import { ChevronLeft, Check } from 'lucide-react-native';
 import { router } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 // ---------------------------------------------------------------------------
 // Reusable bits

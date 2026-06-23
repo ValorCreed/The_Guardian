@@ -1,9 +1,12 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from 'expo-router';
+import { DarkTheme, DefaultTheme, ThemeProvider} from 'expo-router';
 import { useColorScheme } from 'react-native';
 import {Stack} from 'expo-router';
+import React from 'react';
 
 
-export default function TabLayout() {
+
+
+export default function RootLayout() {
   const colorScheme = useColorScheme();
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
@@ -21,8 +24,9 @@ export default function TabLayout() {
         <Stack.Screen name="subscription" options={{ headerShown: false }} />
         <Stack.Screen name="family" options={{ headerShown: false }} />
         <Stack.Screen name="security" options={{ headerShown: false }} />
-         <Stack.Screen name="newmember" options={{ headerShown: false }} />
-           <Stack.Screen name="signin" options={{ headerShown: false }} />
+        <Stack.Screen name="newmember" options={{ headerShown: false }} />
+        <Stack.Screen name="signin" options={{ headerShown: false }} />
+        <Stack.Screen name="forgotpassword" options={{ headerShown: false }} />
       </Stack>
       </ThemeProvider>
 );
