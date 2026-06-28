@@ -1,4 +1,5 @@
 package com.vault.theguardian.vault;
+
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
@@ -17,10 +18,11 @@ public class VaultService {
         this.subscriptionService = subscriptionService;
     }
 
-    public VaultResponse createVaultItem(User user, VaultRequest request){
-        long count = vaultItemRepository.findByUser(user).size();
+    public VaultResponse createVaultItem(User user, VaultRequest request) {
+        // Faster than findByUser(user).size(), but requires countByUser(User user) in VaultItemRepository.
+        long count = vaultItemRepository.countByUser(user);
 
-        if(!subscriptionService.canCreateVaultItem(user,count)){
+        if (!subscriptionService.canCreateVaultItem(user, count)) {
             throw new RuntimeException("Free plan limit reached. Upgrade to Premium.");
         }
 
@@ -35,29 +37,51 @@ public class VaultService {
                 .build();
 
         VaultItem saved = vaultItemRepository.save(item);
-
         return toResponse(saved);
     }
 
-    public List<VaultResponse> getMyVaultItems(User user){
+    public List<VaultResponse> getMyVaultItems(User user) {
         return vaultItemRepository.findByUser(user)
                 .stream()
                 .map(this::toResponse)
                 .toList();
     }
 
-    public void deleteVaultItem(User user, Long id){
-        VaultItem item = vaultItemRepository.findById(id)
-                .orElseThrow(()->new RuntimeException("Vault Item not Found"));
+    public VaultResponse getVaultItem(User user, Long id) {
+        VaultItem item = getOwnedVaultItem(user, id);
+        return toResponse(item);
+    }
 
-        if (!item.getUser().getId().equals(user.getId())){
-            throw new RuntimeException("You cannot delete this item");
-        }
+    public VaultResponse updateVaultItem(User user, Long id, VaultRequest request) {
+        VaultItem item = getOwnedVaultItem(user, id);
 
+        item.setTitle(request.title());
+        item.setUsernameValue(request.usernameValue());
+        item.setEncryptedPassword(request.encryptedPassword());
+        item.setWebsite(request.website());
+        item.setNotes(request.notes());
+
+        VaultItem saved = vaultItemRepository.save(item);
+        return toResponse(saved);
+    }
+
+    public void deleteVaultItem(User user, Long id) {
+        VaultItem item = getOwnedVaultItem(user, id);
         vaultItemRepository.delete(item);
     }
 
-    private VaultResponse toResponse(VaultItem item){
+    private VaultItem getOwnedVaultItem(User user, Long id) {
+        VaultItem item = vaultItemRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Vault item not found"));
+
+        if (!item.getUser().getId().equals(user.getId())) {
+            throw new RuntimeException("You cannot access this item");
+        }
+
+        return item;
+    }
+
+    private VaultResponse toResponse(VaultItem item) {
         return new VaultResponse(
                 item.getId(),
                 item.getTitle(),
@@ -67,5 +91,4 @@ public class VaultService {
                 item.getNotes()
         );
     }
-
 }

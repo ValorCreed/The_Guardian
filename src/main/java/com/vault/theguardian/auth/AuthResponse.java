@@ -5,6 +5,8 @@ public record AuthResponse(
         Long userId,
         String fullName,
         String email,
-        String plan
-) {
-}
+        String plan,
+        boolean emailVerified,
+        boolean twoFactorEnabled,
+        boolean requiresTwoFactor
+) {}

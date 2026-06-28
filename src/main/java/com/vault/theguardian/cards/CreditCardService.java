@@ -1,10 +1,10 @@
 package com.vault.theguardian.cards;
+
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
 import java.time.LocalDateTime;
-
+import java.util.List;
 
 @Service
 public class CreditCardService {
@@ -14,10 +14,8 @@ public class CreditCardService {
     public CreditCardService(CreditCardRepository creditCardRepository) {
         this.creditCardRepository = creditCardRepository;
     }
+
     public CreditCardResponse createCard(User user, CreditCardRequest request) {
-        /*
-         * Save encrypted card information.
-         */
         CreditCardEntity card = CreditCardEntity.builder()
                 .user(user)
                 .cardName(request.cardName())
@@ -29,32 +27,48 @@ public class CreditCardService {
                 .build();
 
         CreditCardEntity savedCard = creditCardRepository.save(card);
-
         return toResponse(savedCard);
     }
 
     public List<CreditCardResponse> getMyCards(User user) {
-        /*
-         * Only return cards owned by the logged-in user.
-         */
         return creditCardRepository.findByUser(user)
                 .stream()
                 .map(this::toResponse)
                 .toList();
     }
 
+    public CreditCardResponse getCard(User user, Long id) {
+        CreditCardEntity card = getOwnedCard(user, id);
+        return toResponse(card);
+    }
+
+    public CreditCardResponse updateCard(User user, Long id, CreditCardRequest request) {
+        CreditCardEntity card = getOwnedCard(user, id);
+
+        card.setCardName(request.cardName());
+        card.setEncryptedCardNumber(request.encryptedCardNumber());
+        card.setEncryptedExpiryDate(request.encryptedExpiryDate());
+        card.setEncryptedCvv(request.encryptedCvv());
+        card.setEncryptedCardholderName(request.encryptedCardholderName());
+
+        CreditCardEntity savedCard = creditCardRepository.save(card);
+        return toResponse(savedCard);
+    }
+
     public void deleteCard(User user, Long id) {
+        CreditCardEntity card = getOwnedCard(user, id);
+        creditCardRepository.delete(card);
+    }
+
+    private CreditCardEntity getOwnedCard(User user, Long id) {
         CreditCardEntity card = creditCardRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Card not found"));
 
-        /*
-         * Prevent one user from deleting another user's card.
-         */
         if (!card.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("You cannot delete this card");
+            throw new RuntimeException("You cannot access this card");
         }
 
-        creditCardRepository.delete(card);
+        return card;
     }
 
     private CreditCardResponse toResponse(CreditCardEntity card) {
@@ -67,6 +81,4 @@ public class CreditCardService {
                 card.getEncryptedCardholderName()
         );
     }
-
-
 }

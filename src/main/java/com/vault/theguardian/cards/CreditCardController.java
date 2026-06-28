@@ -33,6 +33,23 @@ public class CreditCardController {
         return creditCardService.getMyCards(user);
     }
 
+    @GetMapping("/{id}")
+    public CreditCardResponse getCard(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id
+    ) {
+        return creditCardService.getCard(user, id);
+    }
+
+    @PutMapping("/{id}")
+    public CreditCardResponse updateCard(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id,
+            @Valid @RequestBody CreditCardRequest request
+    ) {
+        return creditCardService.updateCard(user, id, request);
+    }
+
     @DeleteMapping("/{id}")
     public void deleteCard(
             @AuthenticationPrincipal User user,
