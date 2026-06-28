@@ -1,12 +1,12 @@
 package com.vault.theguardian.documents;
 
-import com.vault.theguardian.subscription.Subscription;
-import com.vault.theguardian.subscription.SubscriptionPlan;
-import com.vault.theguardian.subscription.SubscriptionRepository;
+import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
@@ -23,21 +23,21 @@ import java.util.List;
 public class DocumentService {
 
     private final DocumentRepository documentRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final SubscriptionService subscriptionService;
 
     @Value("${vault.document.secret:change-this-document-secret}")
     private String documentSecret;
 
     public DocumentService(
             DocumentRepository documentRepository,
-            SubscriptionRepository subscriptionRepository
+            SubscriptionService subscriptionService
     ) {
         this.documentRepository = documentRepository;
-        this.subscriptionRepository = subscriptionRepository;
+        this.subscriptionService = subscriptionService;
     }
 
     public DocumentResponse createDocument(User user, DocumentRequest request) {
-        checkDocumentAccess(user);
+        requireDocumentUploadAccess(user);
 
         DocumentVault document = DocumentVault.builder()
                 .user(user)
@@ -58,16 +58,20 @@ public class DocumentService {
             String documentType,
             Long sizeBytes
     ) throws IOException {
-        checkDocumentAccess(user);
+        requireDocumentUploadAccess(user);
 
         if (file == null || file.isEmpty()) {
-            throw new RuntimeException("No file was uploaded");
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No file was uploaded.");
         }
 
         String finalDocumentName =
                 documentName != null && !documentName.isBlank()
                         ? documentName.trim()
                         : file.getOriginalFilename();
+
+        if (finalDocumentName == null || finalDocumentName.isBlank()) {
+            finalDocumentName = "Untitled document";
+        }
 
         String finalDocumentType =
                 documentType != null && !documentType.isBlank()
@@ -111,13 +115,15 @@ public class DocumentService {
     }
 
     public DocumentResponse getDocument(User user, Long id) {
-        return toResponse(getOwnedDocument(user, id));
+        DocumentVault document = getOwnedDocument(user, id);
+        return toResponse(document);
     }
 
     public DocumentResponse updateDocument(User user, Long id, DocumentRequest request) {
-        checkDocumentAccess(user);
+        requireDocumentUploadAccess(user);
 
         DocumentVault document = getOwnedDocument(user, id);
+
         document.setDocumentName(request.documentName());
         document.setDocumentType(request.documentType());
         document.setEncryptedFileUrl(encryptText(request.encryptedFileUrl()));
@@ -133,21 +139,21 @@ public class DocumentService {
 
     private DocumentVault getOwnedDocument(User user, Long id) {
         DocumentVault document = documentRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Document not found"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found."));
 
         if (!document.getUser().getId().equals(user.getId())) {
-            throw new RuntimeException("You cannot access this document");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this document.");
         }
 
         return document;
     }
 
-    private void checkDocumentAccess(User user) {
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Subscription not found"));
-
-        if (subscription.getPlan() == SubscriptionPlan.FREE) {
-            throw new RuntimeException("Document vault is only available for Premium and Family users");
+    private void requireDocumentUploadAccess(User user) {
+        if (!subscriptionService.canUploadDocuments(user)) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Document upload is only available on the Premium and Family plans."
+            );
         }
     }
 
@@ -173,6 +179,10 @@ public class DocumentService {
 
     private String encryptText(String plainText) {
         try {
+            if (plainText == null) {
+                plainText = "";
+            }
+
             byte[] iv = new byte[12];
             new SecureRandom().nextBytes(iv);
 
