@@ -27,18 +27,20 @@ import {
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
-import { api, SharedVaultItem } from '../services/api';
+import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 
 type SharedItemType = 'PASSWORD' | 'CARD' | 'DOCUMENT';
 
-type DisplayItem = SharedVaultItem & {
+type DisplayItem = {
+  id: number | string;
   itemType: SharedItemType;
 
   title?: string;
 
   usernameValue?: string;
   encryptedPassword?: string;
+  encryptedData?: string;
   website?: string;
   notes?: string;
 
@@ -54,8 +56,18 @@ type DisplayItem = SharedVaultItem & {
   encryptedFileUrl?: string;
   encryptedNotes?: string;
 
+  ownerId?: number;
   ownerName?: string;
   ownerEmail?: string;
+};
+
+const normalizeItemType = (type?: string | string[]): SharedItemType => {
+  const value = Array.isArray(type) ? type[0] : type;
+
+  if (value === 'CARD') return 'CARD';
+  if (value === 'DOCUMENT') return 'DOCUMENT';
+
+  return 'PASSWORD';
 };
 
 const cleanSharedValue = (value?: string | null) => {
@@ -71,7 +83,6 @@ const cleanSharedValue = (value?: string | null) => {
 
   cleaned = cleaned.trim();
 
-  // Removes wrapping quotes such as "Morge" or "%22Morge%22".
   if (
     (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
     (cleaned.startsWith("'") && cleaned.endsWith("'"))
@@ -85,7 +96,7 @@ const cleanSharedValue = (value?: string | null) => {
 export default function SharedVaultDetailsScreen() {
   const { id, type } = useLocalSearchParams<{
     id: string;
-    type?: SharedItemType;
+    type?: string;
   }>();
 
   const { isDark, colors: C } = useAppTheme();
@@ -101,64 +112,66 @@ export default function SharedVaultDetailsScreen() {
     try {
       setLoading(true);
 
-      const itemType: SharedItemType = type || 'PASSWORD';
+      const itemType = normalizeItemType(type);
 
       if (itemType === 'CARD') {
-        const data = await api.getSharedCardItem(id);
+        const data: any = await api.getSharedCardItem(id);
 
         setItem({
-          ...(data as any),
+          id: data.id,
           itemType: 'CARD',
-          title: cleanSharedValue((data as any).cardName) || 'Shared card',
-          cardName: cleanSharedValue((data as any).cardName),
+          title: cleanSharedValue(data.cardName) || 'Shared card',
+          cardName: cleanSharedValue(data.cardName),
           encryptedCardholderName: cleanSharedValue(
-            (data as any).encryptedCardholderName ||
-              (data as any).encryptedCardHolderName
+            data.encryptedCardholderName || data.encryptedCardHolderName
           ),
           encryptedCardHolderName: cleanSharedValue(
-            (data as any).encryptedCardHolderName ||
-              (data as any).encryptedCardholderName
+            data.encryptedCardHolderName || data.encryptedCardholderName
           ),
-          encryptedCardNumber: cleanSharedValue((data as any).encryptedCardNumber),
-          encryptedExpiryDate: cleanSharedValue((data as any).encryptedExpiryDate),
-          encryptedCvv: cleanSharedValue((data as any).encryptedCvv),
-          ownerName: (data as any).ownerName,
-          ownerEmail: (data as any).ownerEmail,
+          encryptedCardNumber: cleanSharedValue(data.encryptedCardNumber),
+          encryptedExpiryDate: cleanSharedValue(data.encryptedExpiryDate),
+          encryptedCvv: cleanSharedValue(data.encryptedCvv),
+          ownerId: data.ownerId,
+          ownerName: data.ownerName,
+          ownerEmail: data.ownerEmail,
         });
 
         return;
       }
 
       if (itemType === 'DOCUMENT') {
-        const data = await api.getSharedDocumentItem(id);
+        const data: any = await api.getSharedDocumentItem(id);
 
         setItem({
-          ...(data as any),
+          id: data.id,
           itemType: 'DOCUMENT',
-          title: cleanSharedValue((data as any).documentName) || 'Shared document',
-          documentName: cleanSharedValue((data as any).documentName),
-          documentType: cleanSharedValue((data as any).documentType),
-          encryptedFileUrl: cleanSharedValue((data as any).encryptedFileUrl),
-          encryptedNotes: cleanSharedValue((data as any).encryptedNotes),
-          ownerName: (data as any).ownerName,
-          ownerEmail: (data as any).ownerEmail,
+          title: cleanSharedValue(data.documentName) || 'Shared document',
+          documentName: cleanSharedValue(data.documentName),
+          documentType: cleanSharedValue(data.documentType),
+          encryptedFileUrl: cleanSharedValue(data.encryptedFileUrl),
+          encryptedNotes: cleanSharedValue(data.encryptedNotes),
+          ownerId: data.ownerId,
+          ownerName: data.ownerName,
+          ownerEmail: data.ownerEmail,
         });
 
         return;
       }
 
-      const data = await api.getSharedPasswordItem(id);
+      const data: any = await api.getSharedPasswordItem(id);
 
       setItem({
-        ...(data as any),
+        id: data.id,
         itemType: 'PASSWORD',
-        title: cleanSharedValue((data as any).title) || 'Shared password',
-        usernameValue: cleanSharedValue((data as any).usernameValue),
-        encryptedPassword: cleanSharedValue((data as any).encryptedPassword),
-        website: cleanSharedValue((data as any).website),
-        notes: cleanSharedValue((data as any).notes),
-        ownerName: (data as any).ownerName,
-        ownerEmail: (data as any).ownerEmail,
+        title: cleanSharedValue(data.title) || 'Shared password',
+        usernameValue: cleanSharedValue(data.usernameValue),
+        encryptedPassword: cleanSharedValue(data.encryptedPassword),
+        encryptedData: cleanSharedValue(data.encryptedData),
+        website: cleanSharedValue(data.website),
+        notes: cleanSharedValue(data.notes),
+        ownerId: data.ownerId,
+        ownerName: data.ownerName,
+        ownerEmail: data.ownerEmail,
       });
     } catch (error: any) {
       Alert.alert(
@@ -211,14 +224,14 @@ export default function SharedVaultDetailsScreen() {
 
   if (!item) return null;
 
-  const itemType = item.itemType || 'PASSWORD';
+  const itemType: SharedItemType = item.itemType;
 
   const title =
     itemType === 'CARD'
       ? cleanSharedValue(item.cardName || item.title) || 'Shared card'
       : itemType === 'DOCUMENT'
-        ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
-        : cleanSharedValue(item.title) || 'Shared password';
+      ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
+      : cleanSharedValue(item.title) || 'Shared password';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -243,6 +256,7 @@ export default function SharedVaultDetailsScreen() {
         </View>
 
         <Text style={styles.title}>{title}</Text>
+
         <Text style={styles.subtitle}>
           Shared by {item.ownerName || item.ownerEmail || 'Family admin'}
         </Text>
@@ -309,7 +323,9 @@ function SharedPasswordDetails({
   styles: any;
   C: any;
 }) {
-  const passwordValue = cleanSharedValue(item.encryptedPassword || item.encryptedData || '');
+  const passwordValue = cleanSharedValue(
+    item.encryptedPassword || item.encryptedData || ''
+  );
 
   return (
     <View style={styles.card}>
