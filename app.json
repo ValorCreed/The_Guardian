@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "guardian",
+    "name": "The Guardian",
     "slug": "guardian",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -16,7 +16,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": true,
+      "package": "com.vault.theguardian"
     },
     "web": {
       "output": "static",

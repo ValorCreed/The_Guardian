@@ -303,7 +303,7 @@ const VaultScreen = () => {
         <View style={{ height: 110 }} />
       </ScrollView>
 
-      <FloatingTabBar />
+  
     </SafeAreaView>
   );
 };

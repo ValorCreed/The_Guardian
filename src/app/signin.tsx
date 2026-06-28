@@ -11,6 +11,7 @@ import {
   Platform,
   Alert,
   BackHandler,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
@@ -55,7 +56,7 @@ export default function UnlockScreen() {
     useCallback(() => {
       const onBackPress = () => {
         if (vaultLocked) {
-          (router as any).dismissAll?.();
+          // (router as any).dismissAll?.();
           router.replace('/login');
           return true;
         }
@@ -71,7 +72,7 @@ export default function UnlockScreen() {
     const locked = await AsyncStorage.getItem('vaultLocked');
 
     if (locked === 'true') {
-      (router as any).dismissAll?.();
+      // (router as any).dismissAll?.();
       router.replace('/login');
       return;
     }
@@ -81,7 +82,7 @@ export default function UnlockScreen() {
 
   const unlockSuccess = async () => {
     await AsyncStorage.setItem('vaultLocked', 'false');
-    (router as any).dismissAll?.();
+    // (router as any).dismissAll?.();
     router.replace('/home');
   };
 
@@ -91,11 +92,18 @@ const handleBiometricLogin = async () => {
   try {
     setLoading(true);
 
-    await biometricLogin();
+    const data = await biometricLogin();
 
+    if (data.requiresTwoFactor) {
+      router.push({
+        pathname: '/twofactor',
+        params: { email: data.email || '' },
+      });
+      return;
+    }
+
+    await saveLoginSession(data);
     await AsyncStorage.setItem('vaultLocked', 'false');
-
-    (router as any).dismissAll?.();
     router.replace('/home');
   } catch (error: any) {
     Alert.alert(
@@ -110,6 +118,7 @@ const handleBiometricLogin = async () => {
   const handleLogin = async () => {
     if (loading) return;
 
+    /** Get rid of the .trim in the password field for auto fill to work */
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
@@ -126,9 +135,15 @@ const handleBiometricLogin = async () => {
         password: cleanPassword,
       });
 
-      await saveLoginSession(data);
+      if (data.requiresTwoFactor) {
+        router.push({
+          pathname: '/twofactor',
+          params: { email: cleanEmail },
+        });
+        return;
+      }
 
-      // Save real login credentials securely for biometric login
+      await saveLoginSession(data);
       await saveBiometricCredentials(cleanEmail, cleanPassword);
       await unlockSuccess();
     } catch (error: any) {
@@ -194,6 +209,10 @@ const handleBiometricLogin = async () => {
               autoCapitalize="none"
               keyboardType="email-address"
               autoCorrect={false}
+              /*Autofill for email logins */
+              autoComplete="email"
+              textContentType="username"
+              importantForAutofill="yes"
             />
           </View>
 
@@ -208,6 +227,10 @@ const handleBiometricLogin = async () => {
               onChangeText={setPassword}
               autoCapitalize="none"
               autoCorrect={false}
+              /*Added auto fill for logins */
+              autoComplete="current-password"
+              textContentType="password"
+              importantForAutofill="yes"
             />
             <TouchableOpacity onPress={() => setShowPassword(!showPassword)} activeOpacity={0.6}>
               <Ionicons
@@ -237,7 +260,8 @@ const handleBiometricLogin = async () => {
             onPress={handleLogin}
             disabled={loading}
           >
-            <Text style={styles.unlockButtonText}>{loading ? 'Signing in...' : 'Unlock Vault'}</Text>
+            {loading? <ActivityIndicator color = "#FFFFFF"/>: <Text style = {styles.unlockButtonText}>Unlock Vault</Text> }
+            {/* <Text style={styles.unlockButtonText}>{loading ? 'Signing in...' : 'Unlock Vault'}</Text> */}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>

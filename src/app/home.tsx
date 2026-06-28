@@ -373,7 +373,6 @@ const HomeScreen = () => {
         <View style={{ height: 110 }} />
       </ScrollView>
 
-      <FloatingTabBar />
     </SafeAreaView>
   );
 };

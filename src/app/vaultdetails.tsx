@@ -492,8 +492,10 @@ const loadItem = async () => {
       style={[styles.secondaryBtn, { borderColor: '#e53935' }]}
       onPress={deleteCurrentItem}
     >
+      
       <Ionicons name="trash-outline" size={18} color="#e53935" />
       <Text style={[styles.secondaryBtnText, { color: '#e53935' }]}>Delete Document</Text>
+      
     </TouchableOpacity>
   </View>
 )}

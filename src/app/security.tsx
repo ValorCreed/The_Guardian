@@ -202,7 +202,7 @@ export default function SecurityScreen() {
         </View>
       </ScrollView>
 
-      <FloatingTabBar />
+    
     </SafeAreaView>
   );
 }

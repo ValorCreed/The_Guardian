@@ -1,152 +1,266 @@
 import React, { useState } from 'react';
 import {
-  SafeAreaView, View, Text, TextInput,
-  TouchableOpacity, StyleSheet, StatusBar, useColorScheme,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Colors } from '../constants/theme';
-import FloatingTabBar from '../components/FloatingTabBar';
+import { CreditCard, FileText, KeyRound, Mail, UserPlus } from 'lucide-react-native';
 
-type Role = 'Admin' | 'Viewer';
+import { api } from '../services/api';
+import { useAppTheme } from '../context/ThemeContext';
 
-const ROLES: { key: Role; description: string }[] = [
-  { key: 'Admin', description: 'Can manage members and shared items' },
-  { key: 'Viewer', description: 'Can view shared items only' },
-];
-
-export default function InviteMemberScreen() {
-  const scheme = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const C = Colors[scheme];
+export default function NewMemberScreen() {
+  const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [email, setEmail] = useState('');
-  const [selectedRole, setSelectedRole] = useState<Role>('Admin');
+  const [sharePasswords, setSharePasswords] = useState(true);
+  const [shareCards, setShareCards] = useState(false);
+  const [shareDocuments, setShareDocuments] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleAddMember = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      Alert.alert('Missing email', 'Enter the email of the user you want to add.');
+      return;
+    }
+
+    if (!sharePasswords && !shareCards && !shareDocuments) {
+      Alert.alert('Choose what to share', 'Select at least one vault type: passwords, cards, or documents.');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await api.addFamilyMember(cleanEmail, {
+        sharePasswords,
+        shareCards,
+        shareDocuments,
+      });
+      api.clearCache();
+
+      Alert.alert('Member added', 'This user can now access the vault types you selected.', [
+        { text: 'OK', onPress: () => router.replace('/family') },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Could not add member', error.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle={scheme === 'dark' ? 'light-content' : 'dark-content'} />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity
-            style={styles.backButton}
-            activeOpacity={0.6}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="chevron-back" size={20} color={C.text} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Invite Member</Text>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.scrollContent}
+      >
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backText}>← Back</Text>
+        </TouchableOpacity>
+
+        <View style={styles.iconBox}>
+          <UserPlus size={34} color="#fff" />
         </View>
 
-        <View style={styles.inputRow}>
-          <Ionicons name="mail-outline" size={18} color={C.tabInactive} style={styles.inputIcon} />
+        <Text style={styles.title}>Add family member</Text>
+        <Text style={styles.subtitle}>
+          Enter the email address of someone who already has a Guardian account, then choose what they can view.
+        </Text>
+
+        <Text style={styles.label}>Member email</Text>
+        <View style={styles.inputBox}>
+          <Mail size={20} color={C.textSecondary} />
           <TextInput
             style={styles.input}
-            placeholder="member@email.com"
+            placeholder="family@example.com"
             placeholderTextColor={C.tabInactive}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
+            autoComplete="email"
+            textContentType="emailAddress"
           />
         </View>
 
-        <Text style={styles.permissionLabel}>Permission role</Text>
+        <Text style={styles.sectionLabel}>WHAT SHOULD THIS MEMBER ACCESS?</Text>
 
-        <View style={styles.rolesContainer}>
-          {ROLES.map((r) => (
-            <TouchableOpacity
-              key={r.key}
-              activeOpacity={0.7}
-              onPress={() => setSelectedRole(r.key)}
-              style={[
-                styles.roleOption,
-                selectedRole === r.key && styles.roleOptionSelected,
-              ]}
-            >
-              <View style={[
-                styles.radioOuter,
-                selectedRole === r.key && styles.radioOuterSelected,
-              ]}>
-                {selectedRole === r.key && (
-                  <Ionicons name="checkmark" size={14} color="#fff" />
-                )}
-              </View>
-              <View style={styles.roleTextBlock}>
-                <Text style={styles.roleLabel}>{r.key}</Text>
-                <Text style={styles.roleDescription}>{r.description}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.permissionsCard}>
+          <PermissionRow
+            icon={<KeyRound size={20} color={C.primary} />}
+            title="Passwords"
+            subtitle="Share saved login credentials"
+            value={sharePasswords}
+            onChange={setSharePasswords}
+            C={C}
+            styles={styles}
+            divider
+          />
+
+          <PermissionRow
+            icon={<CreditCard size={20} color={C.primary} />}
+            title="Cards"
+            subtitle="Share saved credit/debit cards"
+            value={shareCards}
+            onChange={setShareCards}
+            C={C}
+            styles={styles}
+            divider
+          />
+
+          <PermissionRow
+            icon={<FileText size={20} color={C.primary} />}
+            title="Documents"
+            subtitle="Share uploaded encrypted documents"
+            value={shareDocuments}
+            onChange={setShareDocuments}
+            C={C}
+            styles={styles}
+          />
         </View>
 
-        <TouchableOpacity activeOpacity={0.8} style={styles.sendButton} onPress={() => {}}>
-          <Ionicons name="person-add-outline" size={18} color="#fff" style={{ marginRight: 8 }} />
-          <Text style={styles.sendButtonText}>Send invitation</Text>
+        <TouchableOpacity
+          style={[styles.button, loading && styles.disabledButton]}
+          onPress={handleAddMember}
+          disabled={loading}
+          activeOpacity={0.75}
+        >
+          {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Add member</Text>}
         </TouchableOpacity>
-      </View>
 
-      <FloatingTabBar />
+        <Text style={styles.note}>
+          Only Family plan users can add members. Members can only view the vault types you select; they cannot edit or delete your items.
+        </Text>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
-const makeStyles = (C: typeof Colors.light | typeof Colors.dark) =>
+function PermissionRow({
+  icon,
+  title,
+  subtitle,
+  value,
+  onChange,
+  C,
+  styles,
+  divider,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  C: any;
+  styles: any;
+  divider?: boolean;
+}) {
+  return (
+    <View style={[styles.permissionRow, divider && styles.permissionDivider]}>
+      <View style={styles.permissionIcon}>{icon}</View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.permissionTitle}>{title}</Text>
+        <Text style={styles.permissionSub}>{subtitle}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        trackColor={{ false: C.border, true: C.primary }}
+        thumbColor="#fff"
+        ios_backgroundColor={C.border}
+      />
+    </View>
+  );
+}
+
+const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
-    container: {
-      marginTop: 30, flex: 1,
-      paddingHorizontal: 16, paddingTop: 16, paddingBottom: 100,
+    scrollContent: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 150 },
+    backButton: { marginTop: 6, marginBottom: 30 },
+    backText: { color: C.text, fontSize: 18, fontWeight: '600' },
+    iconBox: {
+      width: 86,
+      height: 86,
+      borderRadius: 28,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 28,
     },
-    header: { flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 12 },
-    backButton: {
-      width: 36, height: 36, borderRadius: 18,
-      backgroundColor: C.backgroundElement,
-      alignItems: 'center', justifyContent: 'center',
-    },
-    title: { fontSize: 22, fontWeight: '700', color: C.text },
-    inputRow: {
-      flexDirection: 'row', alignItems: 'center',
-      backgroundColor: C.backgroundElement,
-      borderRadius: 20, paddingHorizontal: 16, paddingVertical: 14, marginBottom: 20,
-    },
-    inputIcon: { marginRight: 10 },
-    input: { flex: 1, fontSize: 15, color: C.text },
-    permissionLabel: { fontSize: 13, color: C.textSecondary, marginBottom: 10, marginLeft: 2 },
-    rolesContainer: { gap: 10, marginBottom: 24 },
-    roleOption: {
-      flexDirection: 'row', alignItems: 'center',
-      backgroundColor: C.backgroundElement,
-      borderRadius: 20, padding: 16,
-      borderWidth: 1.5, borderColor: 'transparent',
-    },
-    roleOptionSelected: { borderColor: C.primary },
-    radioOuter: {
-      width: 24, height: 24, borderRadius: 12,
-      borderWidth: 1.5, borderColor: C.border,
-      backgroundColor: 'transparent',
-      alignItems: 'center', justifyContent: 'center', marginRight: 14,
-    },
-    radioOuterSelected: { backgroundColor: C.primary, borderColor: C.primary },
-    roleTextBlock: { flex: 1 },
-    roleLabel: { fontSize: 16, fontWeight: '600', color: C.text, marginBottom: 2 },
-    roleDescription: { fontSize: 13, color: C.textSecondary },
-    sendButton: {
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.backgroundbutton,
-      borderRadius: 30, paddingVertical: 16,
-    },
-    sendButtonText: { fontSize: 16, fontWeight: '600', color: '#fff' },
-    bottomNav: {
-      position: 'absolute', bottom: 0, left: 0, right: 0,
-      backgroundColor: C.backgroundElement,
+    title: { color: C.text, fontSize: 34, fontWeight: '800', marginBottom: 10 },
+    subtitle: { color: C.textSecondary, fontSize: 15, lineHeight: 22, marginBottom: 30 },
+    label: { color: C.text, fontWeight: '800', fontSize: 14, marginBottom: 8 },
+    inputBox: {
       flexDirection: 'row',
-      paddingTop: 10, paddingBottom: 28,
-      borderTopWidth: 1, borderTopColor: C.border,
+      alignItems: 'center',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      paddingHorizontal: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      marginBottom: 22,
     },
-    navItem: { flex: 1, alignItems: 'center', gap: 4 },
-    navLabel: { fontSize: 11, color: C.tabInactive },
-    navLabelActive: { fontSize: 11, color: C.tabActive, fontWeight: '600' },
+    input: { flex: 1, color: C.text, fontSize: 16, paddingVertical: 16, paddingLeft: 10 },
+    sectionLabel: {
+      fontSize: 12,
+      fontWeight: '800',
+      color: C.textSecondary,
+      letterSpacing: 0.5,
+      marginLeft: 4,
+      marginBottom: 8,
+    },
+    permissionsCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+      marginBottom: 18,
+    },
+    permissionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 14,
+      paddingVertical: 14,
+    },
+    permissionDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
+    permissionIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.backgroundSelected,
+      marginRight: 12,
+    },
+    permissionTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
+    permissionSub: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
+    button: {
+      backgroundColor: C.primary,
+      borderRadius: 22,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 17,
+      marginTop: 4,
+    },
+    disabledButton: { opacity: 0.7 },
+    buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+    note: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 18, textAlign: 'center' },
   });

@@ -93,9 +93,10 @@ const PremiumPlanCard = ({ currentPlan, onUpgrade, styles, colors }: PlanCardPro
       </View>
 
       <View style={styles.featureList}>
-        <FeatureRow label="Unlimited passwords" styles={styles} colors={colors} />
+        <FeatureRow label="Unlimited password Storage" styles={styles} colors={colors} />
         <FeatureRow label="Document vault" styles={styles} colors={colors} />
         <FeatureRow label="Breach monitoring" styles={styles} colors={colors} />
+        <FeatureRow label="Cloud Backup" styles={styles} colors={colors} />
         <FeatureRow label="All devices" isLast styles={styles} colors={colors} />
       </View>
 

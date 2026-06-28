@@ -10,7 +10,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { api } from '../services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { api, saveLoginSession } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const RegisterScreen = () => {
@@ -20,59 +21,79 @@ const RegisterScreen = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   const [loading, setLoading] = useState(false);
 
-const handleRegister = async () => {
-  if (loading) return;
+  const handleRegister = async () => {
+    if (loading) return;
 
-  if (!fullName.trim() || !email.trim() || !password.trim()) {
-    Alert.alert('Missing details', 'Enter your full name, email and master password.');
-    return;
-  }
+    if (!fullName.trim() || !email.trim() || !password.trim()) {
+      Alert.alert('Missing details', 'Enter your full name, email and master password.');
+      return;
+    }
 
-  if (password !== confirmPassword) {
-    Alert.alert('Password mismatch', 'Your passwords do not match.');
-    return;
-  }
+    if (!confirmPassword.trim()) {
+      Alert.alert('Missing details', 'Please confirm your master password.');
+      return;
+    }
 
-  if (password.length < 8) {
-    Alert.alert('Weak password', 'Password must be at least 8 characters.');
-    return;
-  }
+    if (password !== confirmPassword) {
+      Alert.alert('Password mismatch', 'Your passwords do not match.');
+      return;
+    }
 
-  try {
-    setLoading(true);
+    if (password.length < 8) {
+      Alert.alert('Weak password', 'Password must be at least 8 characters.');
+      return;
+    }
 
-    await AsyncStorage.removeItem('token');
-    await api.register({
-      fullname: fullName.trim(),
-      email: email.trim(),
-      password: password.trim(),
-    });
+    try {
+      setLoading(true);
 
-    Alert.alert('Account created', 'Now sign in with your details.', [
-      {
-        text: 'OK',
-        onPress: () => router.replace('/signin'),
-      },
-    ]);
-  } catch (error: any) {
-    Alert.alert('Registration failed', error.message || 'Please try again.');
-  } finally {
-    setLoading(false);
-  }
-};
+      const cleanEmail = email.trim().toLowerCase();
+
+      await AsyncStorage.multiRemove([
+        'token',
+        'userName',
+        'userEmail',
+        'subscriptionPlan',
+        'emailVerified',
+        'twoFactorEnabled',
+        'vaultLocked',
+      ]);
+
+      const data = await api.register({
+        fullname: fullName.trim(),
+        email: cleanEmail,
+        password: password.trim(),
+      });
+
+      await saveLoginSession(data as any);
+      await AsyncStorage.setItem('emailVerified', 'false');
+
+      router.replace({
+        pathname: '/verifyemail',
+        params: {
+          email: cleanEmail,
+          next: 'verification',
+        },
+      });
+    } catch (error: any) {
+      Alert.alert('Registration failed', error.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-
-      {/* Back button */}
       <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
 
-      {/* Shield icon box */}
       <View style={styles.iconBox}>
         <View style={styles.shield}>
           <View style={styles.checkLeft} />
@@ -80,14 +101,11 @@ const handleRegister = async () => {
         </View>
       </View>
 
-      {/* Title and subtitle */}
       <Text style={styles.title}>Create your account</Text>
       <Text style={styles.subtitle}>
         Your master password is the only key. We can never see it.
       </Text>
 
-
-      {/* Full name field */}
       <Text style={styles.label}>Full Name</Text>
       <TextInput
         style={styles.input}
@@ -98,7 +116,6 @@ const handleRegister = async () => {
         autoCapitalize="words"
       />
 
-      {/* Email field */}
       <Text style={styles.label}>Email</Text>
       <TextInput
         style={styles.input}
@@ -110,7 +127,6 @@ const handleRegister = async () => {
         autoCapitalize="none"
       />
 
-      {/* Master Password field */}
       <Text style={styles.label}>Master Password</Text>
       <View style={styles.passwordBox}>
         <TextInput
@@ -120,35 +136,62 @@ const handleRegister = async () => {
           value={password}
           onChangeText={setPassword}
           secureTextEntry={!showPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
         />
-        {/* Eye toggle */}
-        <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-          <Text style={styles.eyeIcon}>{showPassword ? '🙈' : '👁️'}</Text>
+
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowPassword((current) => !current)}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+            size={22}
+            color="#666"
+          />
         </TouchableOpacity>
       </View>
 
-      {/* Confirm Password field */}
       <Text style={styles.label}>Confirm Password</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Re-enter master password"
-        placeholderTextColor="#aaa"
-        value={confirmPassword}
-        onChangeText={setConfirmPassword}
-        secureTextEntry={true}
-      />
+      <View style={styles.passwordBox}>
+        <TextInput
+          style={styles.passwordInput}
+          placeholder="Re-enter master password"
+          placeholderTextColor="#aaa"
+          value={confirmPassword}
+          onChangeText={setConfirmPassword}
+          secureTextEntry={!showConfirmPassword}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
 
-      {/* Continue button */}
+        <TouchableOpacity
+          style={styles.eyeButton}
+          onPress={() => setShowConfirmPassword((current) => !current)}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+            size={22}
+            color="#666"
+          />
+        </TouchableOpacity>
+      </View>
+
       <View style={styles.bottomSection}>
         <TouchableOpacity
-          style={styles.continueButton}
+          style={[styles.continueButton, loading && styles.disabledButton]}
           onPress={handleRegister}
           disabled={loading}
         >
-          {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.continueText}>Continue</Text>}
+          {loading ? (
+            <ActivityIndicator color="#FFFFFF" />
+          ) : (
+            <Text style={styles.continueText}>Continue</Text>
+          )}
         </TouchableOpacity>
       </View>
-
     </SafeAreaView>
   );
 };
@@ -173,7 +216,6 @@ const styles = StyleSheet.create({
     color: '#333',
   },
 
-  // Small green icon box
   iconBox: {
     width: 60,
     height: 60,
@@ -247,15 +289,14 @@ const styles = StyleSheet.create({
     borderColor: '#e0e0e0',
   },
 
-  // Password field with eye icon
   passwordBox: {
     backgroundColor: '#ffffff',
     borderRadius: 50,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingLeft: 20,
+    paddingRight: 12,
+    paddingVertical: 4,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: 20,
     borderWidth: 1,
     borderColor: '#e0e0e0',
@@ -265,11 +306,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     color: '#333',
+    paddingVertical: 14,
+    paddingRight: 10,
   },
 
-  eyeIcon: {
-    fontSize: 18,
-    marginLeft: 10,
+  eyeButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   bottomSection: {
@@ -282,6 +328,10 @@ const styles = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 50,
     alignItems: 'center',
+  },
+
+  disabledButton: {
+    opacity: 0.7,
   },
 
   continueText: {

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { api, saveLoginSession } from '../services/api';
+import { api } from '../services/api';
 
 const BIOMETRIC_ENABLED_KEY = 'biometricUnlock';
 const BIOMETRIC_EMAIL_KEY = 'biometricEmail';
@@ -61,8 +61,8 @@ export const biometricLogin = async () => {
     throw new Error('Biometric authentication was cancelled or failed.');
   }
 
-  const loginResponse = await api.login({ email, password });
-  await saveLoginSession(loginResponse);
-
-  return loginResponse;
+  // Do not save the session here.
+  // If the account has 2FA enabled, the backend returns requiresTwoFactor=true and no token yet.
+  // The sign-in screen must route to /twofactor first.
+  return api.login({ email, password });
 };
