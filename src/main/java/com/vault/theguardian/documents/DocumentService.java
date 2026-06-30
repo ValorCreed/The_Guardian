@@ -1,5 +1,6 @@
 package com.vault.theguardian.documents;
 
+import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.beans.factory.annotation.Value;
@@ -24,16 +25,19 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
     private final SubscriptionService subscriptionService;
+    private final NotificationService notificationService;
 
     @Value("${vault.document.secret:change-this-document-secret}")
     private String documentSecret;
 
     public DocumentService(
             DocumentRepository documentRepository,
-            SubscriptionService subscriptionService
+            SubscriptionService subscriptionService,
+            NotificationService notificationService
     ) {
         this.documentRepository = documentRepository;
         this.subscriptionService = subscriptionService;
+        this.notificationService = notificationService;
     }
 
     public DocumentResponse createDocument(User user, DocumentRequest request) {
@@ -48,7 +52,9 @@ public class DocumentService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return toResponse(documentRepository.save(document));
+        DocumentVault savedDocument = documentRepository.save(document);
+        notificationService.notifyDocumentAdded(user, savedDocument.getDocumentName());
+        return toResponse(savedDocument);
     }
 
     public DocumentResponse uploadDocument(
@@ -104,7 +110,9 @@ public class DocumentService {
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        return toResponse(documentRepository.save(document));
+        DocumentVault savedDocument = documentRepository.save(document);
+        notificationService.notifyDocumentAdded(user, savedDocument.getDocumentName());
+        return toResponse(savedDocument);
     }
 
     public List<DocumentResponse> getMyDocuments(User user) {
@@ -129,7 +137,8 @@ public class DocumentService {
         document.setEncryptedFileUrl(encryptText(request.encryptedFileUrl()));
         document.setEncryptedNotes(request.encryptedNotes());
 
-        return toResponse(documentRepository.save(document));
+        DocumentVault savedDocument = documentRepository.save(document);
+        return toResponse(savedDocument);
     }
 
     public void deleteDocument(User user, Long id) {

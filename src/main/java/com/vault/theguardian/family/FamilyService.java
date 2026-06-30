@@ -1,6 +1,7 @@
 package com.vault.theguardian.family;
 
 import com.vault.theguardian.cards.CreditCardEntity;
+import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.cards.CreditCardRepository;
 import com.vault.theguardian.documents.DocumentRepository;
 import com.vault.theguardian.documents.DocumentVault;
@@ -37,6 +38,7 @@ public class FamilyService {
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
+    private final NotificationService notificationService;
 
     @Value("${vault.document.secret:change-this-document-secret}")
     private String documentSecret;
@@ -47,7 +49,8 @@ public class FamilyService {
                          SubscriptionRepository subscriptionRepository,
                          VaultItemRepository vaultItemRepository,
                          CreditCardRepository creditCardRepository,
-                         DocumentRepository documentRepository) {
+                         DocumentRepository documentRepository,
+                         NotificationService notificationService) {
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
         this.userRepository = userRepository;
@@ -55,6 +58,7 @@ public class FamilyService {
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
+        this.notificationService = notificationService;
     }
 
     public FamilyOverviewResponse getOverview(User user) {
@@ -125,6 +129,7 @@ public class FamilyService {
             existingMember.setShareDocuments(request.shareDocuments());
 
             FamilyMember updated = familyMemberRepository.save(existingMember);
+            notificationService.notifyFamilyMemberAdded(admin, memberUser.getEmail());
             return toMemberResponse(updated);
         }
 
@@ -147,6 +152,7 @@ public class FamilyService {
                         .build()
         );
 
+        notificationService.notifyFamilyMemberAdded(admin, memberUser.getEmail());
         return toMemberResponse(saved);
     }
 
@@ -158,6 +164,7 @@ public class FamilyService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Family member not found."));
 
         familyMemberRepository.delete(member);
+        notificationService.notifyFamilyMemberRemoved(admin, member.getUser().getEmail());
     }
 
     public SharedFamilyItemsResponse getSharedItems(User user) {

@@ -1,0 +1,16 @@
+package com.vault.theguardian.notification;
+
+public enum NotificationType {
+    SUBSCRIPTION_ACTIVATED,
+    SUBSCRIPTION_CANCELLED,
+    SUBSCRIPTION_EXPIRED,
+    BACKUP_CREATED,
+    BACKUP_RESTORED,
+    PASSWORD_ADDED,
+    CARD_ADDED,
+    DOCUMENT_ADDED,
+    FAMILY_MEMBER_ADDED,
+    FAMILY_MEMBER_REMOVED,
+    SECURITY_ALERT,
+    SYSTEM
+}

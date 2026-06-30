@@ -1,5 +1,6 @@
 package com.vault.theguardian.vault;
 
+import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
@@ -11,11 +12,14 @@ import java.util.List;
 public class VaultService {
     private final VaultItemRepository vaultItemRepository;
     private final SubscriptionService subscriptionService;
+    private final NotificationService notificationService;
 
     public VaultService(VaultItemRepository vaultItemRepository,
-                        SubscriptionService subscriptionService) {
+                        SubscriptionService subscriptionService,
+                        NotificationService notificationService) {
         this.vaultItemRepository = vaultItemRepository;
         this.subscriptionService = subscriptionService;
+        this.notificationService = notificationService;
     }
 
     public VaultResponse createVaultItem(User user, VaultRequest request) {
@@ -37,6 +41,7 @@ public class VaultService {
                 .build();
 
         VaultItem saved = vaultItemRepository.save(item);
+        notificationService.notifyPasswordAdded(user, saved.getTitle());
         return toResponse(saved);
     }
 
@@ -62,6 +67,7 @@ public class VaultService {
         item.setNotes(request.notes());
 
         VaultItem saved = vaultItemRepository.save(item);
+        notificationService.notifyPasswordAdded(user, saved.getTitle());
         return toResponse(saved);
     }
 

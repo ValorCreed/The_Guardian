@@ -1,8 +1,7 @@
 package com.vault.theguardian.payment;
 
-import com.vault.theguardian.subscription.Subscription;
 import com.vault.theguardian.subscription.SubscriptionPlan;
-import com.vault.theguardian.subscription.SubscriptionRepository;
+import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -17,7 +16,7 @@ public class PaystackService {
 
     private final RestClient restClient;
     private final PaymentRepository paymentRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final SubscriptionService subscriptionService;
 
     @Value("${paystack.secret.key}")
     private String paystackSecretKey;
@@ -28,11 +27,11 @@ public class PaystackService {
     public PaystackService(
             RestClient restClient,
             PaymentRepository paymentRepository,
-            SubscriptionRepository subscriptionRepository
+            SubscriptionService subscriptionService
     ) {
         this.restClient = restClient;
         this.paymentRepository = paymentRepository;
-        this.subscriptionRepository = subscriptionRepository;
+        this.subscriptionService = subscriptionService;
     }
 
     public InitializePaymentResponse initializePayment(User user, InitializePaymentRequest request) {
@@ -43,13 +42,8 @@ public class PaystackService {
         }
 
         int amount = getAmountForPlan(plan);
-
         String reference = "guardian_" + UUID.randomUUID();
 
-        /*
-         * Paystack expects amount in the smallest currency unit.
-         * For GHS, 2990 means GHS 29.90.
-         */
         Map<String, Object> payload = Map.of(
                 "email", user.getEmail(),
                 "amount", amount,
@@ -64,6 +58,10 @@ public class PaystackService {
                 .body(payload)
                 .retrieve()
                 .body(Map.class);
+
+        if (response == null || response.get("data") == null) {
+            throw new RuntimeException("Could not initialize Paystack payment");
+        }
 
         Map data = (Map) response.get("data");
 
@@ -97,36 +95,48 @@ public class PaystackService {
             throw new RuntimeException("You cannot verify another user's payment");
         }
 
+        return verifyPaymentRecord(payment);
+    }
+
+    public VerifyPaymentResponse verifyPaymentFromCallback(String reference) {
+        Payment payment = paymentRepository.findByReference(reference)
+                .orElseThrow(() -> new RuntimeException("Payment reference not found"));
+
+        return verifyPaymentRecord(payment);
+    }
+
+    private VerifyPaymentResponse verifyPaymentRecord(Payment payment) {
+        if ("SUCCESS".equalsIgnoreCase(payment.getStatus())) {
+            return new VerifyPaymentResponse("SUCCESS", payment.getPlan().name());
+        }
+
         Map response = restClient.get()
-                .uri("https://api.paystack.co/transaction/verify/" + request.reference())
+                .uri("https://api.paystack.co/transaction/verify/" + payment.getReference())
                 .header("Authorization", "Bearer " + paystackSecretKey)
                 .retrieve()
                 .body(Map.class);
 
-        Map data = (Map) response.get("data");
-
-        String status = (String) data.get("status");
-
-        if (!"success".equals(status)) {
+        if (response == null || response.get("data") == null) {
             payment.setStatus("FAILED");
             paymentRepository.save(payment);
 
             return new VerifyPaymentResponse("FAILED", payment.getPlan().name());
         }
 
-        /*
-         * Payment is successful, so now we upgrade the subscription.
-         */
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Subscription not found"));
+        Map data = (Map) response.get("data");
+        String status = (String) data.get("status");
 
-        subscription.setPlan(payment.getPlan());
-        subscription.setActive(true);
+        if (!"success".equalsIgnoreCase(status)) {
+            payment.setStatus("FAILED");
+            paymentRepository.save(payment);
+
+            return new VerifyPaymentResponse("FAILED", payment.getPlan().name());
+        }
+
+        subscriptionService.upgradePlan(payment.getUser(), payment.getPlan());
 
         payment.setStatus("SUCCESS");
         payment.setPaidAt(LocalDateTime.now());
-
-        subscriptionRepository.save(subscription);
         paymentRepository.save(payment);
 
         return new VerifyPaymentResponse("SUCCESS", payment.getPlan().name());

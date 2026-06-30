@@ -19,19 +19,21 @@ public class SubscriptionController {
         return subscriptionService.getMySubscription(user);
     }
 
-    //This is for manual upgrade
-    //User must pay through paystack first
-//    @PostMapping("/upgrade")
-//    public Subscription upgradePlan(
-//            @AuthenticationPrincipal User user,
-//            @RequestParam SubscriptionPlan plan
-//    ) {
-//        return subscriptionService.upgradePlan(user, plan);
-//    }
+    /**
+     * Manual upgrade endpoint.
+     * If you use Paystack, keep calling this from payment verification after payment succeeds.
+     * The subscription lasts for 1 month from the time this method runs.
+     */
+    @PostMapping("/upgrade")
+    public Subscription upgradePlan(
+            @AuthenticationPrincipal User user,
+            @RequestParam SubscriptionPlan plan
+    ) {
+        return subscriptionService.upgradePlan(user, plan);
+    }
 
+    @PostMapping("/cancel")
+    public Subscription cancelSubscription(@AuthenticationPrincipal User user) {
+        return subscriptionService.cancelSubscription(user);
+    }
 }
-
-
-
-
-
