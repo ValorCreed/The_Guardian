@@ -1,30 +1,51 @@
 package com.vault.theguardian.email;
 
+import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.mail.MailException;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-
-import java.util.List;
-import java.util.Map;
 
 @Service
 public class EmailService {
 
-    private final WebClient webClient;
+    private final JavaMailSender mailSender;
 
-    @Value("${RESEND_API_KEY}")
-    private String resendApiKey;
+    /*
+     * Keep DEMO_MODE=true for your school project.
+     *
+     * When true:
+     * - Email failure will NOT crash signup/login/reset flow.
+     * - The code will be printed in Render logs.
+     *
+     * When false:
+     * - Email failure throws an error.
+     */
+    @Value("${DEMO_MODE:true}")
+    private boolean demoMode;
 
-    @Value("${MAIL_FROM:The Guardian <onboarding@resend.dev>}")
+    /*
+     * This is the Gmail address the email is sent from.
+     * Example:
+     * MAIL_FROM=theguardianllc@gmail.com
+     */
+    @Value("${MAIL_FROM:}")
     private String mailFrom;
 
-    public EmailService(WebClient.Builder builder) {
-        this.webClient = builder
-                .baseUrl("https://api.resend.com")
-                .build();
+    /*
+     * Fallback sender email.
+     * This comes from application.properties:
+     * spring.mail.username=${MAIL_USERNAME}
+     */
+    @Value("${spring.mail.username:}")
+    private String mailUsername;
+
+    public EmailService(JavaMailSender mailSender) {
+        this.mailSender = mailSender;
     }
 
-    public void sendEmailVerificationCode(String toEmail, String code) {
+    public boolean sendEmailVerificationCode(String toEmail, String code) {
         String html = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
                     <div style="max-width: 520px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px;">
@@ -54,14 +75,15 @@ public class EmailService {
                 </div>
                 """.formatted(code);
 
-        sendEmail(
+        return sendHtmlEmail(
                 toEmail,
                 "The Guardian Email Verification Code",
-                html
+                html,
+                code
         );
     }
 
-    public void sendPasswordResetCode(String toEmail, String code) {
+    public boolean sendPasswordResetCode(String toEmail, String code) {
         String html = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
                     <div style="max-width: 520px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px;">
@@ -91,14 +113,15 @@ public class EmailService {
                 </div>
                 """.formatted(code);
 
-        sendEmail(
+        return sendHtmlEmail(
                 toEmail,
                 "The Guardian Password Reset Code",
-                html
+                html,
+                code
         );
     }
 
-    public void sendTwoFactorCode(String toEmail, String code) {
+    public boolean sendTwoFactorCode(String toEmail, String code) {
         String html = """
                 <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
                     <div style="max-width: 520px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px;">
@@ -128,45 +151,69 @@ public class EmailService {
                 </div>
                 """.formatted(code);
 
-        sendEmail(
+        return sendHtmlEmail(
                 toEmail,
                 "The Guardian 2FA Code",
-                html
+                html,
+                code
         );
     }
 
-    private void sendEmail(String toEmail, String subject, String html) {
-        if (resendApiKey == null || resendApiKey.isBlank()) {
-            throw new RuntimeException("Email service is not configured. Missing RESEND_API_KEY.");
-        }
-
-        Map<String, Object> requestBody = Map.of(
-                "from", mailFrom,
-                "to", List.of(toEmail),
-                "subject", subject,
-                "html", html
-        );
-
+    private boolean sendHtmlEmail(String toEmail, String subject, String html, String code) {
         try {
-            String response = webClient.post()
-                    .uri("/emails")
-                    .header("Authorization", "Bearer " + resendApiKey)
-                    .header("Content-Type", "application/json")
-                    .bodyValue(requestBody)
-                    .retrieve()
-                    .bodyToMono(String.class)
-                    .block();
+            String senderEmail = getSenderEmail();
+
+            System.out.println("Attempting to send email using Gmail SMTP...");
+            System.out.println("To: " + toEmail);
+            System.out.println("From: " + senderEmail);
+            System.out.println("Subject: " + subject);
+
+            MimeMessage message = mailSender.createMimeMessage();
+
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
+            helper.setFrom(senderEmail, "The Guardian");
+            helper.setTo(toEmail);
+            helper.setSubject(subject);
+            helper.setText(html, true);
+
+            mailSender.send(message);
 
             System.out.println("Email sent successfully to " + toEmail);
-            System.out.println("Resend response: " + response);
+
+            return true;
+
+        } catch (MailException mailError) {
+            return handleEmailFailure(toEmail, code, mailError);
 
         } catch (Exception error) {
-            System.out.println("EMAIL SEND FAILED for " + toEmail);
-            System.out.println("Reason: " + error.getMessage());
-
-            throw new RuntimeException(
-                    "We could not send the email right now. Please try again shortly."
-            );
+            return handleEmailFailure(toEmail, code, error);
         }
+    }
+
+    private boolean handleEmailFailure(String toEmail, String code, Exception error) {
+        System.out.println("EMAIL SEND FAILED for " + toEmail);
+        System.out.println("Reason: " + error.getMessage());
+        System.out.println("Code for " + toEmail + " is: " + code);
+
+        if (demoMode) {
+            System.out.println("DEMO_MODE is true. Email failure will not break the user flow.");
+            return false;
+        }
+
+        throw new RuntimeException(
+                "We could not send the email right now. Please try again shortly."
+        );
+    }
+
+    private String getSenderEmail() {
+        if (mailFrom != null && !mailFrom.isBlank()) {
+            return mailFrom;
+        }
+
+        if (mailUsername != null && !mailUsername.isBlank()) {
+            return mailUsername;
+        }
+
+        throw new RuntimeException("MAIL_FROM or MAIL_USERNAME is missing.");
     }
 }
