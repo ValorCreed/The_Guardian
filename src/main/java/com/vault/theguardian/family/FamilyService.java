@@ -40,7 +40,7 @@ public class FamilyService {
     private final DocumentRepository documentRepository;
     private final NotificationService notificationService;
 
-    @Value("${vault.document.secret:change-this-document-secret}")
+    @Value("${VAULT_DOCUMENT_SECRET}")
     private String documentSecret;
 
     public FamilyService(FamilyGroupRepository familyGroupRepository,

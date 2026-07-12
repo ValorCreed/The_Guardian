@@ -1,48 +1,58 @@
 package com.vault.theguardian.email;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.mail.Session;
+import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.mail.MailException;
-import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+
+import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Base64;
+import java.util.Properties;
 
 @Service
 public class EmailService {
 
-    private final JavaMailSender mailSender;
+    private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
+
+    @Value("${GMAIL_CLIENT_ID:}")
+    private String gmailClientId;
+
+    @Value("${GMAIL_CLIENT_SECRET:}")
+    private String gmailClientSecret;
+
+    @Value("${GMAIL_REFRESH_TOKEN:}")
+    private String gmailRefreshToken;
+
+    @Value("${GMAIL_FROM:}")
+    private String gmailFrom;
 
     /*
-     * Keep DEMO_MODE=true for your school project.
+     * Keep this true for your school project.
      *
-     * When true:
-     * - Email failure will NOT crash signup/login/reset flow.
-     * - The code will be printed in Render logs.
-     *
-     * When false:
-     * - Email failure throws an error.
+     * If Gmail API fails:
+     * - signup will not crash
+     * - forgot password will not crash
+     * - the code will be printed in Render logs
      */
     @Value("${DEMO_MODE:true}")
     private boolean demoMode;
 
-    /*
-     * This is the Gmail address the email is sent from.
-     * Example:
-     * MAIL_FROM=theguardianllc@gmail.com
-     */
-    @Value("${MAIL_FROM:}")
-    private String mailFrom;
-
-    /*
-     * Fallback sender email.
-     * This comes from application.properties:
-     * spring.mail.username=${MAIL_USERNAME}
-     */
-    @Value("${spring.mail.username:}")
-    private String mailUsername;
-
-    public EmailService(JavaMailSender mailSender) {
-        this.mailSender = mailSender;
+    public EmailService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
     }
 
     public boolean sendEmailVerificationCode(String toEmail, String code) {
@@ -161,33 +171,105 @@ public class EmailService {
 
     private boolean sendHtmlEmail(String toEmail, String subject, String html, String code) {
         try {
-            String senderEmail = getSenderEmail();
+            validateGmailApiConfig();
 
-            System.out.println("Attempting to send email using Gmail SMTP...");
+            System.out.println("Attempting to send email using Gmail API...");
             System.out.println("To: " + toEmail);
-            System.out.println("From: " + senderEmail);
+            System.out.println("From: " + gmailFrom);
             System.out.println("Subject: " + subject);
 
-            MimeMessage message = mailSender.createMimeMessage();
+            String accessToken = getAccessToken();
+            String rawEmail = createBase64UrlEmail(toEmail, subject, html);
 
-            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
-            helper.setFrom(senderEmail, "The Guardian");
-            helper.setTo(toEmail);
-            helper.setSubject(subject);
-            helper.setText(html, true);
+            String requestBody = objectMapper
+                    .createObjectNode()
+                    .put("raw", rawEmail)
+                    .toString();
 
-            mailSender.send(message);
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://gmail.googleapis.com/gmail/v1/users/me/messages/send"))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Authorization", "Bearer " + accessToken)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
 
-            System.out.println("Email sent successfully to " + toEmail);
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString()
+            );
 
-            return true;
+            if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                System.out.println("Email sent successfully to " + toEmail);
+                System.out.println("Gmail API response: " + response.body());
+                return true;
+            }
 
-        } catch (MailException mailError) {
-            return handleEmailFailure(toEmail, code, mailError);
+            throw new RuntimeException(
+                    "Gmail API send failed. Status: " + response.statusCode() +
+                            ", Body: " + response.body()
+            );
 
         } catch (Exception error) {
             return handleEmailFailure(toEmail, code, error);
         }
+    }
+
+    private String getAccessToken() throws Exception {
+        String formBody =
+                "client_id=" + urlEncode(gmailClientId) +
+                        "&client_secret=" + urlEncode(gmailClientSecret) +
+                        "&refresh_token=" + urlEncode(gmailRefreshToken) +
+                        "&grant_type=refresh_token";
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("https://oauth2.googleapis.com/token"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(
+                request,
+                HttpResponse.BodyHandlers.ofString()
+        );
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new RuntimeException(
+                    "Failed to get Gmail access token. Status: " +
+                            response.statusCode() +
+                            ", Body: " + response.body()
+            );
+        }
+
+        JsonNode json = objectMapper.readTree(response.body());
+
+        if (!json.has("access_token")) {
+            throw new RuntimeException(
+                    "No access_token returned by Google. Response: " + response.body()
+            );
+        }
+
+        return json.get("access_token").asText();
+    }
+
+    private String createBase64UrlEmail(String toEmail, String subject, String html) throws Exception {
+        Properties props = new Properties();
+        Session session = Session.getDefaultInstance(props, null);
+
+        MimeMessage email = new MimeMessage(session);
+        email.setFrom(new InternetAddress(gmailFrom, "The Guardian"));
+        email.addRecipient(jakarta.mail.Message.RecipientType.TO, new InternetAddress(toEmail));
+        email.setSubject(subject, "UTF-8");
+        email.setContent(html, "text/html; charset=UTF-8");
+        email.saveChanges();
+
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        email.writeTo(buffer);
+
+        return Base64.getUrlEncoder()
+                .withoutPadding()
+                .encodeToString(buffer.toByteArray());
     }
 
     private boolean handleEmailFailure(String toEmail, String code, Exception error) {
@@ -205,15 +287,29 @@ public class EmailService {
         );
     }
 
-    private String getSenderEmail() {
-        if (mailFrom != null && !mailFrom.isBlank()) {
-            return mailFrom;
+    private void validateGmailApiConfig() {
+        if (isBlank(gmailClientId)) {
+            throw new RuntimeException("Missing GMAIL_CLIENT_ID.");
         }
 
-        if (mailUsername != null && !mailUsername.isBlank()) {
-            return mailUsername;
+        if (isBlank(gmailClientSecret)) {
+            throw new RuntimeException("Missing GMAIL_CLIENT_SECRET.");
         }
 
-        throw new RuntimeException("MAIL_FROM or MAIL_USERNAME is missing.");
+        if (isBlank(gmailRefreshToken)) {
+            throw new RuntimeException("Missing GMAIL_REFRESH_TOKEN.");
+        }
+
+        if (isBlank(gmailFrom)) {
+            throw new RuntimeException("Missing GMAIL_FROM.");
+        }
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }
