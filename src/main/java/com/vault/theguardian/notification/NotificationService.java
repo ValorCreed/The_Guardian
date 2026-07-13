@@ -71,6 +71,20 @@ public class NotificationService {
         notificationRepository.save(notification);
     }
 
+    public void notifyWelcome(User user) {
+        String name = user == null || user.getFullName() == null || user.getFullName().isBlank()
+                ? "there"
+                : user.getFullName().trim();
+
+        createNotification(
+                user,
+                NotificationType.WELCOME,
+                "Welcome to The Guardian",
+                "Hi " + name + ", your secure vault is ready. Start by saving your first password, enabling 2FA, and setting up backup protection.",
+                "/security"
+        );
+    }
+
     public void notifySubscriptionActivated(User user, SubscriptionPlan plan, LocalDateTime expiresAt) {
         String planLabel = formatPlan(plan);
         String expiryText = expiresAt == null ? "for the next month" : "until " + expiresAt.toLocalDate();
@@ -146,6 +160,36 @@ public class NotificationService {
         );
     }
 
+    public void notifySecureNoteAdded(User user, String title) {
+        createNotification(
+                user,
+                NotificationType.NOTE_ADDED,
+                "Secure note saved",
+                cleanTitle(title, "A secure note") + " was added to your notes vault.",
+                "/vault?tab=Notes"
+        );
+    }
+
+    public void notifySecureNoteUpdated(User user, String title) {
+        createNotification(
+                user,
+                NotificationType.NOTE_UPDATED,
+                "Secure note updated",
+                cleanTitle(title, "A secure note") + " was updated.",
+                "/vault?tab=Notes"
+        );
+    }
+
+    public void notifySecureNoteDeleted(User user, String title) {
+        createNotification(
+                user,
+                NotificationType.NOTE_DELETED,
+                "Secure note deleted",
+                cleanTitle(title, "A secure note") + " was removed from your notes vault.",
+                "/vault?tab=Notes"
+        );
+    }
+
     public void notifyFamilyMemberAdded(User user, String memberEmail) {
         createNotification(
                 user,
@@ -163,6 +207,82 @@ public class NotificationService {
                 "Family member removed",
                 cleanTitle(memberEmail, "A family member") + " was removed from your family vault.",
                 "/family"
+        );
+    }
+
+    public void notifyEmergencyContactAdded(User user, String contactEmail) {
+        createNotification(
+                user,
+                NotificationType.EMERGENCY_CONTACT_ADDED,
+                "Emergency contact added",
+                cleanTitle(contactEmail, "A trusted contact") + " was added to your emergency access list.",
+                "/emergencyaccess"
+        );
+    }
+
+    public void notifyEmergencyContactRemoved(User user, String contactEmail) {
+        createNotification(
+                user,
+                NotificationType.EMERGENCY_CONTACT_REMOVED,
+                "Emergency contact removed",
+                cleanTitle(contactEmail, "A trusted contact") + " was removed from your emergency access list.",
+                "/emergencyaccess"
+        );
+    }
+
+    public void notifyEmergencyAccessRequested(User owner, String requesterEmail) {
+        createNotification(
+                owner,
+                NotificationType.EMERGENCY_ACCESS_REQUESTED,
+                "Emergency access requested",
+                cleanTitle(requesterEmail, "A trusted contact") + " requested emergency access. Approve or deny the request.",
+                "/emergencyaccess"
+        );
+    }
+
+    public void notifyEmergencyAccessApproved(User requester, String ownerEmail) {
+        createNotification(
+                requester,
+                NotificationType.EMERGENCY_ACCESS_APPROVED,
+                "Emergency access approved",
+                cleanTitle(ownerEmail, "The vault owner") + " approved your emergency access request.",
+                "/emergencyaccess"
+        );
+    }
+
+    public void notifyEmergencyAccessDenied(User requester, String ownerEmail) {
+        createNotification(
+                requester,
+                NotificationType.EMERGENCY_ACCESS_DENIED,
+                "Emergency access denied",
+                cleanTitle(ownerEmail, "The vault owner") + " denied your emergency access request.",
+                "/emergencyaccess"
+        );
+    }
+
+
+    public void notifyNewDeviceLogin(User user, String deviceName, String ipAddress) {
+        String deviceLabel = cleanTitle(deviceName, "A device");
+        String ipLabel = ipAddress == null || ipAddress.isBlank() || ipAddress.equalsIgnoreCase("Unknown")
+                ? ""
+                : " from " + ipAddress;
+
+        createNotification(
+                user,
+                NotificationType.NEW_DEVICE_LOGIN,
+                "New device signed in",
+                deviceLabel + " signed in to your account" + ipLabel + ". Review trusted devices if this was not you.",
+                "/devices"
+        );
+    }
+
+    public void notifySessionRevoked(User user, String deviceName) {
+        createNotification(
+                user,
+                NotificationType.SESSION_REVOKED,
+                "Device session revoked",
+                cleanTitle(deviceName, "A device") + " was removed from your trusted devices.",
+                "/devices"
         );
     }
 

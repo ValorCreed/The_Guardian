@@ -10,6 +10,7 @@ public record AddFamilyMemberRequest(
 
         boolean sharePasswords,
         boolean shareCards,
-        boolean shareDocuments
+        boolean shareDocuments,
+        boolean shareNotes
 ) {
 }

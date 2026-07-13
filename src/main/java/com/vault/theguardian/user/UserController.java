@@ -1,5 +1,6 @@
 package com.vault.theguardian.user;
 
+import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,7 +15,10 @@ public class UserController {
     }
 
     @DeleteMapping("/me")
-    public DeleteAccountResponse deleteMyAccount(@AuthenticationPrincipal User user) {
-        return userService.deleteMyAccount(user);
+    public DeleteAccountResponse deleteMyAccount(
+            @AuthenticationPrincipal User user,
+            @Valid @RequestBody DeleteAccountRequest request
+    ) {
+        return userService.deleteMyAccount(user, request);
     }
 }

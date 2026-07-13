@@ -83,6 +83,60 @@ public class SubscriptionService {
         return isFamilyPlan(user);
     }
 
+    public boolean canUseAdvancedSecurity(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
+    public boolean canUseAdvancedPasswordGenerator(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
+    public boolean canUseMultipleDevices(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
+    public boolean canCreateSecureNote(User user, long currentNoteCount) {
+        Subscription subscription = getMySubscription(user);
+
+        if (!isPaidSubscription(subscription)) {
+            return currentNoteCount < 5;
+        }
+
+        return true;
+    }
+
+
+    public boolean canCreateEmergencyContact(User user, long currentEmergencyContactCount) {
+        Subscription subscription = getMySubscription(user);
+
+        if (!isPaidSubscription(subscription)) {
+            return currentEmergencyContactCount < 1;
+        }
+
+        if (subscription.getPlan() == SubscriptionPlan.PREMIUM) {
+            return currentEmergencyContactCount < 3;
+        }
+
+        if (subscription.getPlan() == SubscriptionPlan.FAMILY) {
+            return currentEmergencyContactCount < 6;
+        }
+
+        return false;
+    }
+
+    public boolean canUseEmergencyVaultItemSharing(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
+    public boolean canUseCustomEmergencyWaitingPeriod(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
     private boolean isPremiumOrFamily(Subscription subscription) {
         return subscription.isActive()
                 && (subscription.getPlan() == SubscriptionPlan.PREMIUM

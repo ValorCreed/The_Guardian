@@ -42,4 +42,7 @@ public class FamilyMember {
 
     @Column(nullable = false)
     private boolean shareDocuments;
+
+    @Column(nullable = false)
+    private boolean shareNotes;
 }

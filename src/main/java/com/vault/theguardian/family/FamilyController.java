@@ -81,4 +81,17 @@ public class FamilyController {
     ) {
         return familyService.getSharedDocumentItem(user, itemId);
     }
+
+    @GetMapping("/shared-notes")
+    public List<SharedNoteItemResponse> getSharedNoteItems(@AuthenticationPrincipal User user) {
+        return familyService.getSharedNoteItems(user);
+    }
+
+    @GetMapping("/shared-notes/{itemId}")
+    public SharedNoteItemResponse getSharedNoteItem(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long itemId
+    ) {
+        return familyService.getSharedNoteItem(user, itemId);
+    }
 }

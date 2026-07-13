@@ -1,6 +1,7 @@
 package com.vault.theguardian.auth;
 
 import com.vault.theguardian.user.User;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -16,18 +17,27 @@ public class AuthController {
     }
 
     @PostMapping("/register")
-    public AuthResponse register(@Valid @RequestBody RegisterRequest request) {
-        return authService.register(request);
+    public AuthResponse register(
+            @Valid @RequestBody RegisterRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        return authService.register(request, httpRequest);
     }
 
     @PostMapping("/login")
-    public AuthResponse login(@Valid @RequestBody LoginRequest request) {
-        return authService.login(request);
+    public AuthResponse login(
+            @Valid @RequestBody LoginRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        return authService.login(request, httpRequest);
     }
 
     @PostMapping("/verify-2fa")
-    public AuthResponse verifyTwoFactor(@Valid @RequestBody VerifyTwoFactorRequest request) {
-        return authService.verifyTwoFactor(request);
+    public AuthResponse verifyTwoFactor(
+            @Valid @RequestBody VerifyTwoFactorRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        return authService.verifyTwoFactor(request, httpRequest);
     }
 
     @GetMapping("/me/security")

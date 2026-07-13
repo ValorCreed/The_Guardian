@@ -1,12 +1,13 @@
 package com.vault.theguardian.vault;
+
 import com.vault.theguardian.user.User;
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 
-
 @Entity
-@Table(name="vault_items")
+@Table(name = "vault_items")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -21,7 +22,7 @@ public class VaultItem {
 
     private String usernameValue;
 
-    @Column(nullable = false ,columnDefinition = "TEXT")
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String encryptedPassword;
 
     private String website;
@@ -31,7 +32,27 @@ public class VaultItem {
 
     private LocalDateTime createdAt;
 
+    private LocalDateTime updatedAt;
+
     @ManyToOne
-    @JoinColumn(name="user_id")
+    @JoinColumn(name = "user_id")
     private User user;
+
+    @PrePersist
+    public void prePersist() {
+        LocalDateTime now = LocalDateTime.now();
+
+        if (createdAt == null) {
+            createdAt = now;
+        }
+
+        if (updatedAt == null) {
+            updatedAt = now;
+        }
+    }
+
+    @PreUpdate
+    public void preUpdate() {
+        updatedAt = LocalDateTime.now();
+    }
 }

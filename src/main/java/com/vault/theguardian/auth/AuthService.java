@@ -1,12 +1,16 @@
 package com.vault.theguardian.auth;
 
 import com.vault.theguardian.email.EmailService;
+import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.security.JwtService;
+import com.vault.theguardian.session.DeviceSessionService;
+import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.subscription.Subscription;
 import com.vault.theguardian.subscription.SubscriptionPlan;
 import com.vault.theguardian.subscription.SubscriptionRepository;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -23,6 +27,8 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
+    private final NotificationService notificationService;
+    private final DeviceSessionService deviceSessionService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(
@@ -30,16 +36,20 @@ public class AuthService {
             SubscriptionRepository subscriptionRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            EmailService emailService
+            EmailService emailService,
+            NotificationService notificationService,
+            DeviceSessionService deviceSessionService
     ) {
         this.userRepository = userRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.emailService = emailService;
+        this.notificationService = notificationService;
+        this.deviceSessionService = deviceSessionService;
     }
 
-    public AuthResponse register(RegisterRequest request) {
+    public AuthResponse register(RegisterRequest request, HttpServletRequest httpRequest) {
         String cleanEmail = request.email().trim().toLowerCase();
 
         if (userRepository.findByEmail(cleanEmail).isPresent()) {
@@ -70,17 +80,27 @@ public class AuthService {
                 .plan(SubscriptionPlan.FREE)
                 .active(true)
                 .startedAt(LocalDateTime.now())
+                .expiresAt(null)
                 .build();
 
-        subscriptionRepository.save(subscription);
+        Subscription savedSubscription = subscriptionRepository.save(subscription);
+
+        notificationService.notifyWelcome(savedUser);
 
         trySendVerificationEmail(savedUser.getEmail(), verificationCode);
 
-        String token = jwtService.generateToken(savedUser.getEmail());
-        return toAuthResponse(savedUser, subscription, token, false);
+        UserSession session = deviceSessionService.createLoginSession(
+                savedUser,
+                httpRequest,
+                hasMultipleDeviceAccess(savedSubscription)
+        );
+
+        String token = jwtService.generateToken(savedUser.getEmail(), session.getTokenId());
+
+        return toAuthResponse(savedUser, savedSubscription, token, false);
     }
 
-    public AuthResponse login(LoginRequest request) {
+    public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
         String cleanEmail = request.email().trim().toLowerCase();
 
         User user = userRepository.findByEmail(cleanEmail)
@@ -95,10 +115,14 @@ public class AuthService {
         Subscription subscription = subscriptionRepository.findByUser(user)
                 .orElseThrow(() -> new RuntimeException("Subscription not found"));
 
+        subscription = refreshExpiredSubscription(subscription);
+
         if (user.isTwoFactorEnabled()) {
             String code = generateCode();
+
             user.setTwoFactorCode(code);
             user.setTwoFactorCodeExpiresAt(LocalDateTime.now().plusMinutes(10));
+
             userRepository.save(user);
 
             trySendTwoFactorEmail(user.getEmail(), code);
@@ -106,11 +130,18 @@ public class AuthService {
             return toAuthResponse(user, subscription, null, true);
         }
 
-        String token = jwtService.generateToken(user.getEmail());
+        UserSession session = deviceSessionService.createLoginSession(
+                user,
+                httpRequest,
+                hasMultipleDeviceAccess(subscription)
+        );
+
+        String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
+
         return toAuthResponse(user, subscription, token, false);
     }
 
-    public AuthResponse verifyTwoFactor(VerifyTwoFactorRequest request) {
+    public AuthResponse verifyTwoFactor(VerifyTwoFactorRequest request, HttpServletRequest httpRequest) {
         String cleanEmail = request.email().trim().toLowerCase();
 
         User user = userRepository.findByEmail(cleanEmail)
@@ -134,17 +165,30 @@ public class AuthService {
 
         user.setTwoFactorCode(null);
         user.setTwoFactorCodeExpiresAt(null);
+
         userRepository.save(user);
 
         Subscription subscription = subscriptionRepository.findByUser(user)
                 .orElseThrow(() -> new RuntimeException("Subscription not found"));
 
-        String token = jwtService.generateToken(user.getEmail());
+        subscription = refreshExpiredSubscription(subscription);
+
+        UserSession session = deviceSessionService.createLoginSession(
+                user,
+                httpRequest,
+                hasMultipleDeviceAccess(subscription)
+        );
+
+        String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
+
         return toAuthResponse(user, subscription, token, false);
     }
 
     public SecuritySettingsResponse getSecuritySettings(User user) {
-        return new SecuritySettingsResponse(user.isEmailVerified(), user.isTwoFactorEnabled());
+        return new SecuritySettingsResponse(
+                user.isEmailVerified(),
+                user.isTwoFactorEnabled()
+        );
     }
 
     public SecuritySettingsResponse setTwoFactorEnabled(User user, TwoFactorToggleRequest request) {
@@ -155,9 +199,13 @@ public class AuthService {
         user.setTwoFactorEnabled(request.enabled());
         user.setTwoFactorCode(null);
         user.setTwoFactorCodeExpiresAt(null);
+
         User saved = userRepository.save(user);
 
-        return new SecuritySettingsResponse(saved.isEmailVerified(), saved.isTwoFactorEnabled());
+        return new SecuritySettingsResponse(
+                saved.isEmailVerified(),
+                saved.isTwoFactorEnabled()
+        );
     }
 
     public MessageResponse verifyEmail(VerifyEmailRequest request) {
@@ -185,6 +233,7 @@ public class AuthService {
         user.setEmailVerified(true);
         user.setEmailVerificationCode(null);
         user.setEmailVerificationCodeExpiresAt(null);
+
         userRepository.save(user);
 
         return new MessageResponse("Email verified successfully");
@@ -201,8 +250,10 @@ public class AuthService {
         }
 
         String code = generateCode();
+
         user.setEmailVerificationCode(code);
         user.setEmailVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(15));
+
         userRepository.save(user);
 
         trySendVerificationEmail(user.getEmail(), code);
@@ -224,8 +275,10 @@ public class AuthService {
         }
 
         String resetCode = generateCode();
+
         user.setPasswordResetCode(resetCode);
         user.setPasswordResetCodeExpiresAt(LocalDateTime.now().plusMinutes(15));
+
         userRepository.save(user);
 
         trySendPasswordResetEmail(user.getEmail(), resetCode);
@@ -258,12 +311,18 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setPasswordResetCode(null);
         user.setPasswordResetCodeExpiresAt(null);
+
         userRepository.save(user);
 
         return new MessageResponse("Password reset successfully");
     }
 
-    private AuthResponse toAuthResponse(User user, Subscription subscription, String token, boolean requiresTwoFactor) {
+    private AuthResponse toAuthResponse(
+            User user,
+            Subscription subscription,
+            String token,
+            boolean requiresTwoFactor
+    ) {
         return new AuthResponse(
                 token,
                 user.getId(),
@@ -276,8 +335,45 @@ public class AuthService {
         );
     }
 
+    private boolean hasMultipleDeviceAccess(Subscription subscription) {
+        if (subscription == null || subscription.getPlan() == null) {
+            return false;
+        }
+
+        if (!subscription.isActive()) {
+            return false;
+        }
+
+        if (
+                subscription.getExpiresAt() != null &&
+                        subscription.getExpiresAt().isBefore(LocalDateTime.now())
+        ) {
+            return false;
+        }
+
+        return subscription.getPlan() == SubscriptionPlan.PREMIUM
+                || subscription.getPlan() == SubscriptionPlan.FAMILY;
+    }
+
+    private Subscription refreshExpiredSubscription(Subscription subscription) {
+        if (
+                subscription.isActive() &&
+                        subscription.getExpiresAt() != null &&
+                        subscription.getExpiresAt().isBefore(LocalDateTime.now())
+        ) {
+            subscription.setPlan(SubscriptionPlan.FREE);
+            subscription.setActive(false);
+
+            return subscriptionRepository.save(subscription);
+        }
+
+        return subscription;
+    }
+
     private String generateCode() {
-        return String.valueOf(secureRandom.nextInt(CODE_MAX - CODE_MIN + 1) + CODE_MIN);
+        return String.valueOf(
+                secureRandom.nextInt(CODE_MAX - CODE_MIN + 1) + CODE_MIN
+        );
     }
 
     private void trySendVerificationEmail(String email, String code) {

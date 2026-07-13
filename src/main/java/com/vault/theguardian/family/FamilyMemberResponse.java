@@ -10,5 +10,6 @@ public record FamilyMemberResponse(
         LocalDateTime joinedAt,
         boolean sharePasswords,
         boolean shareCards,
-        boolean shareDocuments
+        boolean shareDocuments,
+        boolean shareNotes
 ) {}

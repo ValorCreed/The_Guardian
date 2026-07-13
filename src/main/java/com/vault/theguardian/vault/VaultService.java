@@ -23,12 +23,13 @@ public class VaultService {
     }
 
     public VaultResponse createVaultItem(User user, VaultRequest request) {
-        // Faster than findByUser(user).size(), but requires countByUser(User user) in VaultItemRepository.
         long count = vaultItemRepository.countByUser(user);
 
         if (!subscriptionService.canCreateVaultItem(user, count)) {
             throw new RuntimeException("Free plan limit reached. Upgrade to Premium.");
         }
+
+        LocalDateTime now = LocalDateTime.now();
 
         VaultItem item = VaultItem.builder()
                 .title(request.title())
@@ -36,7 +37,8 @@ public class VaultService {
                 .encryptedPassword(request.encryptedPassword())
                 .website(request.website())
                 .notes(request.notes())
-                .createdAt(LocalDateTime.now())
+                .createdAt(now)
+                .updatedAt(now)
                 .user(user)
                 .build();
 
@@ -65,9 +67,9 @@ public class VaultService {
         item.setEncryptedPassword(request.encryptedPassword());
         item.setWebsite(request.website());
         item.setNotes(request.notes());
+        item.setUpdatedAt(LocalDateTime.now());
 
         VaultItem saved = vaultItemRepository.save(item);
-        notificationService.notifyPasswordAdded(user, saved.getTitle());
         return toResponse(saved);
     }
 
@@ -94,7 +96,9 @@ public class VaultService {
                 item.getUsernameValue(),
                 item.getEncryptedPassword(),
                 item.getWebsite(),
-                item.getNotes()
+                item.getNotes(),
+                item.getCreatedAt(),
+                item.getUpdatedAt()
         );
     }
 }

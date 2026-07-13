@@ -1,10 +1,12 @@
 package com.vault.theguardian.family;
 
 import com.vault.theguardian.cards.CreditCardEntity;
-import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.cards.CreditCardRepository;
 import com.vault.theguardian.documents.DocumentRepository;
 import com.vault.theguardian.documents.DocumentVault;
+import com.vault.theguardian.notes.SecureNote;
+import com.vault.theguardian.notes.SecureNoteRepository;
+import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.subscription.Subscription;
 import com.vault.theguardian.subscription.SubscriptionPlan;
 import com.vault.theguardian.subscription.SubscriptionRepository;
@@ -38,6 +40,7 @@ public class FamilyService {
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
+    private final SecureNoteRepository secureNoteRepository;
     private final NotificationService notificationService;
 
     @Value("${VAULT_DOCUMENT_SECRET}")
@@ -50,6 +53,7 @@ public class FamilyService {
                          VaultItemRepository vaultItemRepository,
                          CreditCardRepository creditCardRepository,
                          DocumentRepository documentRepository,
+                         SecureNoteRepository secureNoteRepository,
                          NotificationService notificationService) {
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
@@ -58,6 +62,7 @@ public class FamilyService {
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
+        this.secureNoteRepository = secureNoteRepository;
         this.notificationService = notificationService;
     }
 
@@ -98,8 +103,14 @@ public class FamilyService {
 
         String cleanEmail = request.email().trim().toLowerCase();
 
-        if (!request.sharePasswords() && !request.shareCards() && !request.shareDocuments()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose at least one vault type to share.");
+        if (!request.sharePasswords()
+                && !request.shareCards()
+                && !request.shareDocuments()
+                && !request.shareNotes()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Choose at least one vault type to share."
+            );
         }
 
         if (admin.getEmail().equalsIgnoreCase(cleanEmail)) {
@@ -127,6 +138,7 @@ public class FamilyService {
             existingMember.setSharePasswords(request.sharePasswords());
             existingMember.setShareCards(request.shareCards());
             existingMember.setShareDocuments(request.shareDocuments());
+            existingMember.setShareNotes(request.shareNotes());
 
             FamilyMember updated = familyMemberRepository.save(existingMember);
             notificationService.notifyFamilyMemberAdded(admin, memberUser.getEmail());
@@ -149,6 +161,7 @@ public class FamilyService {
                         .sharePasswords(request.sharePasswords())
                         .shareCards(request.shareCards())
                         .shareDocuments(request.shareDocuments())
+                        .shareNotes(request.shareNotes())
                         .build()
         );
 
@@ -171,7 +184,8 @@ public class FamilyService {
         return new SharedFamilyItemsResponse(
                 getSharedPasswordItems(user),
                 getSharedCardItems(user),
-                getSharedDocumentItems(user)
+                getSharedDocumentItems(user),
+                getSharedNoteItems(user)
         );
     }
 
@@ -205,6 +219,16 @@ public class FamilyService {
                 .toList();
     }
 
+    public List<SharedNoteItemResponse> getSharedNoteItems(User user) {
+        List<User> owners = sharedOwners(user, FamilyMember::isShareNotes);
+        if (owners.isEmpty()) return List.of();
+
+        return secureNoteRepository.findByUserIn(owners)
+                .stream()
+                .map(this::toSharedNoteResponse)
+                .toList();
+    }
+
     public SharedPasswordItemResponse getSharedPasswordItem(User user, Long itemId) {
         VaultItem item = vaultItemRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared password item not found."));
@@ -214,7 +238,7 @@ public class FamilyService {
                 .anyMatch(sharedItem -> sharedItem.id().equals(itemId));
 
         if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared passwords item.");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared password item.");
         }
 
         return toSharedPasswordResponse(item);
@@ -229,7 +253,7 @@ public class FamilyService {
                 .anyMatch(sharedCard -> sharedCard.id().equals(itemId));
 
         if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared cards item.");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared card item.");
         }
 
         return toSharedCardResponse(card);
@@ -244,10 +268,25 @@ public class FamilyService {
                 .anyMatch(sharedDocument -> sharedDocument.id().equals(itemId));
 
         if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared documents item.");
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared document item.");
         }
 
         return toSharedDocumentDetailResponse(document);
+    }
+
+    public SharedNoteItemResponse getSharedNoteItem(User user, Long itemId) {
+        SecureNote note = secureNoteRepository.findById(itemId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared secure note not found."));
+
+        boolean allowed = getSharedNoteItems(user)
+                .stream()
+                .anyMatch(sharedNote -> sharedNote.id().equals(itemId));
+
+        if (!allowed) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared secure note item.");
+        }
+
+        return toSharedNoteResponse(note);
     }
 
     public boolean isFamilyPlan(User user) {
@@ -271,17 +310,6 @@ public class FamilyService {
                 .toList();
     }
 
-    private void requireSharedAccess(User user, Long ownerId, Predicate<FamilyMember> permissionCheck, String typeLabel) {
-        boolean allowed = familyMemberRepository.findByUser(user)
-                .stream()
-                .filter(permissionCheck)
-                .anyMatch(member -> member.getGroup().getAdmin().getId().equals(ownerId));
-
-        if (!allowed) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared " + typeLabel + " item.");
-        }
-    }
-
     private FamilyMemberResponse toMemberResponse(FamilyMember member) {
         User user = member.getUser();
 
@@ -293,7 +321,8 @@ public class FamilyService {
                 member.getJoinedAt(),
                 member.isSharePasswords(),
                 member.isShareCards(),
-                member.isShareDocuments()
+                member.isShareDocuments(),
+                member.isShareNotes()
         );
     }
 
@@ -357,6 +386,24 @@ public class FamilyService {
                 document.getDocumentType(),
                 decryptTextIfPossible(document.getEncryptedFileUrl()),
                 document.getEncryptedNotes(),
+                owner.getId(),
+                owner.getFullName(),
+                owner.getEmail()
+        );
+    }
+
+    private SharedNoteItemResponse toSharedNoteResponse(SecureNote note) {
+        User owner = note.getUser();
+
+        return new SharedNoteItemResponse(
+                note.getId(),
+                "NOTE",
+                note.getTitle(),
+                note.getCategory(),
+                note.getEncryptedContent(),
+                note.isPinned(),
+                note.getCreatedAt(),
+                note.getUpdatedAt(),
                 owner.getId(),
                 owner.getFullName(),
                 owner.getEmail()

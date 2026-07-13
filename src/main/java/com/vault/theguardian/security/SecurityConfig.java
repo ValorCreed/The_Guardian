@@ -1,5 +1,7 @@
 package com.vault.theguardian.security;
 
+import com.vault.theguardian.session.UserSession;
+import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import jakarta.servlet.FilterChain;
@@ -16,20 +18,22 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.LocalDateTime;
 
 @Configuration
 public class SecurityConfig {
     private final JwtService jwtService;
     private final UserRepository userRepository;
+    private final UserSessionRepository userSessionRepository;
 
-    private final Map<String, CachedUser> userCache = new ConcurrentHashMap<>();
-    private static final long USER_CACHE_MS = 5 * 60 * 1000;
-
-    public SecurityConfig(JwtService jwtService, UserRepository userRepository) {
+    public SecurityConfig(
+            JwtService jwtService,
+            UserRepository userRepository,
+            UserSessionRepository userSessionRepository
+    ) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
+        this.userSessionRepository = userSessionRepository;
     }
 
     @Bean
@@ -93,7 +97,34 @@ public class SecurityConfig {
                         return;
                     }
 
-                    User user = getCachedUser(token);
+                    String email = jwtService.extractEmail(token);
+                    String tokenId = jwtService.extractTokenId(token);
+
+                    if (tokenId == null || tokenId.isBlank()) {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        return;
+                    }
+
+                    UserSession session = userSessionRepository.findByTokenIdAndActiveTrue(tokenId)
+                            .orElse(null);
+
+                    if (session == null || session.getUser() == null) {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        return;
+                    }
+
+                    User user = session.getUser();
+
+                    /*
+                     * Extra safety check:
+                     * The JWT subject must match the session owner.
+                     */
+                    if (!user.getEmail().equalsIgnoreCase(email)) {
+                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        return;
+                    }
+
+                    touchSessionIfNeeded(session);
 
                     UsernamePasswordAuthenticationToken authentication =
                             new UsernamePasswordAuthenticationToken(user, null, java.util.List.of());
@@ -121,21 +152,15 @@ public class SecurityConfig {
                 || path.equals("/vault/payments/callback");
     }
 
-    private User getCachedUser(String token) {
-        long now = System.currentTimeMillis();
-        CachedUser cached = userCache.get(token);
+    private void touchSessionIfNeeded(UserSession session) {
+        LocalDateTime now = LocalDateTime.now();
 
-        if (cached != null && now < cached.expiresAt) {
-            return cached.user;
+        if (
+                session.getLastSeenAt() == null ||
+                        session.getLastSeenAt().isBefore(now.minusMinutes(1))
+        ) {
+            session.setLastSeenAt(now);
+            userSessionRepository.save(session);
         }
-
-        String email = jwtService.extractEmail(token);
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("User not found"));
-
-        userCache.put(token, new CachedUser(user, now + USER_CACHE_MS));
-        return user;
     }
-
-    private record CachedUser(User user, long expiresAt) {}
 }
