@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   RefreshControl,
@@ -19,6 +18,7 @@ import {
   Crown,
   FileText,
   KeyRound,
+  NotebookText,
   Plus,
   Trash2,
   Users,
@@ -30,9 +30,12 @@ import {
   SharedCardItem,
   SharedDocumentItem,
   SharedFamilyItems,
+  SharedNoteItem,
   SharedPasswordItem,
 } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import PulsingSkeleton from '../components/PulsingSkeleton';
+
 
 export default function FamilyScreen() {
   const { isDark, colors: C } = useAppTheme();
@@ -43,6 +46,7 @@ export default function FamilyScreen() {
     passwords: [],
     cards: [],
     documents: [],
+    notes: [],
   });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -57,6 +61,7 @@ export default function FamilyScreen() {
         passwords: items.passwords || [],
         cards: items.cards || [],
         documents: items.documents || [],
+        notes: items.notes || [],
       });
     } catch (error: any) {
       Alert.alert('Family error', error.message || 'Could not load family data.');
@@ -101,16 +106,44 @@ export default function FamilyScreen() {
   const memberCount = overview?.memberCount || 0;
   const memberLimit = overview?.memberLimit || 6;
   const totalShared =
-    sharedItems.passwords.length + sharedItems.cards.length + sharedItems.documents.length;
+    sharedItems.passwords.length +
+    sharedItems.cards.length +
+    sharedItems.documents.length +
+    sharedItems.notes.length;
+
+
+  const renderFamilySkeleton = () => (
+    <ScrollView
+      contentContainerStyle={styles.scrollContent}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.listCard}>
+        {[1, 2, 3, 4, 5].map((item, index) => (
+          <View
+            key={`family-skeleton-${item}`}
+            style={[
+              styles.notificationRow,
+              index !== 4 && styles.rowDivider,
+            ]}
+          >
+            <PulsingSkeleton styles={styles} style={styles.iconCircle} />
+
+            <View style={{ flex: 1 }}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonText} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonDate} />
+            </View>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
 
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-        <View style={styles.centered}>
-          <ActivityIndicator color={C.primary} />
-          <Text style={styles.loadingText}>Loading family...</Text>
-        </View>
+        {renderFamilySkeleton()}
       </SafeAreaView>
     );
   }
@@ -240,7 +273,7 @@ export default function FamilyScreen() {
           <View style={styles.card}>
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>No shared items yet</Text>
-              <Text style={styles.emptyText}>Shared passwords, cards, and documents will appear here.</Text>
+              <Text style={styles.emptyText}>Shared passwords, cards, documents, and secure notes will appear here.</Text>
             </View>
           </View>
         ) : (
@@ -248,6 +281,7 @@ export default function FamilyScreen() {
             <SharedPasswordSection items={sharedItems.passwords} styles={styles} C={C} />
             <SharedCardSection items={sharedItems.cards} styles={styles} C={C} />
             <SharedDocumentSection items={sharedItems.documents} styles={styles} C={C} />
+            <SharedNoteSection items={sharedItems.notes} styles={styles} C={C} />
           </>
         )}
       </ScrollView>
@@ -333,6 +367,32 @@ function SharedDocumentSection({ items, styles, C }: { items: SharedDocumentItem
   );
 }
 
+function SharedNoteSection({ items, styles, C }: { items: SharedNoteItem[]; styles: any; C: any }) {
+  if (!items.length) return null;
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.innerSectionTitle}>Secure Notes</Text>
+      <FlatList
+        data={items}
+        keyExtractor={(item) => `note-${item.ownerId}-${item.id}`}
+        scrollEnabled={false}
+        renderItem={({ item, index }) => (
+          <SharedRow
+            icon={<NotebookText size={18} color={C.primary} />}
+            title={item.title || 'Shared secure note'}
+            subtitle={`Shared by ${item.ownerName || item.ownerEmail}`}
+            extra={item.category || 'Secure note'}
+            isLast={index === items.length - 1}
+            styles={styles}
+            onPress={() => router.push({ pathname: '/sharedvaultdetails', params: { id: String(item.id), type: 'NOTE' } })}
+          />
+        )}
+      />
+    </View>
+  );
+}
+
 function SharedRow({
   icon,
   title,
@@ -382,6 +442,7 @@ function permissionLabel(member: any) {
   if (member.sharePasswords) permissions.push('Passwords');
   if (member.shareCards) permissions.push('Cards');
   if (member.shareDocuments) permissions.push('Documents');
+  if (member.shareNotes) permissions.push('Secure notes');
   return permissions.length ? `Can view: ${permissions.join(', ')}` : 'No vault access selected';
 }
 
@@ -391,6 +452,64 @@ const makeStyles = (C: any) =>
     scrollContent: { paddingHorizontal: 16, paddingTop: 48, paddingBottom: 140 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     loadingText: { marginTop: 10, color: C.textSecondary },
+
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    listCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+      marginBottom: 22,
+    },
+    notificationRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 14,
+      gap: 12,
+    },
+    iconCircle: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.background,
+    },
+    skeletonTitle: {
+      width: '72%',
+      height: 15,
+      marginBottom: 9,
+    },
+    skeletonText: {
+      width: '94%',
+      height: 12,
+      marginBottom: 9,
+    },
+    skeletonDate: {
+      width: 84,
+      height: 10,
+    },
+    skeletonPageTitle: { width: 122, height: 34, marginBottom: 12 },
+    skeletonSubtitle: { width: '82%', height: 14, marginBottom: 18 },
+    skeletonHeroTitle: { width: '54%', height: 17, marginBottom: 10 },
+    skeletonHeroText: { width: '88%', height: 12, marginBottom: 8 },
+    skeletonHeroTextShort: { width: '54%', height: 12 },
+    skeletonHeroIcon: { width: 56, height: 56, borderRadius: 18, marginRight: 14 },
+    skeletonSectionLabel: { width: 155, height: 12, marginLeft: 4, marginBottom: 8 },
+    skeletonButton: { width: '100%', height: 52, borderRadius: 18, marginBottom: 22 },
+    skeletonAvatar: { width: 42, height: 42, borderRadius: 14, marginRight: 12 },
+    skeletonSharedIcon: { width: 42, height: 42, borderRadius: 14, marginRight: 12 },
+    skeletonPermission: { width: '68%', height: 10, marginTop: 8 },
+    skeletonSmallButton: { width: 38, height: 38, borderRadius: 19 },
+    skeletonChevron: { width: 20, height: 20, borderRadius: 10 },
+    skeletonMemberRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+    skeletonMemberTitle: { width: '58%', height: 15, marginBottom: 8 },
+    skeletonMemberSub: { width: '80%', height: 11 },
+    skeletonSharedRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
+    skeletonSharedTitle: { width: '62%', height: 15, marginBottom: 8 },
+    skeletonSharedSub: { width: '44%', height: 11 },
+
     title: { fontSize: 34, fontWeight: '800', color: C.text, marginBottom: 6 },
     subtitle: { fontSize: 15, color: C.textSecondary, marginBottom: 18 },
     heroCard: {

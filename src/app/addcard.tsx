@@ -101,9 +101,6 @@ const AddCardScreen = () => {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={20} color={C.text} />
-          </TouchableOpacity>
           <Text style={styles.headerTitle}>Add Card</Text>
         </View>
 
@@ -213,7 +210,7 @@ type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
 const makeStyles = (C: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: C.background },
-    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 12, gap: 12 },
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 94, paddingBottom: 16, gap: 12 },
     backBtn: { width: 36, height: 36, backgroundColor: C.backgroundSelected, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
     headerTitle: { fontSize: 22, fontWeight: 'bold', color: C.text },
     cardPreview: { backgroundColor: C.primary, borderRadius: 20, marginHorizontal: 20, marginBottom: 28, padding: 24, height: 190, justifyContent: 'space-between' },

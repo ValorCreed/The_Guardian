@@ -1,21 +1,30 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
-  View,
-  TouchableOpacity,
   TextInput,
-  Alert,
-  ActivityIndicator,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { api, saveLoginSession } from '../services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { api, getEmailDeliveryWarning, saveLoginSession } from '../services/api';
+import { useAppTheme } from '../context/ThemeContext';
+import GuardianLogoTile from '../components/GuardianLogoTitle';
 
 const RegisterScreen = () => {
   const router = useRouter();
+
+  const { colors: C, resetThemeForNewAccount } = useAppTheme();
+  const styles = makeStyles(C);
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -31,7 +40,10 @@ const RegisterScreen = () => {
     if (loading) return;
 
     if (!fullName.trim() || !email.trim() || !password.trim()) {
-      Alert.alert('Missing details', 'Enter your full name, email and master password.');
+      Alert.alert(
+        'Missing details',
+        'Enter your full name, email and master password.'
+      );
       return;
     }
 
@@ -68,19 +80,69 @@ const RegisterScreen = () => {
       const data = await api.register({
         fullname: fullName.trim(),
         email: cleanEmail,
-        password: password.trim(),
+        password,
       });
 
       await saveLoginSession(data as any);
-      await AsyncStorage.setItem('emailVerified', 'false');
 
-      router.replace({
-        pathname: '/verifyemail',
-        params: {
-          email: cleanEmail,
-          next: 'verification',
-        },
-      });
+      await resetThemeForNewAccount(cleanEmail);
+
+      const verified = Boolean((data as any)?.emailVerified);
+      await AsyncStorage.setItem('emailVerified', String(verified));
+
+      const emailWarning = getEmailDeliveryWarning(data);
+
+      if (verified) {
+        Alert.alert('Account created', 'Your account is ready.', [
+          {
+            text: 'Continue',
+            onPress: () => router.replace('/verification'),
+          },
+        ]);
+        return;
+      }
+
+      if (emailWarning) {
+        Alert.alert(
+          'Account created',
+          'Your account was created, but we could not send the verification email right now. You can still sign in and use the app. For better account security, verify your email later from User Information.',
+          [
+            {
+              text: 'Continue',
+              onPress: () => router.replace('/verification'),
+              style: 'cancel',
+            },
+            {
+              text: 'Verify later',
+              onPress: () => router.replace('/verification'),
+            },
+          ]
+        );
+        return;
+      }
+
+      Alert.alert(
+        'Account created',
+        'We sent a verification code to your email. You can verify now, or continue and verify later from User Information.',
+        [
+          {
+            text: 'Continue',
+            onPress: () => router.replace('/verification'),
+            style: 'cancel',
+          },
+          {
+            text: 'Verify now',
+            onPress: () =>
+              router.replace({
+                pathname: '/verifyemail',
+                params: {
+                  email: cleanEmail,
+                  next: 'verification',
+                },
+              }),
+          },
+        ]
+      );
     } catch (error: any) {
       Alert.alert('Registration failed', error.message || 'Please try again.');
     } finally {
@@ -89,254 +151,286 @@ const RegisterScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backText}>← Back</Text>
-      </TouchableOpacity>
-
-      <View style={styles.iconBox}>
-        <View style={styles.shield}>
-          <View style={styles.checkLeft} />
-          <View style={styles.checkRight} />
-        </View>
-      </View>
-
-      <Text style={styles.title}>Create your account</Text>
-      <Text style={styles.subtitle}>
-        Your master password is the only key. We can never see it.
-      </Text>
-
-      <Text style={styles.label}>Full Name</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Alex Morgan"
-        placeholderTextColor="#aaa"
-        value={fullName}
-        onChangeText={setFullName}
-        autoCapitalize="words"
-      />
-
-      <Text style={styles.label}>Email</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="alex.morgan@gmail.com"
-        placeholderTextColor="#aaa"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-
-      <Text style={styles.label}>Master Password</Text>
-      <View style={styles.passwordBox}>
-        <TextInput
-          style={styles.passwordInput}
-          placeholder="Enter master password"
-          placeholderTextColor="#aaa"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry={!showPassword}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-
-        <TouchableOpacity
-          style={styles.eyeButton}
-          onPress={() => setShowPassword((current) => !current)}
-          activeOpacity={0.7}
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={styles.scrollContent}
         >
-          <Ionicons
-            name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-            size={22}
-            color="#666"
+          <GuardianLogoTile
+            size={62}
+            logoSize={50}
+            radius={18}
+            style={styles.iconBox}
           />
-        </TouchableOpacity>
-      </View>
 
-      <Text style={styles.label}>Confirm Password</Text>
-      <View style={styles.passwordBox}>
-        <TextInput
-          style={styles.passwordInput}
-          placeholder="Re-enter master password"
-          placeholderTextColor="#aaa"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry={!showConfirmPassword}
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
+          <Text style={styles.title}>Create your account</Text>
 
-        <TouchableOpacity
-          style={styles.eyeButton}
-          onPress={() => setShowConfirmPassword((current) => !current)}
-          activeOpacity={0.7}
-        >
-          <Ionicons
-            name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
-            size={22}
-            color="#666"
-          />
-        </TouchableOpacity>
-      </View>
+          <Text style={styles.subtitle}>
+            Your master password is the only key. We can never see it.
+          </Text>
 
-      <View style={styles.bottomSection}>
-        <TouchableOpacity
-          style={[styles.continueButton, loading && styles.disabledButton]}
-          onPress={handleRegister}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <Text style={styles.continueText}>Continue</Text>
-          )}
-        </TouchableOpacity>
-      </View>
+          <View style={styles.formCard}>
+            <Text style={styles.label}>Full Name</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Alex Morgan"
+              placeholderTextColor={C.tabInactive}
+              value={fullName}
+              onChangeText={setFullName}
+              autoCapitalize="words"
+              autoCorrect={false}
+              returnKeyType="next"
+            />
+
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="alex.morgan@gmail.com"
+              placeholderTextColor={C.tabInactive}
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="email"
+              textContentType="username"
+              importantForAutofill="yes"
+              returnKeyType="next"
+            />
+
+            <Text style={styles.label}>Master Password</Text>
+            <View style={styles.passwordBox}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Enter master password"
+                placeholderTextColor={C.tabInactive}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                importantForAutofill="yes"
+                returnKeyType="next"
+              />
+
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((current) => !current)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={C.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>Confirm Password</Text>
+            <View style={styles.passwordBox}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Re-enter master password"
+                placeholderTextColor={C.tabInactive}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry={!showConfirmPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                importantForAutofill="yes"
+                returnKeyType="done"
+                onSubmitEditing={handleRegister}
+              />
+
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowConfirmPassword((current) => !current)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={C.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.continueButton, loading && styles.disabledButton]}
+            onPress={handleRegister}
+            disabled={loading}
+            activeOpacity={0.85}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.continueText}>Continue</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.signinLink}
+            activeOpacity={0.7}
+            onPress={() => router.replace('/signin')}
+          >
+            <Text style={styles.signinText}>
+              Already have an account?{' '}
+              <Text style={styles.signinTextBold}>Sign in</Text>
+            </Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
 export default RegisterScreen;
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f0f4f0',
-    paddingHorizontal: 24,
-    paddingBottom: 20,
-  },
+const makeStyles = (C: any) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: C.background,
+    },
 
-  backButton: {
-    marginTop: 8,
-    marginBottom: 20,
-  },
+    keyboardView: {
+      flex: 1,
+    },
 
-  backText: {
-    fontSize: 16,
-    color: '#333',
-  },
+    scrollView: {
+      flex: 1,
+    },
 
-  iconBox: {
-    width: 60,
-    height: 60,
-    backgroundColor: '#1a5c35',
-    borderRadius: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
+    scrollContent: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+      paddingTop: 78,
+      paddingBottom: 180,
+    },
 
-  shield: {
-    width: 30,
-    height: 34,
-    borderColor: '#ffffff',
-    borderWidth: 2.5,
-    borderRadius: 4,
-    borderBottomLeftRadius: 15,
-    borderBottomRightRadius: 15,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+    iconBox: {
+      marginBottom: 20,
+    },
 
-  checkLeft: {
-    position: 'absolute',
-    width: 2.5,
-    height: 8,
-    backgroundColor: '#ffffff',
-    borderRadius: 2,
-    transform: [{ rotate: '45deg' }, { translateX: -4 }, { translateY: 2 }],
-  },
+    title: {
+      fontSize: 30,
+      fontWeight: '900',
+      color: C.text,
+      marginBottom: 8,
+    },
 
-  checkRight: {
-    position: 'absolute',
-    width: 2.5,
-    height: 14,
-    backgroundColor: '#ffffff',
-    borderRadius: 2,
-    transform: [{ rotate: '-45deg' }, { translateX: 4 }, { translateY: -1 }],
-  },
+    subtitle: {
+      fontSize: 14,
+      color: C.textSecondary,
+      lineHeight: 21,
+      marginBottom: 22,
+    },
 
-  title: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#0f2d1f',
-    marginBottom: 8,
-  },
+    formCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      marginBottom: 18,
+    },
 
-  subtitle: {
-    fontSize: 14,
-    color: '#666',
-    lineHeight: 20,
-    marginBottom: 28,
-  },
+    label: {
+      fontSize: 13,
+      color: C.text,
+      fontWeight: '800',
+      marginBottom: 8,
+      marginLeft: 4,
+    },
 
-  label: {
-    fontSize: 14,
-    color: '#333',
-    fontWeight: '600',
-    marginBottom: 8,
-  },
+    input: {
+      backgroundColor: C.background,
+      borderRadius: 18,
+      paddingHorizontal: 16,
+      paddingVertical: 15,
+      fontSize: 15,
+      color: C.text,
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
 
-  input: {
-    backgroundColor: '#ffffff',
-    borderRadius: 50,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    fontSize: 15,
-    color: '#333',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
+    passwordBox: {
+      backgroundColor: C.background,
+      borderRadius: 18,
+      paddingLeft: 16,
+      paddingRight: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
 
-  passwordBox: {
-    backgroundColor: '#ffffff',
-    borderRadius: 50,
-    paddingLeft: 20,
-    paddingRight: 12,
-    paddingVertical: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
+    passwordInput: {
+      flex: 1,
+      fontSize: 15,
+      color: C.text,
+      paddingVertical: 15,
+      paddingRight: 10,
+    },
 
-  passwordInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#333',
-    paddingVertical: 14,
-    paddingRight: 10,
-  },
+    eyeButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
 
-  eyeButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+    continueButton: {
+      backgroundColor: C.backgroundbutton,
+      paddingVertical: 18,
+      borderRadius: 50,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 56,
+      marginTop: 2,
+    },
 
-  bottomSection: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
+    disabledButton: {
+      opacity: 0.7,
+    },
 
-  continueButton: {
-    backgroundColor: '#1a5c35',
-    paddingVertical: 18,
-    borderRadius: 50,
-    alignItems: 'center',
-  },
+    continueText: {
+      color: '#ffffff',
+      fontSize: 16,
+      fontWeight: '900',
+    },
 
-  disabledButton: {
-    opacity: 0.7,
-  },
+    signinLink: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 18,
+    },
 
-  continueText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-});
+    signinText: {
+      color: C.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+
+    signinTextBold: {
+      color: C.primary,
+      fontWeight: '900',
+    },
+  });

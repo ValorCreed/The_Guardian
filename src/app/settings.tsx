@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  AppState,
+  Animated,
+  KeyboardAvoidingView,
+  Modal,
+  Easing,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Switch,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -14,22 +20,26 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BlurView } from 'expo-blur';
 import {
   Bell,
   ChevronRight,
   CloudUpload,
   Crown,
-  Download,
   Fingerprint,
+  Info,
   Lock,
   LockKeyhole,
+  KeyRound,
   Palette,
+  ShieldAlert,
+  Smartphone,
   Trash2,
   Wand2,
 } from 'lucide-react-native';
-import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useBlurTarget } from '../context/BlurTargetContext';
 import { api, logout } from '../services/api';
 import {
   clearBiometricCredentials,
@@ -45,6 +55,8 @@ const TIMEOUT_OPTIONS = [
   { label: '1 hour', value: 3600000 },
 ];
 
+type SubscriptionPlan = 'FREE' | 'PREMIUM' | 'FAMILY';
+
 const getInitials = (name: string, email: string) => {
   const source = name || email || 'User';
   const parts = source.trim().split(/\s+/).filter(Boolean);
@@ -56,20 +68,192 @@ const getInitials = (name: string, email: string) => {
   return source.slice(0, 2).toUpperCase();
 };
 
+function PlanBadge({
+  plan,
+  loading,
+  C,
+  isDark,
+}: {
+  plan: SubscriptionPlan;
+  loading: boolean;
+  C: any;
+  isDark: boolean;
+}) {
+  const blurTarget = useBlurTarget();
+
+  const pulseOpacity = useRef(new Animated.Value(0.45)).current;
+  const pulseScale = useRef(new Animated.Value(0.96)).current;
+  const badgeOpacity = useRef(new Animated.Value(0)).current;
+  const badgeScale = useRef(new Animated.Value(0.92)).current;
+
+  useEffect(() => {
+    if (loading) {
+      badgeOpacity.setValue(0);
+      badgeScale.setValue(0.92);
+
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.parallel([
+            Animated.timing(pulseOpacity, {
+              toValue: 1,
+              duration: 650,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseScale, {
+              toValue: 1.04,
+              duration: 650,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
+          ]),
+          Animated.parallel([
+            Animated.timing(pulseOpacity, {
+              toValue: 0.45,
+              duration: 650,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
+            Animated.timing(pulseScale, {
+              toValue: 0.96,
+              duration: 650,
+              easing: Easing.inOut(Easing.quad),
+              useNativeDriver: true,
+            }),
+          ]),
+        ])
+      );
+
+      pulse.start();
+
+      return () => {
+        pulse.stop();
+      };
+    }
+
+    Animated.parallel([
+      Animated.timing(badgeOpacity, {
+        toValue: 1,
+        duration: 180,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.spring(badgeScale, {
+        toValue: 1,
+        friction: 7,
+        tension: 160,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [loading, badgeOpacity, badgeScale, pulseOpacity, pulseScale]);
+
+  const planLabel = plan.charAt(0) + plan.slice(1).toLowerCase();
+
+  const isFree = plan === 'FREE';
+  const isFamily = plan === 'FAMILY';
+
+  const badgeBackground = isFree
+    ? C.backgroundSelected
+    : isFamily
+      ? C.primary
+      : C.securityScoreBg;
+
+  const badgeTextColor = isFree
+    ? C.textSecondary
+    : isFamily
+      ? '#FFFFFF'
+      : C.warning;
+
+  const loadingBorderColor = isDark
+    ? 'rgba(255,255,255,0.14)'
+    : 'rgba(255,255,255,0.75)';
+
+  const loadingBackground = isDark
+    ? 'rgba(255,255,255,0.08)'
+    : 'rgba(255,255,255,0.46)';
+
+  if (loading) {
+    return (
+      <Animated.View
+        style={[
+          localStyles.loadingBadgeWrap,
+          {
+            opacity: pulseOpacity,
+            transform: [{ scale: pulseScale }],
+          },
+        ]}
+      >
+        {Platform.OS === 'ios' ? (
+          <BlurView
+            blurTarget={blurTarget?.targetRef}
+            intensity={18}
+            tint={isDark ? 'dark' : 'light'}
+            style={[
+              localStyles.loadingBadge,
+              {
+                borderColor: loadingBorderColor,
+                backgroundColor: loadingBackground,
+              },
+            ]}
+          >
+            <View style={[localStyles.loadingDot, { backgroundColor: C.primary }]} />
+            <Text style={[localStyles.loadingText, { color: C.textSecondary }]}>
+              Loading
+            </Text>
+          </BlurView>
+        ) : (
+          <View
+            style={[
+              localStyles.loadingBadge,
+              {
+                borderColor: loadingBorderColor,
+                backgroundColor: loadingBackground,
+              },
+            ]}
+          >
+            <View style={[localStyles.loadingDot, { backgroundColor: C.primary }]} />
+            <Text style={[localStyles.loadingText, { color: C.textSecondary }]}>
+              Loading
+            </Text>
+          </View>
+        )}
+      </Animated.View>
+    );
+  }
+
+  return (
+    <Animated.View
+      style={[
+        localStyles.loadedBadge,
+        {
+          opacity: badgeOpacity,
+          transform: [{ scale: badgeScale }],
+          backgroundColor: badgeBackground,
+        },
+      ]}
+    >
+      <Text style={[localStyles.loadedBadgeText, { color: badgeTextColor }]}>
+        {planLabel}
+      </Text>
+    </Animated.View>
+  );
+}
+
 export default function SettingsScreen() {
   const { isDark, toggleTheme, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [fullName, setFullName] = useState('User');
   const [email, setEmail] = useState('');
-  const [plan, setPlan] = useState<'FREE' | 'PREMIUM' | 'FAMILY'>('FREE');
+  const [plan, setPlan] = useState<SubscriptionPlan>('FREE');
+  const [planLoading, setPlanLoading] = useState(true);
   const [biometricUnlock, setBiometricUnlock] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [selectedTimeout, setSelectedTimeout] = useState(TIMEOUT_OPTIONS[1]);
-  const [showTimeoutPicker, setShowTimeoutPicker] = useState(false);
-
-  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const appState = useRef(AppState.currentState);
+  const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+  const [deleteModalVisible, setDeleteModalVisible] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
 
   const loadSettings = useCallback(async () => {
     const savedName = await AsyncStorage.getItem('userName');
@@ -96,10 +280,24 @@ export default function SettingsScreen() {
     setBiometricAvailable(compatible && enrolled);
 
     try {
+      setPlanLoading(true);
+
       const subscription = await api.getSubscription();
-      setPlan(subscription.plan || 'FREE');
+      const loadedPlan = subscription.plan || 'FREE';
+
+      if (
+        loadedPlan === 'FREE' ||
+        loadedPlan === 'PREMIUM' ||
+        loadedPlan === 'FAMILY'
+      ) {
+        setPlan(loadedPlan);
+      } else {
+        setPlan('FREE');
+      }
     } catch {
       setPlan('FREE');
+    } finally {
+      setPlanLoading(false);
     }
   }, []);
 
@@ -110,55 +308,10 @@ export default function SettingsScreen() {
   );
 
   const lockVault = useCallback(async () => {
-    if (inactivityTimer.current) {
-      clearTimeout(inactivityTimer.current);
-      inactivityTimer.current = null;
-    }
-
     await AsyncStorage.setItem('vaultLocked', 'true');
     await logout();
     router.replace('/signin');
   }, []);
-
-  const resetTimer = useCallback(() => {
-    if (inactivityTimer.current) {
-      clearTimeout(inactivityTimer.current);
-    }
-
-    inactivityTimer.current = setTimeout(() => {
-      lockVault();
-    }, selectedTimeout.value);
-  }, [lockVault, selectedTimeout.value]);
-
-  useEffect(() => {
-    resetTimer();
-
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (
-        appState.current === 'active' &&
-        (nextState === 'background' || nextState === 'inactive')
-      ) {
-        lockVault();
-      }
-
-      if (
-        (appState.current === 'background' || appState.current === 'inactive') &&
-        nextState === 'active'
-      ) {
-        resetTimer();
-      }
-
-      appState.current = nextState;
-    });
-
-    return () => {
-      if (inactivityTimer.current) {
-        clearTimeout(inactivityTimer.current);
-      }
-
-      subscription.remove();
-    };
-  }, [lockVault, resetTimer]);
 
   const handleBiometricToggle = async (value: boolean) => {
     if (!value) {
@@ -212,18 +365,105 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleDeleteAccount = () => {
+  const closeDeleteModal = () => {
+    if (deleteAccountLoading) return;
+
+    setDeleteModalVisible(false);
+    setDeletePassword('');
+    setDeleteConfirmText('');
+  };
+
+  const performDeleteAccount = async () => {
+    if (deleteAccountLoading) return;
+
+    const cleanPassword = deletePassword;
+    const cleanConfirm = deleteConfirmText.trim().toUpperCase();
+
+    if (!cleanPassword) {
+      Alert.alert('Password required', 'Enter your account password to continue.');
+      return;
+    }
+
+    if (cleanConfirm !== 'DELETE') {
+      Alert.alert('Confirmation required', 'Type DELETE to confirm account deletion.');
+      return;
+    }
+
     Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account and all data. This cannot be undone.',
+      'Delete account permanently?',
+      'This will permanently remove your account and vault data. This action cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => {} },
+        {
+          text: 'Delete forever',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeleteAccountLoading(true);
+
+              await api.deleteAccount({ password: cleanPassword });
+
+              await clearBiometricCredentials();
+              await setBiometricEnabled(false);
+              await AsyncStorage.multiRemove([
+                'token',
+                'userName',
+                'userEmail',
+                'subscriptionPlan',
+                'emailVerified',
+                'twoFactorEnabled',
+                'vaultLocked',
+                'biometricUnlock',
+                'autoLockTimeout',
+              ]);
+
+              await logout();
+
+              setDeleteModalVisible(false);
+              setDeletePassword('');
+              setDeleteConfirmText('');
+
+              Alert.alert(
+                'Account deleted',
+                'Your account and vault data have been deleted.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => router.replace('/login'),
+                  },
+                ]
+              );
+            } catch (error: any) {
+              Alert.alert(
+                'Could not delete account',
+                error.message || 'Something went wrong. Please try again.'
+              );
+            } finally {
+              setDeleteAccountLoading(false);
+            }
+          },
+        },
       ]
     );
   };
 
-  const planLabel = plan.charAt(0) + plan.slice(1).toLowerCase();
+  const handleDeleteAccount = () => {
+    if (deleteAccountLoading) return;
+
+    Alert.alert(
+      'Delete Account',
+      'For your safety, you will need to enter your account password and type DELETE before this account can be removed.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          style: 'destructive',
+          onPress: () => setDeleteModalVisible(true),
+        },
+      ]
+    );
+  };
+
   const iconColor = C.text;
   const destructiveIconColor = C.danger;
 
@@ -231,11 +471,10 @@ export default function SettingsScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      <TouchableOpacity activeOpacity={1} onPress={resetTimer} style={{ flex: 1 }}>
+      <View style={{ flex: 1 }}>
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
-          onScrollBeginDrag={resetTimer}
         >
           <Text style={styles.title}>Settings</Text>
 
@@ -253,16 +492,7 @@ export default function SettingsScreen() {
               <Text style={styles.accountEmail}>{email || 'No email found'}</Text>
             </View>
 
-            <View style={[styles.planBadge, plan === 'FREE' && styles.freeBadge]}>
-              <Text
-                style={[
-                  styles.planBadgeText,
-                  plan === 'FREE' && styles.freeBadgeText,
-                ]}
-              >
-                {planLabel}
-              </Text>
-            </View>
+            <PlanBadge plan={plan} loading={planLoading} C={C} isDark={isDark} />
 
             <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 8 }} />
           </TouchableOpacity>
@@ -273,50 +503,21 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => setShowTimeoutPicker((current) => !current)}
+              onPress={() => router.push('/autolock')}
             >
               <View style={styles.iconCircle}>
                 <Lock size={20} color={iconColor} />
               </View>
 
-              <Text style={styles.rowLabel}>Auto-lock timeout</Text>
-              <Text style={styles.rowValue}>{selectedTimeout.label}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Auto-lock timeout</Text>
+                <Text style={styles.rowSub}>
+                  Locks after leaving app for {selectedTimeout.label}
+                </Text>
+              </View>
+
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
-
-            {showTimeoutPicker && (
-              <View style={styles.timeoutPicker}>
-                {TIMEOUT_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option.value}
-                    style={styles.timeoutOption}
-                    onPress={async () => {
-                      setSelectedTimeout(option);
-                      setShowTimeoutPicker(false);
-                      await AsyncStorage.setItem(
-                        'autoLockTimeout',
-                        String(option.value)
-                      );
-                      resetTimer();
-                    }}
-                  >
-                    <Text
-                      style={[
-                        styles.timeoutOptionText,
-                        selectedTimeout.value === option.value &&
-                          styles.timeoutOptionActive,
-                      ]}
-                    >
-                      {option.label}
-                    </Text>
-
-                    {selectedTimeout.value === option.value && (
-                      <Ionicons name="checkmark" size={18} color={C.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
 
             <View style={[styles.row, styles.rowDivider]}>
               <View style={styles.iconCircle}>
@@ -340,7 +541,26 @@ export default function SettingsScreen() {
             </View>
 
             <TouchableOpacity
-              style={styles.row}
+              style={[styles.row, styles.rowDivider]}
+              activeOpacity={0.6}
+              onPress={() => router.push('/twofasetup')}
+            >
+              <View style={styles.iconCircle}>
+                <KeyRound size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Two-factor authentication</Text>
+                <Text style={styles.rowSub}>
+                  Adds extra verification during sign in
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
               onPress={() => router.push('/autofill')}
             >
@@ -348,7 +568,51 @@ export default function SettingsScreen() {
                 <Wand2 size={20} color={iconColor} />
               </View>
 
-              <Text style={styles.rowLabel}>Auto-fill</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Auto-fill</Text>
+                <Text style={styles.rowSub}>
+                  Sync saved logins and enable Android Autofill
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
+              activeOpacity={0.6}
+              onPress={() => router.push('/devices')}
+            >
+              <View style={styles.iconCircle}>
+                <Smartphone size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Trusted devices</Text>
+                <Text style={styles.rowSub}>
+                  Review active sessions and log out devices you do not recognize
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => router.push('/emergencyaccess')}
+            >
+              <View style={styles.iconCircle}>
+                <ShieldAlert size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Emergency access</Text>
+                <Text style={styles.rowSub}>
+                  Add trusted contacts and manage emergency vault requests
+                </Text>
+              </View>
+
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
           </View>
@@ -372,12 +636,22 @@ export default function SettingsScreen() {
               />
             </View>
 
-            <TouchableOpacity style={styles.row} activeOpacity={0.6} onPress={() => {}}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => router.push('/notifications')}
+            >
               <View style={styles.iconCircle}>
                 <Bell size={20} color={iconColor} />
               </View>
 
-              <Text style={styles.rowLabel}>Notifications</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Notifications</Text>
+                <Text style={styles.rowSub}>
+                  Subscription, backup, vault, and family alerts
+                </Text>
+              </View>
+
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
           </View>
@@ -388,27 +662,20 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => {}}
-            >
-              <View style={styles.iconCircle}>
-                <Download size={20} color={iconColor} />
-              </View>
-
-              <Text style={styles.rowLabel}>Export data</Text>
-              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.row, styles.rowDivider]}
-              activeOpacity={0.6}
-              onPress={() => {}}
+              onPress={() => router.push('/backup')}
             >
               <View style={styles.iconCircle}>
                 <CloudUpload size={20} color={iconColor} />
               </View>
 
-              <Text style={styles.rowLabel}>Backup</Text>
-              <Text style={styles.rowValue}>Today</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Backup</Text>
+                <Text style={styles.rowSub}>
+                  Encrypted vault export for Premium and Family accounts
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -421,6 +688,30 @@ export default function SettingsScreen() {
               </View>
 
               <Text style={styles.rowLabel}>Subscription</Text>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sectionLabel}>ABOUT</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => router.push('/about')}
+            >
+              <View style={styles.iconCircle}>
+                <Info size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>About The Guardian</Text>
+                <Text style={styles.rowSub}>
+                  App version, developers, and company information
+                </Text>
+              </View>
+
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
           </View>
@@ -451,13 +742,20 @@ export default function SettingsScreen() {
               style={styles.row}
               activeOpacity={0.6}
               onPress={handleDeleteAccount}
+              disabled={deleteAccountLoading}
             >
               <View style={styles.dangerIconCircle}>
-                <Trash2 size={20} color={destructiveIconColor} />
+                {deleteAccountLoading ? (
+                  <ActivityIndicator size="small" color={C.danger} />
+                ) : (
+                  <Trash2 size={20} color={destructiveIconColor} />
+                )}
               </View>
 
               <View style={{ flex: 1 }}>
-                <Text style={styles.dangerRowLabel}>Delete account</Text>
+                <Text style={styles.dangerRowLabel}>
+                  {deleteAccountLoading ? 'Deleting account...' : 'Delete account'}
+                </Text>
                 <Text style={styles.dangerRowSub}>
                   Permanently removes your account and vault data
                 </Text>
@@ -467,10 +765,128 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </ScrollView>
-      </TouchableOpacity>
+      </View>
+
+      <Modal
+        visible={deleteModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDeleteModal}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.deleteModalCard}>
+            <View style={styles.deleteModalIcon}>
+              <Trash2 size={26} color={C.danger} />
+            </View>
+
+            <Text style={styles.deleteModalTitle}>Verify account deletion</Text>
+            <Text style={styles.deleteModalText}>
+              Enter your account password and type DELETE to permanently remove this account.
+            </Text>
+
+            <Text style={styles.deleteInputLabel}>Account password</Text>
+            <TextInput
+              style={styles.deleteInput}
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+              placeholder="Enter your password"
+              placeholderTextColor={C.tabInactive}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+
+            <Text style={styles.deleteInputLabel}>Type DELETE</Text>
+            <TextInput
+              style={styles.deleteInput}
+              value={deleteConfirmText}
+              onChangeText={setDeleteConfirmText}
+              placeholder="DELETE"
+              placeholderTextColor={C.tabInactive}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+
+            <TouchableOpacity
+              style={[
+                styles.deleteConfirmButton,
+                deleteAccountLoading && styles.deleteDisabledButton,
+              ]}
+              onPress={performDeleteAccount}
+              disabled={deleteAccountLoading}
+              activeOpacity={0.82}
+            >
+              {deleteAccountLoading ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <Trash2 size={18} color="#FFFFFF" />
+              )}
+              <Text style={styles.deleteConfirmButtonText}>
+                {deleteAccountLoading ? 'Deleting...' : 'Delete account permanently'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.deleteCancelButton}
+              onPress={closeDeleteModal}
+              disabled={deleteAccountLoading}
+              activeOpacity={0.75}
+            >
+              <Text style={styles.deleteCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
+
+const localStyles = StyleSheet.create({
+  loadingBadgeWrap: {
+    minWidth: 88,
+    height: 31,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+
+  loadingBadge: {
+    minWidth: 88,
+    height: 31,
+    borderRadius: 16,
+    borderWidth: 1,
+    overflow: 'hidden',
+    paddingHorizontal: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  loadingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginRight: 7,
+  },
+
+  loadingText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+  loadedBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+
+  loadedBadgeText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+});
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
@@ -534,27 +950,6 @@ const makeStyles = (C: any) =>
       marginTop: 2,
     },
 
-    planBadge: {
-      backgroundColor: C.securityScoreBg,
-      paddingHorizontal: 12,
-      paddingVertical: 6,
-      borderRadius: 14,
-    },
-
-    planBadgeText: {
-      fontSize: 13,
-      fontWeight: '700',
-      color: C.warning,
-    },
-
-    freeBadge: {
-      backgroundColor: C.backgroundSelected,
-    },
-
-    freeBadgeText: {
-      color: C.textSecondary,
-    },
-
     sectionLabel: {
       fontSize: 12,
       fontWeight: '700',
@@ -607,36 +1002,97 @@ const makeStyles = (C: any) =>
       lineHeight: 16,
     },
 
-    rowValue: {
-      fontSize: 15,
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: 'rgba(0,0,0,0.62)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 22,
+    },
+
+    deleteModalCard: {
+      width: '100%',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      padding: 20,
+      borderWidth: 1,
+      borderColor: C.danger,
+    },
+
+    deleteModalIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 27,
+      backgroundColor: C.alertDangerBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 12,
+    },
+
+    deleteModalTitle: {
+      color: C.text,
+      fontSize: 21,
+      fontWeight: '900',
+      marginBottom: 8,
+    },
+
+    deleteModalText: {
       color: C.textSecondary,
-      marginRight: 2,
+      fontSize: 13,
+      lineHeight: 19,
+      marginBottom: 18,
     },
 
-    timeoutPicker: {
+    deleteInputLabel: {
+      color: C.text,
+      fontSize: 13,
+      fontWeight: '800',
+      marginBottom: 8,
+    },
+
+    deleteInput: {
       backgroundColor: C.background,
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
+      color: C.text,
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      marginBottom: 14,
+      fontSize: 15,
     },
 
-    timeoutOption: {
+    deleteConfirmButton: {
+      backgroundColor: C.danger,
+      borderRadius: 999,
+      paddingVertical: 15,
       flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingVertical: 12,
-      paddingHorizontal: 20,
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
+      justifyContent: 'center',
+      gap: 9,
+      marginTop: 4,
     },
 
-    timeoutOptionText: {
-      fontSize: 15,
+    deleteDisabledButton: {
+      opacity: 0.65,
+    },
+
+    deleteConfirmButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '900',
+    },
+
+    deleteCancelButton: {
+      alignItems: 'center',
+      paddingVertical: 13,
+      marginTop: 8,
+    },
+
+    deleteCancelButtonText: {
       color: C.textSecondary,
-    },
-
-    timeoutOptionActive: {
-      color: C.primary,
-      fontWeight: '700',
+      fontSize: 14,
+      fontWeight: '800',
     },
 
     dangerCard: {

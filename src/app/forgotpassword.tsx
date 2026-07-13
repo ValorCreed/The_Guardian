@@ -1,115 +1,315 @@
 import React, { useState } from 'react';
 import {
-  StyleSheet, Text, View, TouchableOpacity,
-  TextInput, Alert, useColorScheme,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/theme';
 
-const ForgotPasswordScreen = () => {
-  const router = useRouter();
-  const rawScheme = useColorScheme();
-  const scheme: 'light' | 'dark' = rawScheme === 'dark' ? 'dark' : 'light';
-  const C = Colors[scheme];
+import { api } from '../services/api';
+import { useAppTheme } from '../context/ThemeContext';
+
+export default function ForgotPasswordScreen() {
+  const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [email, setEmail] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = () => {
-    if (!email) {
-      Alert.alert('Error', 'Please enter your email address.');
+  const handleSubmit = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanEmail) {
+      Alert.alert('Email required', 'Please enter your email address.');
       return;
     }
-    Alert.alert(
-      'Recovery Email Sent',
-      'If an account exists for this email, you will receive recovery instructions.',
-      [{ text: 'OK', onPress: () => router.back() }]
-    );
+
+    try {
+      setLoading(true);
+
+      await api.forgotPassword({ email: cleanEmail });
+
+      Alert.alert(
+        'Reset code sent',
+        'If this email belongs to a verified account, a password reset code has been sent.',
+        [
+          {
+            text: 'Enter code',
+            onPress: () => {
+              router.push({
+                pathname: '/resetpassword',
+                params: {
+                  email: cleanEmail,
+                },
+              });
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert(
+        'Could not send reset code',
+        error.message || 'Please check your email and try again.'
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="chevron-back" size={20} color={C.text} />
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <StatusBar
+        barStyle={isDark ? 'light-content' : 'dark-content'}
+        backgroundColor={C.background}
+      />
 
-      <View style={styles.content}>
-        <View style={styles.iconBox}>
-          <Ionicons name="lock-open-outline" size={32} color={C.primary} />
-        </View>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.heroIcon}>
+            <Ionicons name="lock-open-outline" size={36} color="#FFFFFF" />
+          </View>
 
-        <Text style={styles.title}>Forgot Password?</Text>
-        <Text style={styles.subtitle}>
-          Enter your email address and we'll send you instructions to recover your vault.
-        </Text>
+          <Text style={styles.title}>Forgot password?</Text>
 
-        <View style={styles.warningBox}>
-          <Ionicons name="warning-outline" size={18} color={C.warning} />
-          <Text style={styles.warningText}>
-            Due to zero-knowledge encryption, we cannot recover your master password. You can only reset access if you saved your recovery kit.
+          <Text style={styles.subtitle}>
+            Enter your email address and we’ll send you a code to reset your
+            password.
           </Text>
-        </View>
 
-        <Text style={styles.label}>Email Address</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="you@example.com"
-          placeholderTextColor={C.tabInactive}
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          autoCorrect={false}
-        />
-      </View>
+          <View style={styles.infoCard}>
+            <View style={styles.infoIcon}>
+              <Ionicons
+                name="shield-checkmark-outline"
+                size={20}
+                color={C.primary}
+              />
+            </View>
 
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
-          <Text style={styles.submitBtnText}>Send Recovery Email</Text>
-        </TouchableOpacity>
-      </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoTitle}>Secure reset</Text>
+              <Text style={styles.infoText}>
+                For your safety, password reset only works for verified email
+                accounts.
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.warningBox}>
+            <Ionicons name="warning-outline" size={20} color={C.warning} />
+
+            <Text style={styles.warningText}>
+              The Guardian cannot reveal your old password. You can only create
+              a new one after confirming your reset code.
+            </Text>
+          </View>
+
+          <Text style={styles.label}>Email address</Text>
+
+          <TextInput
+            style={styles.input}
+            placeholder="you@example.com"
+            placeholderTextColor={C.tabInactive}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            autoCorrect={false}
+            editable={!loading}
+          />
+
+          <TouchableOpacity
+            style={[styles.submitButton, loading && styles.disabledButton]}
+            activeOpacity={0.85}
+            onPress={handleSubmit}
+            disabled={loading}
+          >
+            {loading ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <Text style={styles.submitButtonText}>Send reset code</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            activeOpacity={0.75}
+            onPress={() => router.back()}
+            disabled={loading}
+          >
+            <Text style={styles.secondaryButtonText}>Back to sign in</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
-};
+}
 
-export default ForgotPasswordScreen;
-
-const makeStyles = (C: typeof Colors.light | typeof Colors.dark) =>
+const makeStyles = (C: any) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: C.background },
-    header: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 8 },
-    backBtn: {
-      width: 36, height: 36, backgroundColor: C.backgroundSelected,
-      borderRadius: 18, justifyContent: 'center', alignItems: 'center',
+    safeArea: {
+      flex: 1,
+      backgroundColor: C.background,
     },
-    content: { flex: 1, paddingHorizontal: 24, paddingTop: 16 },
-    iconBox: {
-      width: 72, height: 72, borderRadius: 36,
-      backgroundColor: C.actionCard,
-      justifyContent: 'center', alignItems: 'center', marginBottom: 24,
+
+    flex: {
+      flex: 1,
     },
-    title: { fontSize: 28, fontWeight: 'bold', color: C.text, marginBottom: 10 },
-    subtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 22, marginBottom: 24 },
+
+    scrollContent: {
+      flexGrow: 1,
+      paddingHorizontal: 24,
+      paddingTop: 118,
+      paddingBottom: 44,
+    },
+
+    heroIcon: {
+      width: 82,
+      height: 82,
+      borderRadius: 28,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 24,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.18,
+      shadowRadius: 20,
+      elevation: 6,
+    },
+
+    title: {
+      fontSize: 34,
+      fontWeight: '900',
+      color: C.text,
+      marginBottom: 10,
+      letterSpacing: -0.5,
+    },
+
+    subtitle: {
+      fontSize: 15,
+      color: C.textSecondary,
+      lineHeight: 23,
+      marginBottom: 22,
+    },
+
+    infoCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 16,
+      marginBottom: 14,
+    },
+
+    infoIcon: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      backgroundColor: C.backgroundSelected,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 14,
+    },
+
+    infoTitle: {
+      fontSize: 15,
+      fontWeight: '800',
+      color: C.text,
+      marginBottom: 3,
+    },
+
+    infoText: {
+      fontSize: 13,
+      color: C.textSecondary,
+      lineHeight: 19,
+    },
+
     warningBox: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
       backgroundColor: C.securityScoreBg,
-      borderRadius: 12, padding: 14,
-      flexDirection: 'row', gap: 10, alignItems: 'flex-start', marginBottom: 28,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.warning,
+      padding: 14,
+      gap: 10,
+      marginBottom: 26,
     },
-    warningText: { flex: 1, fontSize: 13, color: C.warning, lineHeight: 20 },
-    label: { fontSize: 14, color: C.text, fontWeight: '600', marginBottom: 8 },
+
+    warningText: {
+      flex: 1,
+      fontSize: 13,
+      color: C.warning,
+      lineHeight: 20,
+      fontWeight: '600',
+    },
+
+    label: {
+      fontSize: 14,
+      color: C.text,
+      fontWeight: '800',
+      marginBottom: 8,
+      marginLeft: 4,
+    },
+
     input: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 50, paddingHorizontal: 20, paddingVertical: 16,
-      fontSize: 15, color: C.text, borderWidth: 1, borderColor: C.border,
+      borderRadius: 24,
+      paddingHorizontal: 18,
+      paddingVertical: 16,
+      fontSize: 15,
+      color: C.text,
+      borderWidth: 1,
+      borderColor: C.border,
+      marginBottom: 18,
     },
-    footer: { paddingHorizontal: 24, paddingBottom: 32 },
-    submitBtn: {
+
+    submitButton: {
       backgroundColor: C.backgroundbutton,
-      paddingVertical: 18, borderRadius: 50, alignItems: 'center',
+      borderRadius: 999,
+      minHeight: 58,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 4,
     },
-    submitBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+
+    disabledButton: {
+      opacity: 0.65,
+    },
+
+    submitButtonText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '900',
+    },
+
+    secondaryButton: {
+      alignItems: 'center',
+      paddingVertical: 18,
+    },
+
+    secondaryButtonText: {
+      color: C.primary,
+      fontSize: 15,
+      fontWeight: '800',
+    },
   });

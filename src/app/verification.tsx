@@ -15,7 +15,7 @@ const EncryptionScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
         {/* Lock icon circle */}
         <View style={styles.iconCircle}>
@@ -100,6 +100,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f4f0',
     paddingHorizontal: 24,
     paddingBottom: 20,
+  },
+  scrollContent: {
+    paddingTop: 96,
   },
 
   iconCircle: {

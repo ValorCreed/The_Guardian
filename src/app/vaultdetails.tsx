@@ -17,6 +17,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useAppTheme } from '../context/ThemeContext';
+import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, VaultItem } from '../services/api';
 import {
   decryptJson,
@@ -52,7 +53,7 @@ const VaultDetailsScreen = () => {
   const router = useRouter();
   const { id, type } = useLocalSearchParams<{
   id: string;
-  type?: 'PASSWORD' | 'CARD' | 'DOCUMENT';
+  type?: 'PASSWORD' | 'CARD' | 'DOCUMENT' | 'NOTE';
 }>();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -282,15 +283,40 @@ const loadItem = async () => {
     }
   };
 
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingBox}>
-          <ActivityIndicator size="large" color={C.primary} />
-          <Text style={styles.loadingText}>Loading item...</Text>
+  const renderDetailsSkeleton = () => (
+    <SafeAreaView style={styles.container}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.skeletonScrollContent}
+      >
+        <PulsingSkeleton styles={styles} style={styles.skeletonHeaderTitle} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonIcon} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonSubtitle} />
+
+        <View style={styles.infoCard}>
+          {[1, 2, 3, 4].map((row, index) => (
+            <View key={`vault-details-skeleton-${row}`}>
+              <View style={styles.skeletonInfoRow}>
+                <View style={{ flex: 1 }}>
+                  <PulsingSkeleton styles={styles} style={styles.skeletonInfoLabel} />
+                  <PulsingSkeleton styles={styles} style={styles.skeletonInfoValue} />
+                </View>
+                <PulsingSkeleton styles={styles} style={styles.skeletonRoundButton} />
+              </View>
+              {index !== 3 && <View style={styles.divider} />}
+            </View>
+          ))}
         </View>
-      </SafeAreaView>
-    );
+
+        <PulsingSkeleton styles={styles} style={styles.skeletonMainButton} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonSecondaryButton} />
+      </ScrollView>
+    </SafeAreaView>
+  );
+
+  if (loading) {
+    return renderDetailsSkeleton();
   }
 
   if (!item) {
@@ -328,9 +354,6 @@ const loadItem = async () => {
     <SafeAreaView style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-back" size={20} color={C.text} />
-          </TouchableOpacity>
           <Text style={styles.headerTitle}>Vault Details</Text>
           <View style={{ width: 36 }} />
         </View>
@@ -558,7 +581,70 @@ const makeStyles = (C: ThemeColors) => {
     container: { flex: 1, backgroundColor: C.background },
     loadingBox: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
     loadingText: { color: C.textSecondary, marginTop: 12, fontSize: 15 },
-    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 16, paddingBottom: 16 },
+    skeletonBlock: {
+      backgroundColor: C.backgroundSelected,
+      borderRadius: 999,
+    },
+    skeletonScrollContent: {
+      paddingHorizontal: 20,
+      paddingTop: 96,
+      paddingBottom: 120,
+      alignItems: 'center',
+    },
+    skeletonHeaderTitle: {
+      width: 140,
+      height: 18,
+      marginBottom: 28,
+    },
+    skeletonIcon: {
+      width: 72,
+      height: 72,
+      borderRadius: 24,
+      marginBottom: 18,
+    },
+    skeletonTitle: {
+      width: '64%',
+      height: 24,
+      marginBottom: 10,
+    },
+    skeletonSubtitle: {
+      width: '44%',
+      height: 13,
+      marginBottom: 22,
+    },
+    skeletonInfoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      paddingVertical: 4,
+    },
+    skeletonInfoLabel: {
+      width: 76,
+      height: 11,
+      marginBottom: 8,
+    },
+    skeletonInfoValue: {
+      width: '72%',
+      height: 15,
+    },
+    skeletonRoundButton: {
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+    },
+    skeletonMainButton: {
+      width: '100%',
+      height: 54,
+      borderRadius: 999,
+      marginTop: 8,
+    },
+    skeletonSecondaryButton: {
+      width: '100%',
+      height: 54,
+      borderRadius: 999,
+      marginTop: 10,
+    },
+    header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 96, paddingBottom: 16 },
     backBtn: { width: 36, height: 36, backgroundColor: C.backgroundSelected, borderRadius: 18, justifyContent: 'center', alignItems: 'center' },
     headerTitle: { fontSize: 18, fontWeight: '800', color: C.text },
     content: { paddingHorizontal: 20, alignItems: 'center' },

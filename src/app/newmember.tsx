@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { CreditCard, FileText, KeyRound, Mail, UserPlus } from 'lucide-react-native';
+import { CreditCard, FileText, KeyRound, Mail, NotebookText, UserPlus } from 'lucide-react-native';
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
@@ -26,6 +26,7 @@ export default function NewMemberScreen() {
   const [sharePasswords, setSharePasswords] = useState(true);
   const [shareCards, setShareCards] = useState(false);
   const [shareDocuments, setShareDocuments] = useState(false);
+  const [shareNotes, setShareNotes] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleAddMember = async () => {
@@ -36,8 +37,8 @@ export default function NewMemberScreen() {
       return;
     }
 
-    if (!sharePasswords && !shareCards && !shareDocuments) {
-      Alert.alert('Choose what to share', 'Select at least one vault type: passwords, cards, or documents.');
+    if (!sharePasswords && !shareCards && !shareDocuments && !shareNotes) {
+      Alert.alert('Choose what to share', 'Select at least one vault type: passwords, cards, documents, or secure notes.');
       return;
     }
 
@@ -47,6 +48,7 @@ export default function NewMemberScreen() {
         sharePasswords,
         shareCards,
         shareDocuments,
+        shareNotes,
       });
       api.clearCache();
 
@@ -69,10 +71,6 @@ export default function NewMemberScreen() {
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
       >
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-
         <View style={styles.iconBox}>
           <UserPlus size={34} color="#fff" />
         </View>
@@ -130,6 +128,17 @@ export default function NewMemberScreen() {
             subtitle="Share uploaded encrypted documents"
             value={shareDocuments}
             onChange={setShareDocuments}
+            C={C}
+            styles={styles}
+            divider
+          />
+
+          <PermissionRow
+            icon={<NotebookText size={20} color={C.primary} />}
+            title="Secure notes"
+            subtitle="Share encrypted notes, recovery codes, and private text"
+            value={shareNotes}
+            onChange={setShareNotes}
             C={C}
             styles={styles}
           />
@@ -192,7 +201,7 @@ function PermissionRow({
 const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
-    scrollContent: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 150 },
+    scrollContent: { paddingHorizontal: 20, paddingTop: 100, paddingBottom: 150 },
     backButton: { marginTop: 6, marginBottom: 30 },
     backText: { color: C.text, fontSize: 18, fontWeight: '600' },
     iconBox: {

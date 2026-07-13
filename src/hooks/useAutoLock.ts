@@ -1,55 +1,137 @@
 import { useCallback, useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
+
 import { logout } from '../services/api';
 
 const DEFAULT_TIMEOUT = 60000;
+const LAST_BACKGROUND_AT_KEY = 'lastBackgroundAt';
+
+const AUTH_SCREENS = [
+  '/',
+  '/index',
+  '/login',
+  '/signin',
+  '/signup',
+  '/forgotpassword',
+  '/verifyemail',
+  '/twofactor',
+  '/verification',
+];
+
+const shouldUseAutoLock = (pathname: string) => {
+  return !AUTH_SCREENS.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`)
+  );
+};
+
+export const getAutoLockTimeout = async () => {
+  const savedTimeout = await AsyncStorage.getItem('autoLockTimeout');
+  const timeout = savedTimeout ? Number(savedTimeout) : DEFAULT_TIMEOUT;
+
+  if (!Number.isFinite(timeout) || timeout <= 0) {
+    return DEFAULT_TIMEOUT;
+  }
+
+  return timeout;
+};
+
+export const setAutoLockTimeout = async (timeout: number) => {
+  await AsyncStorage.setItem('autoLockTimeout', String(timeout));
+};
+
+export const formatAutoLockTimeout = (timeout: number) => {
+  if (timeout < 60000) return `${Math.round(timeout / 1000)} seconds`;
+  if (timeout < 3600000) return `${Math.round(timeout / 60000)} minute${timeout === 60000 ? '' : 's'}`;
+  return `${Math.round(timeout / 3600000)} hour${timeout === 3600000 ? '' : 's'}`;
+};
 
 export const useAutoLock = () => {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const appState = useRef(AppState.currentState);
+  const pathname = usePathname();
+
+  const appState = useRef<AppStateStatus>(AppState.currentState);
+  const lockingRef = useRef(false);
+  const mountedRef = useRef(false);
 
   const lockVault = useCallback(async () => {
-    if (timer.current) {
-      clearTimeout(timer.current);
-      timer.current = null;
+    if (lockingRef.current) return;
+    if (!shouldUseAutoLock(pathname)) return;
+
+    try {
+      lockingRef.current = true;
+
+      await AsyncStorage.setItem('vaultLocked', 'true');
+      await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+
+      await logout();
+
+      router.replace('/signin');
+    } finally {
+      lockingRef.current = false;
     }
+  }, [pathname]);
 
-    await AsyncStorage.setItem('vaultLocked', 'true');
-    await logout();
-    router.replace('/signin');
-  }, []);
+  const markAppLeftAt = useCallback(async () => {
+    if (!shouldUseAutoLock(pathname)) return;
 
-  const resetAutoLockTimer = useCallback(async () => {
-    if (timer.current) clearTimeout(timer.current);
+    const existing = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
 
-    const savedTimeout = await AsyncStorage.getItem('autoLockTimeout');
-    const timeout = savedTimeout ? Number(savedTimeout) : DEFAULT_TIMEOUT;
+    if (!existing) {
+      await AsyncStorage.setItem(LAST_BACKGROUND_AT_KEY, String(Date.now()));
+    }
+  }, [pathname]);
 
-    timer.current = setTimeout(lockVault, timeout);
-  }, [lockVault]);
+  const checkIfShouldLock = useCallback(async () => {
+    if (!mountedRef.current) return;
+    if (!shouldUseAutoLock(pathname)) return;
+
+    const lastBackgroundAt = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
+
+    if (!lastBackgroundAt) return;
+
+    const timeout = await getAutoLockTimeout();
+    const timeAway = Date.now() - Number(lastBackgroundAt);
+
+    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+
+    if (timeAway >= timeout) {
+      await lockVault();
+    }
+  }, [lockVault, pathname]);
 
   useEffect(() => {
-    resetAutoLockTimer();
+    mountedRef.current = true;
 
-    const subscription = AppState.addEventListener('change', (nextState) => {
-      if (appState.current === 'active' && (nextState === 'background' || nextState === 'inactive')) {
-        lockVault();
+    const subscription = AppState.addEventListener('change', async (nextState) => {
+      const previousState = appState.current;
+
+      const appWasActive = previousState === 'active';
+      const appLeftScreen =
+        nextState === 'inactive' || nextState === 'background';
+
+      const appReturned =
+        (previousState === 'inactive' || previousState === 'background') &&
+        nextState === 'active';
+
+      if (appWasActive && appLeftScreen) {
+        await markAppLeftAt();
       }
 
-      if ((appState.current === 'background' || appState.current === 'inactive') && nextState === 'active') {
-        resetAutoLockTimer();
+      if (appReturned) {
+        await checkIfShouldLock();
       }
 
       appState.current = nextState;
     });
 
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      mountedRef.current = false;
       subscription.remove();
     };
-  }, [lockVault, resetAutoLockTimer]);
+  }, [checkIfShouldLock, markAppLeftAt]);
 
-  return { resetAutoLockTimer, lockVault };
+  return {
+    lockVault,
+  };
 };

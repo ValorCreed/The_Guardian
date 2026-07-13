@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   ScrollView,
   StatusBar,
@@ -12,32 +11,33 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
+  Calendar,
   Copy,
+  CreditCard,
   Eye,
   EyeOff,
-  KeyRound,
-  UserRound,
-  Globe,
-  StickyNote,
-  CreditCard,
   FileText,
-  Calendar,
-  ShieldCheck,
+  Globe,
   Hash,
+  KeyRound,
+  NotebookText,
+  ShieldCheck,
+  StickyNote,
+  UserRound,
 } from 'lucide-react-native';
 import * as Clipboard from 'expo-clipboard';
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import PulsingSkeleton from '../components/PulsingSkeleton';
+import { decryptJson } from '../utils/vaultcrypto';
 
-type SharedItemType = 'PASSWORD' | 'CARD' | 'DOCUMENT';
+type SharedItemType = 'PASSWORD' | 'CARD' | 'DOCUMENT' | 'NOTE';
 
 type DisplayItem = {
   id: number | string;
   itemType: SharedItemType;
-
   title?: string;
-
   usernameValue?: string;
   encryptedPassword?: string;
   encryptedData?: string;
@@ -56,6 +56,10 @@ type DisplayItem = {
   encryptedFileUrl?: string;
   encryptedNotes?: string;
 
+  category?: string | null;
+  encryptedContent?: string;
+  pinned?: boolean;
+
   ownerId?: number;
   ownerName?: string;
   ownerEmail?: string;
@@ -66,6 +70,7 @@ const normalizeItemType = (type?: string | string[]): SharedItemType => {
 
   if (value === 'CARD') return 'CARD';
   if (value === 'DOCUMENT') return 'DOCUMENT';
+  if (value === 'NOTE') return 'NOTE';
 
   return 'PASSWORD';
 };
@@ -88,6 +93,20 @@ const cleanSharedValue = (value?: string | null) => {
     (cleaned.startsWith("'") && cleaned.endsWith("'"))
   ) {
     cleaned = cleaned.slice(1, -1);
+  }
+
+  return cleaned;
+};
+
+const decryptSharedNoteContent = (value?: string | null) => {
+  const cleaned = cleanSharedValue(value);
+
+  if (!cleaned) return '';
+
+  const decrypted = decryptJson<any>(cleaned, null);
+
+  if (decrypted !== null && decrypted !== undefined) {
+    return String(decrypted);
   }
 
   return cleaned;
@@ -158,6 +177,24 @@ export default function SharedVaultDetailsScreen() {
         return;
       }
 
+      if (itemType === 'NOTE') {
+        const data: any = await api.getSharedNoteItem(id);
+
+        setItem({
+          id: data.id,
+          itemType: 'NOTE',
+          title: cleanSharedValue(data.title) || 'Shared secure note',
+          category: cleanSharedValue(data.category),
+          encryptedContent: cleanSharedValue(data.encryptedContent),
+          pinned: Boolean(data.pinned),
+          ownerId: data.ownerId,
+          ownerName: data.ownerName,
+          ownerEmail: data.ownerEmail,
+        });
+
+        return;
+      }
+
       const data: any = await api.getSharedPasswordItem(id);
 
       setItem({
@@ -210,14 +247,41 @@ export default function SharedVaultDetailsScreen() {
     return '•'.repeat(Math.min(cleaned.length, 18));
   };
 
+  const renderSharedSkeleton = () => (
+    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <PulsingSkeleton styles={styles} style={styles.skeletonHeaderIcon} />
+      <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
+      <PulsingSkeleton styles={styles} style={styles.skeletonSubtitle} />
+
+      <View style={styles.card}>
+        {[1, 2, 3, 4].map((row, index) => (
+          <View key={`shared-detail-skeleton-${row}`}>
+            <View style={styles.infoRow}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonInfoIcon} />
+              <View style={{ flex: 1 }}>
+                <PulsingSkeleton styles={styles} style={styles.skeletonInfoLabel} />
+                <PulsingSkeleton styles={styles} style={styles.skeletonInfoValue} />
+              </View>
+              <PulsingSkeleton styles={styles} style={styles.skeletonCopyButton} />
+            </View>
+            {index !== 3 && <View style={styles.divider} />}
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.readOnlyBox}>
+        <PulsingSkeleton styles={styles} style={styles.skeletonReadOnlyTitle} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonReadOnlyText} />
+        <PulsingSkeleton styles={styles} style={styles.skeletonReadOnlyShort} />
+      </View>
+    </ScrollView>
+  );
+
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-        <View style={styles.centered}>
-          <ActivityIndicator color={C.primary} />
-          <Text style={styles.loadingText}>Opening shared item...</Text>
-        </View>
+        {renderSharedSkeleton()}
       </SafeAreaView>
     );
   }
@@ -230,8 +294,10 @@ export default function SharedVaultDetailsScreen() {
     itemType === 'CARD'
       ? cleanSharedValue(item.cardName || item.title) || 'Shared card'
       : itemType === 'DOCUMENT'
-      ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
-      : cleanSharedValue(item.title) || 'Shared password';
+        ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
+        : itemType === 'NOTE'
+          ? cleanSharedValue(item.title) || 'Shared secure note'
+          : cleanSharedValue(item.title) || 'Shared password';
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -241,15 +307,13 @@ export default function SharedVaultDetailsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
-
         <View style={styles.headerIcon}>
           {itemType === 'CARD' ? (
             <CreditCard size={30} color="#fff" />
           ) : itemType === 'DOCUMENT' ? (
             <FileText size={30} color="#fff" />
+          ) : itemType === 'NOTE' ? (
+            <NotebookText size={30} color="#fff" />
           ) : (
             <KeyRound size={30} color="#fff" />
           )}
@@ -275,6 +339,15 @@ export default function SharedVaultDetailsScreen() {
 
         {itemType === 'DOCUMENT' && (
           <SharedDocumentDetails
+            item={item}
+            copyValue={copyValue}
+            styles={styles}
+            C={C}
+          />
+        )}
+
+        {itemType === 'NOTE' && (
+          <SharedNoteDetails
             item={item}
             copyValue={copyValue}
             styles={styles}
@@ -509,6 +582,46 @@ function SharedDocumentDetails({
   );
 }
 
+function SharedNoteDetails({
+  item,
+  copyValue,
+  styles,
+  C,
+}: {
+  item: DisplayItem;
+  copyValue: (label: string, value?: string) => Promise<void>;
+  styles: any;
+  C: any;
+}) {
+  const category = cleanSharedValue(item.category) || 'General';
+  const content = decryptSharedNoteContent(item.encryptedContent);
+
+  return (
+    <View style={styles.card}>
+      <InfoRow
+        icon={<NotebookText size={19} color={C.primary} />}
+        label="Category"
+        value={category}
+        onCopy={() => copyValue('Category', category)}
+        styles={styles}
+        C={C}
+      />
+
+      <View style={styles.divider} />
+
+      <InfoRow
+        icon={<StickyNote size={19} color={C.primary} />}
+        label="Secure note"
+        value={content || 'No note content saved'}
+        onCopy={() => copyValue('Secure note', content)}
+        styles={styles}
+        C={C}
+        multiline
+      />
+    </View>
+  );
+}
+
 function InfoRow({
   icon,
   label,
@@ -596,6 +709,17 @@ function SecretRow({
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonHeaderIcon: { width: 76, height: 76, borderRadius: 24, alignSelf: 'center', marginBottom: 18 },
+    skeletonTitle: { width: '62%', height: 26, alignSelf: 'center', marginBottom: 10 },
+    skeletonSubtitle: { width: '72%', height: 13, alignSelf: 'center', marginBottom: 22 },
+    skeletonInfoIcon: { width: 40, height: 40, borderRadius: 14 },
+    skeletonInfoLabel: { width: '38%', height: 11, marginBottom: 8 },
+    skeletonInfoValue: { width: '78%', height: 15 },
+    skeletonCopyButton: { width: 38, height: 38, borderRadius: 14 },
+    skeletonReadOnlyTitle: { width: '48%', height: 16, marginBottom: 10 },
+    skeletonReadOnlyText: { width: '96%', height: 12, marginBottom: 8 },
+    skeletonReadOnlyShort: { width: '66%', height: 12 },
     safeArea: {
       flex: 1,
       backgroundColor: C.background,
@@ -603,7 +727,7 @@ const makeStyles = (C: any) =>
 
     scrollContent: {
       paddingHorizontal: 18,
-      paddingTop: 24,
+      paddingTop: 100,
       paddingBottom: 140,
     },
 
@@ -617,17 +741,6 @@ const makeStyles = (C: any) =>
       marginTop: 10,
       color: C.textSecondary,
       fontSize: 14,
-    },
-
-    backButton: {
-      alignSelf: 'flex-start',
-      marginBottom: 26,
-    },
-
-    backText: {
-      color: C.text,
-      fontSize: 18,
-      fontWeight: '600',
     },
 
     headerIcon: {

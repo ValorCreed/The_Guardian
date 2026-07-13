@@ -13,7 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Fingerprint, KeyRound, Mail, ShieldCheck, UserRound } from 'lucide-react-native';
+import { ChevronRight, Fingerprint, KeyRound, Mail, ShieldCheck, Smartphone, UserRound } from 'lucide-react-native';
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import {
@@ -42,8 +42,7 @@ export default function UserInfoScreen() {
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
   const [saving2FA, setSaving2FA] = useState(false);
-  
-
+  const [sendingVerification, setSendingVerification] = useState(false);
 
   const loadUserInfo = useCallback(async () => {
     const savedName = await AsyncStorage.getItem('userName');
@@ -121,6 +120,52 @@ export default function UserInfoScreen() {
     await setBiometricEnabled(true);
   };
 
+  const handleEmailVerificationPress = async () => {
+    if (!email) {
+      Alert.alert('Email not found', 'Please sign in again so we can load your email address.');
+      return;
+    }
+
+    try {
+      setSendingVerification(true);
+      await api.resendVerification({ email });
+
+      Alert.alert(
+        'Verification code sent',
+        'We sent a verification code to your email. Enter the code to mark your account as verified.',
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Enter code',
+            onPress: () =>
+              router.push({
+                pathname: '/verifyemail',
+                params: { email, next: 'userinfo', autoSend: 'true' },
+              }),
+          },
+        ]
+      );
+    } catch (error: any) {
+      Alert.alert(
+        'Could not send code',
+        'We could not send a verification code right now. You can still use the app, but your account is safer after email verification. Please try again later from this page.',
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Enter code',
+            onPress: () =>
+              router.push({
+                pathname: '/verifyemail',
+                params: { email, next: 'userinfo', autoSend: 'true' },
+              }),
+          },
+        ]
+      );
+    } finally {
+      setSendingVerification(false);
+    }
+  };
+
   const handleTwoFactorToggle = async (value: boolean) => {
     try {
       setSaving2FA(true);
@@ -129,7 +174,7 @@ export default function UserInfoScreen() {
         if (!emailVerified) {
           Alert.alert(
             'Verify your email first',
-            'You must verify your email before turning on two-factor authentication.',
+            'For your safety, two-factor authentication needs a verified email first. You can still use the app without 2FA, but verification makes account recovery and login codes safer.',
             [
               { text: 'Cancel', style: 'cancel' },
               {
@@ -137,7 +182,7 @@ export default function UserInfoScreen() {
                 onPress: () =>
                   router.push({
                     pathname: '/verifyemail',
-                    params: { email, next: 'userinfo' },
+                    params: { email, next: 'userinfo', autoSend: 'true' },
                   }),
               },
             ]
@@ -208,9 +253,6 @@ export default function UserInfoScreen() {
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backButton} activeOpacity={0.7} onPress={() => router.back()}>
-            <ChevronLeft size={24} color={C.text} />
-          </TouchableOpacity>
           <Text style={styles.title}>User Information</Text>
         </View>
 
@@ -240,26 +282,21 @@ export default function UserInfoScreen() {
             <View style={styles.rowTextBox}>
               <Text style={styles.rowLabel}>Email</Text>
               <Text style={styles.rowValue}>{email || 'No email found'}</Text>
-              <Text style={styles.rowSub}>{emailVerified ? 'Verified' : 'Not verified'}</Text>
+              <Text style={styles.rowSub}>
+                {emailVerified
+                  ? 'Account Verified.'
+                  : 'Not verified. You can still use the app, but verification makes password reset and 2FA safer.'}
+              </Text>
             </View>
             {!emailVerified && (
               <TouchableOpacity
-                onPress={() =>
-                    router.push({
-                    pathname: '/verifyemail',
-                    params: {
-                        email,
-                        next: 'userinfo',
-                        autoSend: 'true',
-                    },
-                    })
-                }
-                disabled={!email || emailVerified}
-                >
-                <Text style={{ color: emailVerified ? C.textSecondary : C.primary, fontWeight: '800' }}>
-                    {emailVerified ? 'Verified' : 'Verify'}
-                </Text>
-            </TouchableOpacity>
+                style={[styles.smallButton, sendingVerification && styles.disabledSmallButton]}
+                onPress={handleEmailVerificationPress}
+                disabled={!email || sendingVerification}
+                activeOpacity={0.75}
+              >
+                <Text style={styles.smallButtonText}>{sendingVerification ? 'Sending...' : 'Verify'}</Text>
+              </TouchableOpacity>
             )}
           </View>
 
@@ -289,21 +326,35 @@ export default function UserInfoScreen() {
             />
           </View>
 
-          <View style={styles.row}>
+          <TouchableOpacity
+            style={[styles.row, styles.rowDivider]}
+            activeOpacity={0.7}
+            onPress={() => router.push('/twofasetup')}
+          >
             <View style={styles.iconCircle}><KeyRound size={20} color={C.text} /></View>
             <View style={styles.rowTextBox}>
               <Text style={styles.rowLabel}>Two-factor authentication</Text>
-              <Text style={styles.rowSub}>{twoFactorEnabled ? 'On. Login requires a code.' : 'Off. Login uses password only.'}</Text>
+              <Text style={styles.rowSub}>
+                {twoFactorEnabled ? 'On. Login requires a code.' : 'Off. Tap to enable extra sign-in protection.'}
+              </Text>
             </View>
-            <Switch
-              value={twoFactorEnabled}
-              onValueChange={handleTwoFactorToggle}
-              disabled={saving2FA}
-              trackColor={{ false: C.border, true: C.primary }}
-              thumbColor="#fff"
-              ios_backgroundColor={C.border}
-            />
-          </View>
+            <ChevronRight size={20} color={C.tabInactive} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.row}
+            activeOpacity={0.7}
+            onPress={() => router.push('/devices')}
+          >
+            <View style={styles.iconCircle}><Smartphone size={20} color={C.text} /></View>
+            <View style={styles.rowTextBox}>
+              <Text style={styles.rowLabel}>Trusted devices</Text>
+              <Text style={styles.rowSub}>
+                See active sessions and remove devices you do not recognize.
+              </Text>
+            </View>
+            <ChevronRight size={20} color={C.tabInactive} />
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -313,7 +364,7 @@ export default function UserInfoScreen() {
 const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
-    scrollContent: { paddingHorizontal: 16, paddingTop: 24, paddingBottom: 40 },
+    scrollContent: { paddingHorizontal: 16, paddingTop: 100, paddingBottom: 40 },
     headerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
     backButton: {
       width: 42,
@@ -373,5 +424,6 @@ const makeStyles = (C: any) =>
     rowValue: { fontSize: 14, color: C.textSecondary, marginTop: 3 },
     rowSub: { fontSize: 12, color: C.textSecondary, marginTop: 3, lineHeight: 16 },
     smallButton: { backgroundColor: C.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14 },
+    disabledSmallButton: { opacity: 0.6 },
     smallButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   });
