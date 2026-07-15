@@ -1,25 +1,40 @@
 import React from 'react';
-import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
 
 import { useAppTheme } from '../context/ThemeContext';
-import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const LoginScreen = () => {
+const GUARDIAN_LOGO = require('../assets/ForegroundIconGuardianTrans.png');
+
+const WelcomeScreen = () => {
   const router = useRouter();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.topSection}>
-        <GuardianLogoTile
-          size={100}
-          logoSize={84}
-          radius={28}
-          style={styles.iconBox}
-        />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.content}>
+        <View style={styles.logoWrapper}>
+          <Image source={GUARDIAN_LOGO} style={styles.logoImage} resizeMode="contain" />
+          
+          <Svg
+            width={160}
+            height={20}
+            style={styles.shadowSvg}
+          >
+            <Defs>
+              <RadialGradient id="shadowGrad" cx="50%" cy="50%" rx="50%" ry="50%">
+                <Stop offset="0%" stopColor="#000000" stopOpacity={0.9} />
+                <Stop offset="35%" stopColor="#000000" stopOpacity={0.7} />
+                <Stop offset="100%" stopColor="#000000" stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            {/* Reduced ry for thinness, adjusted rx/cx/cy for concentration */}
+            <Ellipse cx={80} cy={10} rx={82} ry={11.5} fill="url(#shadowGrad)" />
+          </Svg>
+        </View>
 
         <Text style={styles.title}>The Guardian</Text>
 
@@ -29,73 +44,83 @@ const LoginScreen = () => {
         </Text>
       </View>
 
-      <View style={styles.bottomSection}>
+      <View style={styles.buttonGroup}>
         <TouchableOpacity
           style={styles.createButton}
           activeOpacity={0.85}
           onPress={() => router.push('/signup')}
         >
-          <Text style={styles.createButtonText}>Create Account</Text>
+          <Text style={styles.createText}>Create Account</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.signInButton}
+          style={styles.signinButton}
           activeOpacity={0.85}
           onPress={() => router.push('/signin')}
         >
-          <Text style={styles.signInButtonText}>Sign In</Text>
+          <Text style={styles.signinText}>Sign In</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 };
 
-export default LoginScreen;
+export default WelcomeScreen;
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
-    container: {
+    safeArea: {
       flex: 1,
       backgroundColor: C.background,
       justifyContent: 'space-between',
-      paddingHorizontal: 24,
-      paddingBottom: 20,
     },
 
-    topSection: {
+    content: {
       flex: 1,
-      justifyContent: 'center',
       alignItems: 'center',
-      paddingTop: 60,
+      justifyContent: 'center',
+      paddingHorizontal: 32,
     },
 
-    iconBox: {
-      marginBottom: 32,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.2,
-      shadowRadius: 8,
-      elevation: 6,
+    logoWrapper: {
+      width: 200,
+      height: 200,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 28,
+      position: 'relative', // Ensure absolute children position relative to this wrapper
+    },
+
+    logoImage: {
+      width: 200,
+      height: 200,
+      zIndex: 2, // Place the image above the shadow
+    },
+
+    shadowSvg: {
+      position: 'absolute',
+      bottom: -15, // Pushed down slightly below the logo wrapper center
+      zIndex: 1,
     },
 
     title: {
-      fontSize: 34,
-      fontWeight: 'bold',
+      fontSize: 30,
+      fontWeight: '900',
       color: C.text,
-      marginBottom: 16,
-      textAlign: 'center',
+      marginBottom: 14,
     },
 
     subtitle: {
-      fontSize: 16,
+      fontSize: 15,
       color: C.textSecondary,
       textAlign: 'center',
-      lineHeight: 24,
-      paddingHorizontal: 10,
+      lineHeight: 22,
     },
 
-    bottomSection: {
-      gap: 12,
+    buttonGroup: {
+      paddingHorizontal: 24,
+      paddingBottom: 24,
+      gap: 14,
     },
 
     createButton: {
@@ -103,26 +128,30 @@ const makeStyles = (C: any) =>
       paddingVertical: 18,
       borderRadius: 50,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 56,
     },
 
-    createButtonText: {
+    createText: {
       color: '#ffffff',
       fontSize: 16,
-      fontWeight: 'bold',
+      fontWeight: '900',
     },
 
-    signInButton: {
+    signinButton: {
       backgroundColor: C.backgroundElement,
       paddingVertical: 18,
       borderRadius: 50,
       alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 56,
       borderWidth: 1,
       borderColor: C.border,
     },
 
-    signInButtonText: {
+    signinText: {
       color: C.text,
       fontSize: 16,
-      fontWeight: '600',
+      fontWeight: '900',
     },
   });
