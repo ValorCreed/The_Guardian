@@ -1,0 +1,3 @@
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_provider VARCHAR(50);
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS storage_key TEXT;
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS size_bytes BIGINT;

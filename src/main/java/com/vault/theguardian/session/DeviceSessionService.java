@@ -9,8 +9,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -19,8 +21,14 @@ import java.util.UUID;
 
 @Service
 public class DeviceSessionService {
+    public static final String DEVICE_LIMIT_CODE = "DEVICE_LIMIT_REACHED";
+
     private static final String FREE_DEVICE_LIMIT_MESSAGE =
-            "Free plan allows only one active device. Upgrade to Premium or Family, or log out from your other device before signing in here.";
+            DEVICE_LIMIT_CODE + ": Your free plan allows one trusted device at a time. You can remove the previous device and continue on this one.";
+
+    private static final String DEVICE_ID_HEADER = "X-Guardian-Device-Id";
+    private static final String DEVICE_NAME_HEADER = "X-Guardian-Device-Name";
+    private static final String DEVICE_TYPE_HEADER = "X-Guardian-Device-Type";
 
     private final UserSessionRepository userSessionRepository;
     private final JwtService jwtService;
@@ -38,34 +46,51 @@ public class DeviceSessionService {
 
     /*
      * Backward-compatible overload for any older call sites.
-     * AuthService uses the 3-argument method below so plan limits are enforced.
+     * AuthService uses the 4-argument method below so plan limits are enforced.
      */
     @Transactional
     public UserSession createLoginSession(User user, HttpServletRequest request) {
-        return createLoginSession(user, request, true);
+        return createLoginSession(user, request, true, false);
     }
 
     @Transactional
     public UserSession createLoginSession(User user, HttpServletRequest request, boolean multipleDevicesAllowed) {
+        return createLoginSession(user, request, multipleDevicesAllowed, false);
+    }
+
+    @Transactional
+    public UserSession createLoginSession(
+            User user,
+            HttpServletRequest request,
+            boolean multipleDevicesAllowed,
+            boolean forceReplaceDevice
+    ) {
         LocalDateTime now = LocalDateTime.now();
+
         String userAgent = request == null ? "" : safe(request.getHeader("User-Agent"));
         String ipAddress = normalizeIpAddress(extractIpAddress(request));
-        String deviceName = resolveDeviceName(userAgent);
-        String deviceType = resolveDeviceType(userAgent);
+
+        String deviceName = resolveDeviceName(request, userAgent);
+        String deviceType = resolveDeviceType(request, userAgent);
+
+        /*
+         * This is the important fix:
+         * We identify a device by a stable app-generated device ID, not by IP address.
+         */
+        String rawDeviceId = resolveDeviceId(request, userAgent, deviceName, deviceType);
+        String deviceIdHash = sha256(rawDeviceId);
 
         List<UserSession> matchingActiveSessions =
-                userSessionRepository.findByUserAndDeviceTypeAndDeviceNameAndIpAddressAndUserAgentAndActiveTrueOrderByLastSeenAtDesc(
+                userSessionRepository.findByUserAndDeviceIdHashAndActiveTrueOrderByLastSeenAtDesc(
                         user,
-                        deviceType,
-                        deviceName,
-                        ipAddress,
-                        userAgent
+                        deviceIdHash
                 );
 
         if (!matchingActiveSessions.isEmpty()) {
             UserSession primarySession = matchingActiveSessions.get(0);
 
             primarySession.setTokenId(UUID.randomUUID().toString());
+            primarySession.setDeviceIdHash(deviceIdHash);
             primarySession.setDeviceName(deviceName);
             primarySession.setDeviceType(deviceType);
             primarySession.setUserAgent(userAgent);
@@ -75,8 +100,8 @@ public class DeviceSessionService {
             primarySession.setRevokedAt(null);
 
             /*
-             * Clean up older duplicate active sessions from the same device and same IP.
-             * This prevents the user from seeing many old sessions for the same phone/network.
+             * Clean up older duplicate active sessions for this same device.
+             * Same device on a different IP/network remains the same trusted device.
              */
             for (int index = 1; index < matchingActiveSessions.size(); index++) {
                 UserSession duplicate = matchingActiveSessions.get(index);
@@ -87,17 +112,13 @@ public class DeviceSessionService {
             userSessionRepository.saveAll(matchingActiveSessions);
             userSessionRepository.flush();
 
-            /*
-             * Do not send a NEW_DEVICE_LOGIN notification here.
-             * Same device + same IP is treated as the same trusted session.
-             */
             return primarySession;
         }
 
         /*
          * FREE plan rule:
-         * Same device + same IP is allowed because it updates the existing trusted session above.
-         * A different device OR the same device on a different IP counts as another session.
+         * A different device ID counts as a new trusted device.
+         * If the user chooses to continue on this device, forceReplaceDevice revokes the old device.
          */
         if (!multipleDevicesAllowed) {
             collapseDuplicateActiveSessions(user, "");
@@ -105,13 +126,18 @@ public class DeviceSessionService {
             long activeSessionCount = userSessionRepository.countByUserAndActiveTrue(user);
 
             if (activeSessionCount >= 1) {
-                throw new ResponseStatusException(HttpStatus.FORBIDDEN, FREE_DEVICE_LIMIT_MESSAGE);
+                if (!forceReplaceDevice) {
+                    throw new ResponseStatusException(HttpStatus.CONFLICT, FREE_DEVICE_LIMIT_MESSAGE);
+                }
+
+                revokeAllActiveSessionsForDeviceReplacement(user);
             }
         }
 
         UserSession session = UserSession.builder()
                 .tokenId(UUID.randomUUID().toString())
                 .user(user)
+                .deviceIdHash(deviceIdHash)
                 .deviceName(deviceName)
                 .deviceType(deviceType)
                 .userAgent(userAgent)
@@ -124,13 +150,22 @@ public class DeviceSessionService {
 
         UserSession saved = userSessionRepository.save(session);
 
-        /*
-         * Different device OR same device on a different IP becomes a separate trusted session,
-         * so the user should be notified.
-         */
         notificationService.notifyNewDeviceLogin(user, deviceName, ipAddress);
 
         return saved;
+    }
+
+    private void revokeAllActiveSessionsForDeviceReplacement(User user) {
+        List<UserSession> sessions = userSessionRepository.findByUserAndActiveTrue(user);
+        LocalDateTime now = LocalDateTime.now();
+
+        for (UserSession session : sessions) {
+            session.setActive(false);
+            session.setRevokedAt(now);
+        }
+
+        userSessionRepository.saveAll(sessions);
+        userSessionRepository.flush();
     }
 
     @Transactional
@@ -182,11 +217,18 @@ public class DeviceSessionService {
     }
 
     private String sessionIdentityKey(UserSession session) {
+        if (session.getDeviceIdHash() != null && !session.getDeviceIdHash().isBlank()) {
+            return "device:" + session.getDeviceIdHash().trim().toLowerCase(Locale.ROOT);
+        }
+
+        /*
+         * Legacy fallback for rows created before V18.
+         * Do not include IP address here because IP changes should not create a new device.
+         */
         return String.join(
                 "|",
                 cleanKey(session.getDeviceType()),
                 cleanKey(session.getDeviceName()),
-                cleanKey(session.getIpAddress()),
                 cleanKey(session.getUserAgent())
         );
     }
@@ -294,7 +336,32 @@ public class DeviceSessionService {
         return value.trim();
     }
 
-    private String resolveDeviceType(String userAgent) {
+    private String resolveDeviceId(
+            HttpServletRequest request,
+            String userAgent,
+            String deviceName,
+            String deviceType
+    ) {
+        String headerValue = request == null ? "" : safe(request.getHeader(DEVICE_ID_HEADER));
+
+        if (headerValue != null && !headerValue.isBlank()) {
+            return "guardian-device:" + headerValue.trim();
+        }
+
+        /*
+         * Legacy fallback if an older frontend has not been updated yet.
+         * This fallback intentionally avoids IP address.
+         */
+        return "legacy:" + deviceType + "|" + deviceName + "|" + userAgent;
+    }
+
+    private String resolveDeviceType(HttpServletRequest request, String userAgent) {
+        String headerValue = request == null ? "" : safe(request.getHeader(DEVICE_TYPE_HEADER));
+
+        if (headerValue != null && !headerValue.isBlank()) {
+            return headerValue.trim();
+        }
+
         String lower = userAgent.toLowerCase(Locale.ROOT);
 
         if (lower.contains("android")) return "Android";
@@ -306,7 +373,13 @@ public class DeviceSessionService {
         return "Unknown";
     }
 
-    private String resolveDeviceName(String userAgent) {
+    private String resolveDeviceName(HttpServletRequest request, String userAgent) {
+        String headerValue = request == null ? "" : safe(request.getHeader(DEVICE_NAME_HEADER));
+
+        if (headerValue != null && !headerValue.isBlank()) {
+            return headerValue.trim();
+        }
+
         String lower = userAgent.toLowerCase(Locale.ROOT);
 
         if (lower.contains("expo")) return "Expo app";
@@ -318,6 +391,16 @@ public class DeviceSessionService {
         if (lower.contains("macintosh") || lower.contains("mac os")) return "Mac device";
 
         return "Trusted device";
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(value.getBytes());
+            return HexFormat.of().formatHex(hashed);
+        } catch (Exception e) {
+            throw new RuntimeException("Could not create device session hash.");
+        }
     }
 
     private String safe(String value) {

@@ -8,4 +8,11 @@ import java.util.Optional;
 
 public interface SubscriptionRepository extends JpaRepository<Subscription, Long> {
     Optional<Subscription> findByUser(User user);
+
+    /*
+     * Safer lookup for authenticated requests.
+     * The @AuthenticationPrincipal User can be a detached entity from the session,
+     * so checking by the user's id avoids rare false "not family" results.
+     */
+    Optional<Subscription> findByUserId(Long userId);
 }

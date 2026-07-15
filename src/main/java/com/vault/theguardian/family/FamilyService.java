@@ -3,67 +3,71 @@ package com.vault.theguardian.family;
 import com.vault.theguardian.cards.CreditCardEntity;
 import com.vault.theguardian.cards.CreditCardRepository;
 import com.vault.theguardian.documents.DocumentRepository;
+import com.vault.theguardian.documents.DocumentService;
 import com.vault.theguardian.documents.DocumentVault;
 import com.vault.theguardian.notes.SecureNote;
 import com.vault.theguardian.notes.SecureNoteRepository;
 import com.vault.theguardian.notification.NotificationService;
-import com.vault.theguardian.subscription.Subscription;
-import com.vault.theguardian.subscription.SubscriptionPlan;
-import com.vault.theguardian.subscription.SubscriptionRepository;
+import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
+import com.vault.theguardian.vault.VaultCryptoService;
 import com.vault.theguardian.vault.VaultItem;
 import com.vault.theguardian.vault.VaultItemRepository;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import javax.crypto.Cipher;
-import javax.crypto.spec.GCMParameterSpec;
-import javax.crypto.spec.SecretKeySpec;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.LocalDateTime;
-import java.util.Base64;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Predicate;
 
 @Service
 public class FamilyService {
     private static final int FAMILY_MEMBER_LIMIT = 6;
+    private static final int FAMILY_PASSWORD_OLD_DAYS = 180;
 
     private final FamilyGroupRepository familyGroupRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final UserRepository userRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final SubscriptionService subscriptionService;
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
+    private final DocumentService documentService;
     private final SecureNoteRepository secureNoteRepository;
     private final NotificationService notificationService;
-
-    @Value("${VAULT_DOCUMENT_SECRET}")
-    private String documentSecret;
+    private final VaultCryptoService vaultCryptoService;
 
     public FamilyService(FamilyGroupRepository familyGroupRepository,
                          FamilyMemberRepository familyMemberRepository,
                          UserRepository userRepository,
-                         SubscriptionRepository subscriptionRepository,
+                         SubscriptionService subscriptionService,
                          VaultItemRepository vaultItemRepository,
                          CreditCardRepository creditCardRepository,
                          DocumentRepository documentRepository,
+                         DocumentService documentService,
                          SecureNoteRepository secureNoteRepository,
-                         NotificationService notificationService) {
+                         NotificationService notificationService,
+                         VaultCryptoService vaultCryptoService) {
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
         this.userRepository = userRepository;
-        this.subscriptionRepository = subscriptionRepository;
+        this.subscriptionService = subscriptionService;
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
+        this.documentService = documentService;
         this.secureNoteRepository = secureNoteRepository;
         this.notificationService = notificationService;
+        this.vaultCryptoService = vaultCryptoService;
     }
 
     public FamilyOverviewResponse getOverview(User user) {
@@ -98,10 +102,63 @@ public class FamilyService {
         );
     }
 
-    public FamilyMemberResponse addMember(User admin, AddFamilyMemberRequest request) {
-        requireFamilyPlan(admin);
 
-        String cleanEmail = request.email().trim().toLowerCase();
+    public ResponseEntity<Map<String, Object>> lookupPotentialMember(User admin, String email) {
+        String cleanEmail = email == null ? "" : email.trim().toLowerCase();
+
+        if (cleanEmail.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "code", "MISSING_EMAIL",
+                    "message", "Enter the email of the person you want to add."
+            ));
+        }
+
+        if (admin == null || admin.getEmail() == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "code", "UNAUTHENTICATED",
+                    "message", "Please sign in again before adding a family member."
+            ));
+        }
+
+        if (!isFamilyPlan(admin)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of(
+                    "code", "FAMILY_PLAN_REQUIRED",
+                    "message", "Only Family plan users can add members."
+            ));
+        }
+
+        if (admin.getEmail().equalsIgnoreCase(cleanEmail)) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "code", "CANNOT_ADD_SELF",
+                    "message", "You cannot add yourself to your own family group."
+            ));
+        }
+
+        User memberUser = userRepository.findByEmailIgnoreCase(cleanEmail).orElse(null);
+        if (memberUser == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
+                    "code", "ACCOUNT_NOT_FOUND",
+                    "message", "That email is not registered on The Guardian. Ask the person to create an account first, then add them again."
+            ));
+        }
+
+        return ResponseEntity.ok(Map.of(
+                "code", "ACCOUNT_FOUND",
+                "exists", true,
+                "userId", memberUser.getId(),
+                "fullName", safeText(memberUser.getFullName()),
+                "email", safeText(memberUser.getEmail())
+        ));
+    }
+
+    public FamilyMemberResponse addMember(User admin, AddFamilyMemberRequest request) {
+        String cleanEmail = request.email() == null
+                ? ""
+                : request.email().trim().toLowerCase();
+
+        if (cleanEmail.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Enter the email of the person you want to add.");
+        }
 
         if (!request.sharePasswords()
                 && !request.shareCards()
@@ -117,8 +174,23 @@ public class FamilyService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "You cannot add yourself to your own family group.");
         }
 
-        User memberUser = userRepository.findByEmail(cleanEmail)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "No account found with that email."));
+        /*
+         * Check that the invited account exists before trying to create a family member.
+         * This fixes the bad UX where an invalid email could result in a generic 403
+         * or a demo/default member value instead of telling the user that the account
+         * is not registered on The Guardian.
+         */
+        User memberUser = userRepository.findByEmailIgnoreCase(cleanEmail)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "That email is not registered on The Guardian. Ask the person to create an account first, then add them again."
+                ));
+
+        /*
+         * Only after the target user exists do we enforce the Family-plan rule.
+         * If the requester is not Family, they still cannot add anyone.
+         */
+        requireFamilyPlan(admin);
 
         FamilyGroup group = familyGroupRepository.findByAdmin(admin)
                 .orElseGet(() -> familyGroupRepository.save(
@@ -195,7 +267,7 @@ public class FamilyService {
 
         return vaultItemRepository.findByUserIn(owners)
                 .stream()
-                .map(this::toSharedPasswordResponse)
+                .map(this::toSharedPasswordSummaryResponse)
                 .toList();
     }
 
@@ -205,7 +277,7 @@ public class FamilyService {
 
         return creditCardRepository.findByUserIn(owners)
                 .stream()
-                .map(this::toSharedCardResponse)
+                .map(this::toSharedCardSummaryResponse)
                 .toList();
     }
 
@@ -215,7 +287,7 @@ public class FamilyService {
 
         return documentRepository.findByUserIn(owners)
                 .stream()
-                .map(this::toSharedDocumentListResponse)
+                .map(this::toSharedDocumentSummaryResponse)
                 .toList();
     }
 
@@ -225,7 +297,7 @@ public class FamilyService {
 
         return secureNoteRepository.findByUserIn(owners)
                 .stream()
-                .map(this::toSharedNoteResponse)
+                .map(this::toSharedNoteSummaryResponse)
                 .toList();
     }
 
@@ -233,72 +305,121 @@ public class FamilyService {
         VaultItem item = vaultItemRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared password item not found."));
 
-        boolean allowed = getSharedPasswordItems(user)
-                .stream()
-                .anyMatch(sharedItem -> sharedItem.id().equals(itemId));
-
-        if (!allowed) {
+        if (!canAccessOwner(user, item.getUser(), FamilyMember::isSharePasswords)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared password item.");
         }
 
-        return toSharedPasswordResponse(item);
+        return toSharedPasswordDetailResponse(item);
     }
 
     public SharedCardItemResponse getSharedCardItem(User user, Long itemId) {
         CreditCardEntity card = creditCardRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared card not found."));
 
-        boolean allowed = getSharedCardItems(user)
-                .stream()
-                .anyMatch(sharedCard -> sharedCard.id().equals(itemId));
-
-        if (!allowed) {
+        if (!canAccessOwner(user, card.getUser(), FamilyMember::isShareCards)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared card item.");
         }
 
-        return toSharedCardResponse(card);
+        return toSharedCardDetailResponse(card);
     }
 
     public SharedDocumentItemResponse getSharedDocumentItem(User user, Long itemId) {
+        DocumentVault document = getAccessibleSharedDocument(user, itemId);
+        return toSharedDocumentDetailResponse(document);
+    }
+
+    public byte[] getSharedDocumentBytes(User user, Long itemId) {
+        DocumentVault document = getAccessibleSharedDocument(user, itemId);
+        return documentService.getDocumentBytesForSharedAccess(document);
+    }
+
+    public String getSharedDocumentDownloadFileName(User user, Long itemId) {
+        DocumentVault document = getAccessibleSharedDocument(user, itemId);
+        return documentService.getDownloadFileNameForSharedAccess(document);
+    }
+
+    public String getSharedDocumentDownloadContentType(User user, Long itemId) {
+        DocumentVault document = getAccessibleSharedDocument(user, itemId);
+        return documentService.getDownloadContentTypeForSharedAccess(document);
+    }
+
+    private DocumentVault getAccessibleSharedDocument(User user, Long itemId) {
         DocumentVault document = documentRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared document not found."));
 
-        boolean allowed = getSharedDocumentItems(user)
-                .stream()
-                .anyMatch(sharedDocument -> sharedDocument.id().equals(itemId));
-
-        if (!allowed) {
+        if (!canAccessOwner(user, document.getUser(), FamilyMember::isShareDocuments)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared document item.");
         }
 
-        return toSharedDocumentDetailResponse(document);
+        return document;
     }
 
     public SharedNoteItemResponse getSharedNoteItem(User user, Long itemId) {
         SecureNote note = secureNoteRepository.findById(itemId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shared secure note not found."));
 
-        boolean allowed = getSharedNoteItems(user)
-                .stream()
-                .anyMatch(sharedNote -> sharedNote.id().equals(itemId));
-
-        if (!allowed) {
+        if (!canAccessOwner(user, note.getUser(), FamilyMember::isShareNotes)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this shared secure note item.");
         }
 
-        return toSharedNoteResponse(note);
+        return toSharedNoteDetailResponse(note);
+    }
+
+
+    public List<FamilyMemberPasswordRiskResponse> getFamilyMemberPasswordRisks(User admin) {
+        requireFamilyPlan(admin);
+
+        FamilyGroup group = familyGroupRepository.findByAdmin(admin).orElse(null);
+        if (group == null) return List.of();
+
+        List<FamilyMember> members = familyMemberRepository.findByGroup(group);
+        if (members.isEmpty()) return List.of();
+
+        List<User> memberUsers = members.stream()
+                .map(FamilyMember::getUser)
+                .toList();
+
+        if (memberUsers.isEmpty()) return List.of();
+
+        List<VaultItem> items = vaultItemRepository.findByUserIn(memberUsers);
+        if (items.isEmpty()) return List.of();
+
+        Map<Long, String> plainPasswordByItemId = new HashMap<>();
+        Map<String, Integer> passwordUsageCount = new HashMap<>();
+
+        for (VaultItem item : items) {
+            String plainPassword = safeDecryptVaultValue(item.getEncryptedPassword());
+            plainPasswordByItemId.put(item.getId(), plainPassword);
+
+            String normalizedPassword = normalizePasswordForReuse(plainPassword);
+            if (!normalizedPassword.isBlank()) {
+                passwordUsageCount.put(
+                        normalizedPassword,
+                        passwordUsageCount.getOrDefault(normalizedPassword, 0) + 1
+                );
+            }
+        }
+
+        return items.stream()
+                .map(item -> toFamilyMemberPasswordRiskResponse(
+                        item,
+                        plainPasswordByItemId.getOrDefault(item.getId(), ""),
+                        passwordUsageCount
+                ))
+                .filter(response -> response.riskTypes() != null && !response.riskTypes().isEmpty())
+                .toList();
     }
 
     public boolean isFamilyPlan(User user) {
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Subscription not found."));
-
-        return subscription.isActive() && subscription.getPlan() == SubscriptionPlan.FAMILY;
+        return subscriptionService.isFamilyPlan(user);
     }
 
     private void requireFamilyPlan(User user) {
         if (!isFamilyPlan(user)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Family sharing is only available on the Family plan.");
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Only Family plan users can add members. Refresh your subscription or sign in again."
+            );
         }
     }
 
@@ -308,6 +429,108 @@ public class FamilyService {
                 .filter(permissionCheck)
                 .map(member -> member.getGroup().getAdmin())
                 .toList();
+    }
+
+    private boolean canAccessOwner(User viewer, User owner, Predicate<FamilyMember> permissionCheck) {
+        if (viewer == null || owner == null) return false;
+
+        return familyMemberRepository.findByUser(viewer)
+                .stream()
+                .anyMatch(member ->
+                        member.getGroup().getAdmin().getId().equals(owner.getId())
+                                && permissionCheck.test(member)
+                );
+    }
+
+
+    private FamilyMemberPasswordRiskResponse toFamilyMemberPasswordRiskResponse(
+            VaultItem item,
+            String plainPassword,
+            Map<String, Integer> passwordUsageCount
+    ) {
+        User memberUser = item.getUser();
+        String password = plainPassword == null ? "" : plainPassword;
+        String normalizedPassword = normalizePasswordForReuse(password);
+        int strengthScore = getPasswordStrengthScore(password);
+        String strengthLabel = getPasswordStrengthLabel(strengthScore);
+        int reusedCount = normalizedPassword.isBlank()
+                ? 0
+                : passwordUsageCount.getOrDefault(normalizedPassword, 0);
+        boolean reusedPassword = reusedCount > 1;
+        boolean oldPassword = isOldPassword(item);
+
+        List<String> riskTypes = new ArrayList<>();
+
+        if ("WEAK".equals(strengthLabel)) {
+            riskTypes.add("WEAK");
+        } else if ("MEDIUM".equals(strengthLabel)) {
+            riskTypes.add("MEDIUM");
+        }
+
+        if (reusedPassword) {
+            riskTypes.add("REUSED");
+        }
+
+        if (oldPassword) {
+            riskTypes.add("OLD");
+        }
+
+        return new FamilyMemberPasswordRiskResponse(
+                item.getId(),
+                "FAMILY_MEMBER_PASSWORD_RISK",
+                safeText(item.getTitle()),
+                safeText(item.getUsernameValue()),
+                safeText(item.getWebsite()),
+                memberUser.getId(),
+                safeText(memberUser.getFullName()),
+                safeText(memberUser.getEmail()),
+                strengthScore,
+                strengthLabel,
+                oldPassword,
+                reusedPassword,
+                reusedCount,
+                riskTypes
+        );
+    }
+
+    private String normalizePasswordForReuse(String password) {
+        if (password == null) return "";
+        return password.trim();
+    }
+
+    private boolean isOldPassword(VaultItem item) {
+        LocalDateTime changedAt = item.getUpdatedAt() != null ? item.getUpdatedAt() : item.getCreatedAt();
+        if (changedAt == null) return false;
+        return ChronoUnit.DAYS.between(changedAt, LocalDateTime.now()) >= FAMILY_PASSWORD_OLD_DAYS;
+    }
+
+    private int getPasswordStrengthScore(String password) {
+        if (password == null || password.isBlank()) return 0;
+
+        int score = 0;
+
+        if (password.length() >= 8) score += 15;
+        if (password.length() >= 12) score += 20;
+        if (password.length() >= 16) score += 10;
+        if (password.matches(".*[a-z].*")) score += 10;
+        if (password.matches(".*[A-Z].*")) score += 15;
+        if (password.matches(".*[0-9].*")) score += 15;
+        if (password.matches(".*[^A-Za-z0-9].*")) score += 15;
+
+        String lower = password.toLowerCase();
+        List<String> commonWords = List.of("password", "qwerty", "admin", "welcome", "guardian", "123456");
+
+        if (commonWords.stream().anyMatch(lower::contains)) score -= 25;
+        if (password.matches(".*(.)\\1{2,}.*")) score -= 10;
+        if (password.matches("^(123|234|345|456|567|678|789|890).*")) score -= 10;
+
+        return Math.max(0, Math.min(score, 100));
+    }
+
+    private String getPasswordStrengthLabel(int score) {
+        if (score < 45) return "WEAK";
+        if (score < 75) return "MEDIUM";
+        return "STRONG";
     }
 
     private FamilyMemberResponse toMemberResponse(FamilyMember member) {
@@ -326,50 +549,84 @@ public class FamilyService {
         );
     }
 
-    private SharedPasswordItemResponse toSharedPasswordResponse(VaultItem item) {
+    private SharedPasswordItemResponse toSharedPasswordSummaryResponse(VaultItem item) {
         User owner = item.getUser();
 
         return new SharedPasswordItemResponse(
                 item.getId(),
                 "PASSWORD",
-                item.getTitle(),
-                item.getUsernameValue(),
-                item.getEncryptedPassword(),
-                item.getWebsite(),
-                item.getNotes(),
+                safeText(item.getTitle()),
+                safeText(item.getUsernameValue()),
+                "",
+                safeText(item.getWebsite()),
+                "",
                 owner.getId(),
                 owner.getFullName(),
                 owner.getEmail()
         );
     }
 
-    private SharedCardItemResponse toSharedCardResponse(CreditCardEntity card) {
+    private SharedPasswordItemResponse toSharedPasswordDetailResponse(VaultItem item) {
+        User owner = item.getUser();
+
+        return new SharedPasswordItemResponse(
+                item.getId(),
+                "PASSWORD",
+                safeText(item.getTitle()),
+                safeText(item.getUsernameValue()),
+                safeDecryptVaultValue(item.getEncryptedPassword()),
+                safeText(item.getWebsite()),
+                safeText(item.getNotes()),
+                owner.getId(),
+                owner.getFullName(),
+                owner.getEmail()
+        );
+    }
+
+    private SharedCardItemResponse toSharedCardSummaryResponse(CreditCardEntity card) {
         User owner = card.getUser();
 
         return new SharedCardItemResponse(
                 card.getId(),
                 "CARD",
-                card.getCardName(),
-                card.getEncryptedCardNumber(),
-                card.getEncryptedExpiryDate(),
-                card.getEncryptedCvv(),
-                card.getEncryptedCardholderName(),
+                safeText(card.getCardName()),
+                "",
+                "",
+                "",
+                "",
                 owner.getId(),
                 owner.getFullName(),
                 owner.getEmail()
         );
     }
 
-    private SharedDocumentItemResponse toSharedDocumentListResponse(DocumentVault document) {
+    private SharedCardItemResponse toSharedCardDetailResponse(CreditCardEntity card) {
+        User owner = card.getUser();
+
+        return new SharedCardItemResponse(
+                card.getId(),
+                "CARD",
+                safeText(card.getCardName()),
+                safeDecryptVaultValue(card.getEncryptedCardNumber()),
+                safeDecryptVaultValue(card.getEncryptedExpiryDate()),
+                safeDecryptVaultValue(card.getEncryptedCvv()),
+                safeDecryptVaultValue(card.getEncryptedCardholderName()),
+                owner.getId(),
+                owner.getFullName(),
+                owner.getEmail()
+        );
+    }
+
+    private SharedDocumentItemResponse toSharedDocumentSummaryResponse(DocumentVault document) {
         User owner = document.getUser();
 
         return new SharedDocumentItemResponse(
                 document.getId(),
                 "DOCUMENT",
-                document.getDocumentName(),
-                document.getDocumentType(),
+                safeText(document.getDocumentName()),
+                safeText(document.getDocumentType()),
                 "",
-                document.getEncryptedNotes(),
+                "",
                 owner.getId(),
                 owner.getFullName(),
                 owner.getEmail()
@@ -382,25 +639,25 @@ public class FamilyService {
         return new SharedDocumentItemResponse(
                 document.getId(),
                 "DOCUMENT",
-                document.getDocumentName(),
-                document.getDocumentType(),
-                decryptTextIfPossible(document.getEncryptedFileUrl()),
-                document.getEncryptedNotes(),
+                safeText(document.getDocumentName()),
+                safeText(document.getDocumentType()),
+                "",
+                "",
                 owner.getId(),
                 owner.getFullName(),
                 owner.getEmail()
         );
     }
 
-    private SharedNoteItemResponse toSharedNoteResponse(SecureNote note) {
+    private SharedNoteItemResponse toSharedNoteSummaryResponse(SecureNote note) {
         User owner = note.getUser();
 
         return new SharedNoteItemResponse(
                 note.getId(),
                 "NOTE",
-                note.getTitle(),
-                note.getCategory(),
-                note.getEncryptedContent(),
+                safeText(note.getTitle()),
+                safeText(note.getCategory()),
+                "",
                 note.isPinned(),
                 note.getCreatedAt(),
                 note.getUpdatedAt(),
@@ -410,29 +667,60 @@ public class FamilyService {
         );
     }
 
-    private String decryptTextIfPossible(String storedText) {
+    private SharedNoteItemResponse toSharedNoteDetailResponse(SecureNote note) {
+        User owner = note.getUser();
+
+        return new SharedNoteItemResponse(
+                note.getId(),
+                "NOTE",
+                safeText(note.getTitle()),
+                safeText(note.getCategory()),
+                safeDecryptVaultValue(note.getEncryptedContent()),
+                note.isPinned(),
+                note.getCreatedAt(),
+                note.getUpdatedAt(),
+                owner.getId(),
+                owner.getFullName(),
+                owner.getEmail()
+        );
+    }
+
+    private String safeDecryptVaultValue(String storedValue) {
+        if (storedValue == null || storedValue.isBlank()) return "";
+
         try {
-            if (storedText == null || !storedText.contains(":")) {
-                return storedText;
-            }
-
-            String[] parts = storedText.split(":", 2);
-            byte[] iv = Base64.getDecoder().decode(parts[0]);
-            byte[] encrypted = Base64.getDecoder().decode(parts[1]);
-
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), new GCMParameterSpec(128, iv));
-
-            byte[] decrypted = cipher.doFinal(encrypted);
-            return new String(decrypted, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            return storedText;
+            return cleanLegacyText(vaultCryptoService.decryptForResponse(storedValue));
+        } catch (Exception ignored) {
+            return "[Unable to decrypt. Ask the owner to update this item.]";
         }
     }
 
-    private SecretKeySpec getSecretKey() throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        byte[] key = digest.digest(documentSecret.getBytes(StandardCharsets.UTF_8));
-        return new SecretKeySpec(key, "AES");
+    private String safeText(String value) {
+        return cleanLegacyText(value);
+    }
+
+    private String cleanLegacyText(String value) {
+        if (value == null) return "";
+
+        String cleaned = value.trim();
+
+        for (int index = 0; index < 2; index++) {
+            if (!cleaned.contains("%")) break;
+
+            try {
+                String decoded = URLDecoder.decode(cleaned, StandardCharsets.UTF_8);
+                if (decoded.equals(cleaned)) break;
+                cleaned = decoded.trim();
+            } catch (Exception ignored) {
+                break;
+            }
+        }
+
+        if ((cleaned.startsWith("\"") && cleaned.endsWith("\""))
+                || (cleaned.startsWith("'") && cleaned.endsWith("'"))) {
+            cleaned = cleaned.substring(1, cleaned.length() - 1).trim();
+        }
+
+        return cleaned;
     }
 }

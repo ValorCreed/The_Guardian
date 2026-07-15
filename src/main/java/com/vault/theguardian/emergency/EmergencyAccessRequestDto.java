@@ -4,6 +4,8 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 
 public record EmergencyAccessRequestDto(
-        @Email @NotBlank String ownerEmail,
+        @NotBlank(message = "Vault owner email is required")
+        @Email(message = "Enter a valid owner email")
+        String ownerEmail,
         String message
 ) {}

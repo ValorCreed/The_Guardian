@@ -13,13 +13,16 @@ public class VaultService {
     private final VaultItemRepository vaultItemRepository;
     private final SubscriptionService subscriptionService;
     private final NotificationService notificationService;
+    private final VaultCryptoService vaultCryptoService;
 
     public VaultService(VaultItemRepository vaultItemRepository,
                         SubscriptionService subscriptionService,
-                        NotificationService notificationService) {
+                        NotificationService notificationService,
+                        VaultCryptoService vaultCryptoService) {
         this.vaultItemRepository = vaultItemRepository;
         this.subscriptionService = subscriptionService;
         this.notificationService = notificationService;
+        this.vaultCryptoService = vaultCryptoService;
     }
 
     public VaultResponse createVaultItem(User user, VaultRequest request) {
@@ -34,9 +37,9 @@ public class VaultService {
         VaultItem item = VaultItem.builder()
                 .title(request.title())
                 .usernameValue(request.usernameValue())
-                .encryptedPassword(request.encryptedPassword())
+                .encryptedPassword(vaultCryptoService.encryptNullable(request.encryptedPassword()))
                 .website(request.website())
-                .notes(request.notes())
+                .notes(vaultCryptoService.encryptNullable(request.notes()))
                 .createdAt(now)
                 .updatedAt(now)
                 .user(user)
@@ -64,9 +67,9 @@ public class VaultService {
 
         item.setTitle(request.title());
         item.setUsernameValue(request.usernameValue());
-        item.setEncryptedPassword(request.encryptedPassword());
+        item.setEncryptedPassword(vaultCryptoService.encryptNullable(request.encryptedPassword()));
         item.setWebsite(request.website());
-        item.setNotes(request.notes());
+        item.setNotes(vaultCryptoService.encryptNullable(request.notes()));
         item.setUpdatedAt(LocalDateTime.now());
 
         VaultItem saved = vaultItemRepository.save(item);
@@ -94,9 +97,9 @@ public class VaultService {
                 item.getId(),
                 item.getTitle(),
                 item.getUsernameValue(),
-                item.getEncryptedPassword(),
+                vaultCryptoService.decryptForResponse(item.getEncryptedPassword()),
                 item.getWebsite(),
-                item.getNotes(),
+                vaultCryptoService.decryptForResponse(item.getNotes()),
                 item.getCreatedAt(),
                 item.getUpdatedAt()
         );

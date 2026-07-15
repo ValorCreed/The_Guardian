@@ -22,15 +22,12 @@ public interface UserSessionRepository extends JpaRepository<UserSession, Long> 
     List<UserSession> findByUserAndActiveTrueOrderByLastSeenAtDesc(User user);
 
     /*
-     * Same account + same device/app identity + same IP address = same trusted session.
-     * Same device/app identity + different IP address = different trusted session.
+     * Same account + same device/app installation ID = same trusted device.
+     * IP address is intentionally NOT part of this lookup.
      */
-    List<UserSession> findByUserAndDeviceTypeAndDeviceNameAndIpAddressAndUserAgentAndActiveTrueOrderByLastSeenAtDesc(
+    List<UserSession> findByUserAndDeviceIdHashAndActiveTrueOrderByLastSeenAtDesc(
             User user,
-            String deviceType,
-            String deviceName,
-            String ipAddress,
-            String userAgent
+            String deviceIdHash
     );
 
     Optional<UserSession> findByIdAndUser(Long id, User user);

@@ -18,8 +18,17 @@ public class SubscriptionService {
     }
 
     public Subscription getMySubscription(User user) {
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Subscription not found"));
+        if (user == null || user.getId() == null) {
+            throw new RuntimeException("Authenticated user could not be resolved.");
+        }
+
+        /*
+         * Prefer lookup by user id instead of object equality. This prevents
+         * false plan failures when the authenticated principal is a detached
+         * User object from the security/session layer.
+         */
+        Subscription subscription = subscriptionRepository.findByUserId(user.getId())
+                .orElseGet(() -> createFreeSubscriptionForExistingUser(user));
 
         return refreshExpiredSubscription(subscription);
     }
@@ -76,7 +85,13 @@ public class SubscriptionService {
 
     public boolean isFamilyPlan(User user) {
         Subscription subscription = getMySubscription(user);
-        return subscription.isActive() && subscription.getPlan() == SubscriptionPlan.FAMILY;
+
+        if (subscription == null || subscription.getPlan() == null) {
+            return false;
+        }
+
+        return subscription.isActive()
+                && "FAMILY".equalsIgnoreCase(subscription.getPlan().name());
     }
 
     public boolean canShareVault(User user) {
@@ -89,6 +104,11 @@ public class SubscriptionService {
     }
 
     public boolean canUseAdvancedPasswordGenerator(User user) {
+        Subscription subscription = getMySubscription(user);
+        return isPremiumOrFamily(subscription);
+    }
+
+    public boolean canUseBreachMonitoring(User user) {
         Subscription subscription = getMySubscription(user);
         return isPremiumOrFamily(subscription);
     }
@@ -137,14 +157,29 @@ public class SubscriptionService {
         return isPremiumOrFamily(subscription);
     }
 
+    private Subscription createFreeSubscriptionForExistingUser(User user) {
+        Subscription subscription = Subscription.builder()
+                .user(user)
+                .plan(SubscriptionPlan.FREE)
+                .active(false)
+                .startedAt(null)
+                .expiresAt(null)
+                .build();
+
+        return subscriptionRepository.save(subscription);
+    }
+
     private boolean isPremiumOrFamily(Subscription subscription) {
-        return subscription.isActive()
+        return subscription != null
+                && subscription.isActive()
+                && subscription.getPlan() != null
                 && (subscription.getPlan() == SubscriptionPlan.PREMIUM
                 || subscription.getPlan() == SubscriptionPlan.FAMILY);
     }
 
     private boolean isPaidSubscription(Subscription subscription) {
-        return subscription.isActive()
+        return subscription != null
+                && subscription.isActive()
                 && subscription.getPlan() != null
                 && subscription.getPlan() != SubscriptionPlan.FREE;
     }

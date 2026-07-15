@@ -1,15 +1,25 @@
 package com.vault.theguardian.emergency;
 
+import com.vault.theguardian.cards.CreditCardRepository;
+import com.vault.theguardian.documents.DocumentRepository;
+import com.vault.theguardian.documents.DocumentResponse;
+import com.vault.theguardian.documents.DocumentService;
+import com.vault.theguardian.documents.DocumentVault;
 import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.subscription.Subscription;
 import com.vault.theguardian.subscription.SubscriptionPlan;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
+import com.vault.theguardian.vault.VaultItem;
+import com.vault.theguardian.vault.VaultItemRepository;
+import com.vault.theguardian.notes.SecureNote;
+import com.vault.theguardian.notes.SecureNoteRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.lang.reflect.Method;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -23,23 +33,39 @@ public class EmergencyAccessService {
     private final UserRepository userRepository;
     private final SubscriptionService subscriptionService;
     private final NotificationService notificationService;
+    private final VaultItemRepository vaultItemRepository;
+    private final CreditCardRepository creditCardRepository;
+    private final DocumentRepository documentRepository;
+    private final DocumentService documentService;
+    private final SecureNoteRepository secureNoteRepository;
 
     public EmergencyAccessService(EmergencyContactRepository emergencyContactRepository,
                                   EmergencyAccessRequestRepository emergencyAccessRequestRepository,
                                   EmergencyAccessAuditLogRepository emergencyAccessAuditLogRepository,
                                   UserRepository userRepository,
                                   SubscriptionService subscriptionService,
-                                  NotificationService notificationService) {
+                                  NotificationService notificationService,
+                                  VaultItemRepository vaultItemRepository,
+                                  CreditCardRepository creditCardRepository,
+                                  DocumentRepository documentRepository,
+                                  DocumentService documentService,
+                                  SecureNoteRepository secureNoteRepository) {
         this.emergencyContactRepository = emergencyContactRepository;
         this.emergencyAccessRequestRepository = emergencyAccessRequestRepository;
         this.emergencyAccessAuditLogRepository = emergencyAccessAuditLogRepository;
         this.userRepository = userRepository;
         this.subscriptionService = subscriptionService;
         this.notificationService = notificationService;
+        this.vaultItemRepository = vaultItemRepository;
+        this.creditCardRepository = creditCardRepository;
+        this.documentRepository = documentRepository;
+        this.documentService = documentService;
+        this.secureNoteRepository = secureNoteRepository;
     }
 
     public EmergencyOverviewResponse getOverview(User user) {
-        refreshAvailableRequests(user);
+        refreshAvailableRequestsForOwner(user);
+        refreshAvailableRequestsForRequester(user);
 
         Subscription subscription = subscriptionService.getMySubscription(user);
         boolean premiumOrFamily = isPremiumOrFamily(subscription);
@@ -203,7 +229,7 @@ public class EmergencyAccessService {
     }
 
     public List<EmergencyAccessRequestResponse> getReceivedRequests(User owner) {
-        refreshAvailableRequests(owner);
+        refreshAvailableRequestsForOwner(owner);
         return emergencyAccessRequestRepository.findByOwnerOrderByRequestedAtDesc(owner)
                 .stream()
                 .map(this::toRequestResponse)
@@ -214,12 +240,14 @@ public class EmergencyAccessService {
         EmergencyAccessRequest request = emergencyAccessRequestRepository.findByIdAndOwner(requestId, owner)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Emergency request not found."));
 
-        if (request.getStatus() != EmergencyAccessStatus.PENDING && request.getStatus() != EmergencyAccessStatus.AVAILABLE) {
+        if (request.getStatus() != EmergencyAccessStatus.PENDING && request.getStatus() != EmergencyAccessStatus.AVAILABLE && request.getStatus() != EmergencyAccessStatus.APPROVED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only pending emergency requests can be approved.");
         }
 
-        request.setStatus(EmergencyAccessStatus.APPROVED);
-        request.setApprovedAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        request.setStatus(EmergencyAccessStatus.AVAILABLE);
+        request.setApprovedAt(now);
+        request.setReleasedAt(now);
         EmergencyAccessRequest saved = emergencyAccessRequestRepository.save(request);
 
         notificationService.notifyEmergencyAccessApproved(request.getRequester(), owner.getEmail());
@@ -231,7 +259,7 @@ public class EmergencyAccessService {
         EmergencyAccessRequest request = emergencyAccessRequestRepository.findByIdAndOwner(requestId, owner)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Emergency request not found."));
 
-        if (request.getStatus() != EmergencyAccessStatus.PENDING && request.getStatus() != EmergencyAccessStatus.AVAILABLE) {
+        if (request.getStatus() != EmergencyAccessStatus.PENDING && request.getStatus() != EmergencyAccessStatus.AVAILABLE && request.getStatus() != EmergencyAccessStatus.APPROVED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Only pending emergency requests can be denied.");
         }
 
@@ -251,6 +279,150 @@ public class EmergencyAccessService {
                 .toList();
     }
 
+    public EmergencyVaultItemsResponse getEmergencyVault(User requester, Long requestId) {
+        EmergencyAccessRequest request = getReleasedRequestForRequester(requester, requestId);
+        EmergencyContact contact = request.getContact();
+        User owner = request.getOwner();
+
+        List<EmergencyVaultItemResponse> passwords = contact.isAllowPasswords()
+                ? vaultItemRepository.findByUser(owner).stream().map(item -> toPasswordEmergencyResponse(item, owner)).toList()
+                : List.of();
+
+        List<EmergencyVaultItemResponse> cards = contact.isAllowCards()
+                ? creditCardRepository.findByUser(owner).stream().map(card -> toCardEmergencyResponse(card, owner)).toList()
+                : List.of();
+
+        List<EmergencyVaultItemResponse> documents = contact.isAllowDocuments()
+                ? documentRepository.findByUser(owner).stream().map(document -> toDocumentEmergencyResponse(document, owner, false)).toList()
+                : List.of();
+
+        List<EmergencyVaultItemResponse> notes = contact.isAllowNotes()
+                ? secureNoteRepository.findByUserOrderByPinnedDescUpdatedAtDesc(owner).stream().map(note -> toNoteEmergencyResponse(note, owner, false)).toList()
+                : List.of();
+
+        log(owner, requester, EmergencyAuditAction.EMERGENCY_VAULT_OPENED, "Emergency vault opened", requester.getEmail() + " opened your emergency vault.");
+
+        return new EmergencyVaultItemsResponse(
+                request.getId(),
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                contact.isAllowPasswords(),
+                contact.isAllowCards(),
+                contact.isAllowDocuments(),
+                contact.isAllowNotes(),
+                passwords,
+                cards,
+                documents,
+                notes
+        );
+    }
+
+    public EmergencyVaultItemResponse getEmergencyVaultItem(User requester, Long requestId, String itemType, Long itemId) {
+        EmergencyAccessRequest request = getReleasedRequestForRequester(requester, requestId);
+        EmergencyContact contact = request.getContact();
+        User owner = request.getOwner();
+        String cleanType = itemType == null ? "" : itemType.trim().toUpperCase();
+
+        EmergencyVaultItemResponse response;
+
+        switch (cleanType) {
+            case "PASSWORD" -> {
+                if (!contact.isAllowPasswords()) throw forbiddenItemType();
+                VaultItem item = vaultItemRepository.findById(itemId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Password not found."));
+                requireOwnedBy(item.getUser(), owner);
+                response = toPasswordEmergencyResponse(item, owner);
+            }
+            case "CARD" -> {
+                if (!contact.isAllowCards()) throw forbiddenItemType();
+                Object card = creditCardRepository.findById(itemId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found."));
+                requireOwnedBy(readUser(card), owner);
+                response = toCardEmergencyResponse(card, owner);
+            }
+            case "DOCUMENT" -> {
+                if (!contact.isAllowDocuments()) throw forbiddenItemType();
+                DocumentVault document = documentRepository.findById(itemId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found."));
+                requireOwnedBy(document.getUser(), owner);
+                DocumentResponse documentResponse = documentService.getDocument(owner, itemId);
+                response = toDocumentEmergencyResponse(documentResponse, document, owner);
+            }
+            case "NOTE" -> {
+                if (!contact.isAllowNotes()) throw forbiddenItemType();
+                SecureNote note = secureNoteRepository.findById(itemId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Secure note not found."));
+                requireOwnedBy(note.getUser(), owner);
+                response = toNoteEmergencyResponse(note, owner, true);
+            }
+            default -> throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown emergency vault item type.");
+        }
+
+        log(owner, requester, EmergencyAuditAction.EMERGENCY_ITEM_VIEWED, "Emergency item viewed", requester.getEmail() + " viewed a " + cleanType.toLowerCase() + " item: " + cleanText(response.title(), "Untitled item") + ".");
+        return response;
+    }
+
+    private EmergencyAccessRequest getReleasedRequestForRequester(User requester, Long requestId) {
+        EmergencyAccessRequest request = emergencyAccessRequestRepository.findByIdAndRequester(requestId, requester)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Emergency request not found."));
+
+        refreshRequestIfAvailable(request);
+
+        if (request.getContact() == null || !request.getContact().isActive()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This emergency contact is no longer active.");
+        }
+
+        if (!request.getContact().getContactEmail().equalsIgnoreCase(requester.getEmail())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This emergency request does not belong to your email address.");
+        }
+
+        if (request.getStatus() != EmergencyAccessStatus.AVAILABLE && request.getStatus() != EmergencyAccessStatus.APPROVED) {
+            if (request.getStatus() == EmergencyAccessStatus.PENDING) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Emergency access is still pending. Wait until the waiting period ends or the vault owner approves it.");
+            }
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Emergency access is not available for this request.");
+        }
+
+        return request;
+    }
+
+    private void refreshAvailableRequestsForOwner(User owner) {
+        emergencyAccessRequestRepository.findByOwnerOrderByRequestedAtDesc(owner)
+                .forEach(this::refreshRequestIfAvailable);
+    }
+
+    private void refreshAvailableRequestsForRequester(User requester) {
+        emergencyAccessRequestRepository.findByRequesterOrderByRequestedAtDesc(requester)
+                .forEach(this::refreshRequestIfAvailable);
+    }
+
+    private void refreshRequestIfAvailable(EmergencyAccessRequest request) {
+        LocalDateTime now = LocalDateTime.now();
+        if (request.getStatus() == EmergencyAccessStatus.PENDING && !request.getAvailableAt().isAfter(now)) {
+            request.setStatus(EmergencyAccessStatus.AVAILABLE);
+            request.setReleasedAt(now);
+            emergencyAccessRequestRepository.save(request);
+            notificationService.createNotification(
+                    request.getRequester(),
+                    com.vault.theguardian.notification.NotificationType.EMERGENCY_ACCESS_AVAILABLE,
+                    "Emergency access available",
+                    "The waiting period for " + request.getOwner().getEmail() + " has ended.",
+                    "/emergencyaccess"
+            );
+            log(request.getOwner(), request.getRequester(), EmergencyAuditAction.ACCESS_AVAILABLE, "Emergency access available", "Waiting period ended for " + request.getRequester().getEmail() + ".");
+        }
+    }
+
+    private ResponseStatusException forbiddenItemType() {
+        return new ResponseStatusException(HttpStatus.FORBIDDEN, "This item type is not allowed for this emergency contact.");
+    }
+
+    private void requireOwnedBy(User actualOwner, User expectedOwner) {
+        if (actualOwner == null || expectedOwner == null || !actualOwner.getId().equals(expectedOwner.getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "This item is not part of the released emergency vault.");
+        }
+    }
+
     private EmergencyContact getOwnedContact(User owner, Long id) {
         return emergencyContactRepository.findByIdAndOwner(id, owner)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Emergency contact not found."));
@@ -264,27 +436,6 @@ public class EmergencyAccessService {
         int hours = requestedHours == null ? FREE_WAITING_HOURS : requestedHours;
         if (hours == 24 || hours == 48 || hours == 72) return hours;
         return FREE_WAITING_HOURS;
-    }
-
-    private void refreshAvailableRequests(User user) {
-        LocalDateTime now = LocalDateTime.now();
-        List<EmergencyAccessRequest> requests = emergencyAccessRequestRepository.findByOwnerOrderByRequestedAtDesc(user);
-
-        for (EmergencyAccessRequest request : requests) {
-            if (request.getStatus() == EmergencyAccessStatus.PENDING && !request.getAvailableAt().isAfter(now)) {
-                request.setStatus(EmergencyAccessStatus.AVAILABLE);
-                request.setReleasedAt(now);
-                emergencyAccessRequestRepository.save(request);
-                notificationService.createNotification(
-                        request.getRequester(),
-                        com.vault.theguardian.notification.NotificationType.EMERGENCY_ACCESS_AVAILABLE,
-                        "Emergency access available",
-                        "The waiting period for " + request.getOwner().getEmail() + " has ended.",
-                        "/emergencyaccess"
-                );
-                log(request.getOwner(), request.getRequester(), EmergencyAuditAction.ACCESS_AVAILABLE, "Emergency access available", "Waiting period ended for " + request.getRequester().getEmail() + ".");
-            }
-        }
     }
 
     private void log(User owner, User actor, EmergencyAuditAction action, String title, String message) {
@@ -350,6 +501,225 @@ public class EmergencyAccessService {
                 log.getActor().getEmail(),
                 log.getCreatedAt()
         );
+    }
+
+    private EmergencyVaultItemResponse toPasswordEmergencyResponse(VaultItem item, User owner) {
+        return new EmergencyVaultItemResponse(
+                item.getId(),
+                "PASSWORD",
+                item.getTitle(),
+                item.getUsernameValue(),
+                item.getEncryptedPassword(),
+                item.getWebsite(),
+                item.getNotes(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                item.getCreatedAt(),
+                item.getUpdatedAt()
+        );
+    }
+
+    private EmergencyVaultItemResponse toCardEmergencyResponse(Object card, User owner) {
+        return new EmergencyVaultItemResponse(
+                readLong(card, "getId"),
+                "CARD",
+                cleanText(readString(card, "getCardName"), "Saved Card"),
+                readFirstString(card, "getEncryptedCardholderName", "getEncryptedCardHolderName"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                readString(card, "getEncryptedCardNumber"),
+                readString(card, "getEncryptedExpiryDate"),
+                readString(card, "getEncryptedCvv"),
+                readString(card, "getEncryptedCardholderName"),
+                readString(card, "getEncryptedCardHolderName"),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                readDateTime(card, "getCreatedAt"),
+                readDateTime(card, "getUpdatedAt")
+        );
+    }
+
+    private EmergencyVaultItemResponse toDocumentEmergencyResponse(DocumentVault document, User owner, boolean includeFileData) {
+        return new EmergencyVaultItemResponse(
+                document.getId(),
+                "DOCUMENT",
+                document.getDocumentName(),
+                null,
+                null,
+                null,
+                null,
+                document.getDocumentName(),
+                document.getDocumentType(),
+                extractSizeBytes(document.getEncryptedNotes()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                document.getDocumentName(),
+                document.getDocumentType(),
+                includeFileData ? document.getEncryptedFileUrl() : "",
+                document.getEncryptedNotes(),
+                null,
+                null,
+                null,
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                document.getCreatedAt(),
+                null
+        );
+    }
+
+    private EmergencyVaultItemResponse toDocumentEmergencyResponse(DocumentResponse response, DocumentVault document, User owner) {
+        return new EmergencyVaultItemResponse(
+                response.id(),
+                "DOCUMENT",
+                response.documentName(),
+                null,
+                null,
+                null,
+                null,
+                response.documentName(),
+                response.documentType(),
+                extractSizeBytes(response.encryptedNotes()),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                response.documentName(),
+                response.documentType(),
+                response.encryptedFileUrl(),
+                response.encryptedNotes(),
+                null,
+                null,
+                null,
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                document.getCreatedAt(),
+                null
+        );
+    }
+
+    private EmergencyVaultItemResponse toNoteEmergencyResponse(SecureNote note, User owner, boolean includeContent) {
+        return new EmergencyVaultItemResponse(
+                note.getId(),
+                "NOTE",
+                note.getTitle(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                note.getCategory(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                note.getCategory(),
+                includeContent ? note.getEncryptedContent() : "",
+                note.isPinned(),
+                cleanText(owner.getFullName(), owner.getEmail()),
+                owner.getEmail(),
+                note.getCreatedAt(),
+                note.getUpdatedAt()
+        );
+    }
+
+    private User readUser(Object object) {
+        Object value = callGetter(object, "getUser");
+        if (value instanceof User user) return user;
+        return null;
+    }
+
+    private Long readLong(Object object, String getter) {
+        Object value = callGetter(object, getter);
+        if (value instanceof Number number) return number.longValue();
+        return null;
+    }
+
+    private String readString(Object object, String getter) {
+        Object value = callGetter(object, getter);
+        return value == null ? null : String.valueOf(value);
+    }
+
+    private String readFirstString(Object object, String... getters) {
+        for (String getter : getters) {
+            String value = readString(object, getter);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    private LocalDateTime readDateTime(Object object, String getter) {
+        Object value = callGetter(object, getter);
+        if (value instanceof LocalDateTime dateTime) return dateTime;
+        return null;
+    }
+
+    private Object callGetter(Object object, String getter) {
+        if (object == null) return null;
+        try {
+            Method method = object.getClass().getMethod(getter);
+            return method.invoke(object);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Long extractSizeBytes(String encryptedNotes) {
+        if (encryptedNotes == null) return null;
+        try {
+            String marker = "\"sizeBytes\":";
+            int index = encryptedNotes.indexOf(marker);
+            if (index < 0) return null;
+            int start = index + marker.length();
+            int end = start;
+            while (end < encryptedNotes.length() && Character.isDigit(encryptedNotes.charAt(end))) {
+                end++;
+            }
+            if (end <= start) return null;
+            return Long.parseLong(encryptedNotes.substring(start, end));
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private boolean isPremiumOrFamily(Subscription subscription) {

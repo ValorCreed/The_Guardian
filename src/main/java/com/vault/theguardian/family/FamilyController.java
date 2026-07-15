@@ -2,10 +2,14 @@ package com.vault.theguardian.family;
 
 import com.vault.theguardian.user.User;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/vault/family")
@@ -20,6 +24,15 @@ public class FamilyController {
     @GetMapping
     public FamilyOverviewResponse getFamilyOverview(@AuthenticationPrincipal User user) {
         return familyService.getOverview(user);
+    }
+
+
+    @GetMapping("/members/lookup")
+    public ResponseEntity<Map<String, Object>> lookupPotentialMember(
+            @AuthenticationPrincipal User user,
+            @RequestParam String email
+    ) {
+        return familyService.lookupPotentialMember(user, email);
     }
 
     @PostMapping("/members")
@@ -41,6 +54,11 @@ public class FamilyController {
     @GetMapping("/shared-items")
     public SharedFamilyItemsResponse getSharedItems(@AuthenticationPrincipal User user) {
         return familyService.getSharedItems(user);
+    }
+
+    @GetMapping("/member-password-risks")
+    public List<FamilyMemberPasswordRiskResponse> getFamilyMemberPasswordRisks(@AuthenticationPrincipal User user) {
+        return familyService.getFamilyMemberPasswordRisks(user);
     }
 
     @GetMapping("/shared-passwords")
@@ -80,6 +98,29 @@ public class FamilyController {
             @PathVariable Long itemId
     ) {
         return familyService.getSharedDocumentItem(user, itemId);
+    }
+
+    @GetMapping("/shared-documents/{itemId}/download")
+    public ResponseEntity<byte[]> downloadSharedDocument(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long itemId
+    ) {
+        byte[] fileBytes = familyService.getSharedDocumentBytes(user, itemId);
+        String fileName = familyService.getSharedDocumentDownloadFileName(user, itemId);
+        String contentType = familyService.getSharedDocumentDownloadContentType(user, itemId);
+
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(contentType);
+        } catch (Exception error) {
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        }
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(fileBytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                .body(fileBytes);
     }
 
     @GetMapping("/shared-notes")

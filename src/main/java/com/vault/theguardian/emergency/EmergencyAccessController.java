@@ -89,6 +89,24 @@ public class EmergencyAccessController {
         return emergencyAccessService.denyRequest(user, id);
     }
 
+    @GetMapping("/requests/{id}/vault")
+    public EmergencyVaultItemsResponse getEmergencyVault(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id
+    ) {
+        return emergencyAccessService.getEmergencyVault(user, id);
+    }
+
+    @GetMapping("/requests/{id}/vault/{itemType}/{itemId}")
+    public EmergencyVaultItemResponse getEmergencyVaultItem(
+            @AuthenticationPrincipal User user,
+            @PathVariable Long id,
+            @PathVariable String itemType,
+            @PathVariable Long itemId
+    ) {
+        return emergencyAccessService.getEmergencyVaultItem(user, id, itemType, itemId);
+    }
+
     @GetMapping("/audit")
     public List<EmergencyAuditLogResponse> getAuditLogs(@AuthenticationPrincipal User user) {
         return emergencyAccessService.getAuditLogs(user);

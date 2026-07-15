@@ -92,7 +92,8 @@ public class AuthService {
         UserSession session = deviceSessionService.createLoginSession(
                 savedUser,
                 httpRequest,
-                hasMultipleDeviceAccess(savedSubscription)
+                hasMultipleDeviceAccess(savedSubscription),
+                false
         );
 
         String token = jwtService.generateToken(savedUser.getEmail(), session.getTokenId());
@@ -133,7 +134,8 @@ public class AuthService {
         UserSession session = deviceSessionService.createLoginSession(
                 user,
                 httpRequest,
-                hasMultipleDeviceAccess(subscription)
+                hasMultipleDeviceAccess(subscription),
+                request.shouldForceReplaceDevice()
         );
 
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
@@ -176,7 +178,8 @@ public class AuthService {
         UserSession session = deviceSessionService.createLoginSession(
                 user,
                 httpRequest,
-                hasMultipleDeviceAccess(subscription)
+                hasMultipleDeviceAccess(subscription),
+                false
         );
 
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
@@ -267,11 +270,11 @@ public class AuthService {
         User user = userRepository.findByEmail(cleanEmail).orElse(null);
 
         if (user == null) {
-            return new MessageResponse("If this email exists and is verified, a reset code has been sent.");
+            return new MessageResponse("If this email exists and is verified, an account reset code has been sent.");
         }
 
         if (!user.isEmailVerified()) {
-            throw new RuntimeException("Please verify your email before resetting your password.");
+            throw new RuntimeException("Please verify your email before resetting your account.");
         }
 
         String resetCode = generateCode();
@@ -281,40 +284,18 @@ public class AuthService {
 
         userRepository.save(user);
 
+        /*
+         * Important security rule:
+         * This email code is only for the Reset & Erase fallback.
+         * It must not be used to reset the password while keeping old vault data.
+         */
         trySendPasswordResetEmail(user.getEmail(), resetCode);
 
-        return new MessageResponse("If this email exists and is verified, a reset code has been sent.");
+        return new MessageResponse("If this email exists and is verified, an account reset code has been sent.");
     }
 
     public MessageResponse resetPassword(ResetPasswordRequest request) {
-        String cleanEmail = request.email().trim().toLowerCase();
-
-        User user = userRepository.findByEmail(cleanEmail)
-                .orElseThrow(() -> new RuntimeException("Invalid email or reset code"));
-
-        if (!user.isEmailVerified()) {
-            throw new RuntimeException("Please verify your email before resetting your password.");
-        }
-
-        if (user.getPasswordResetCode() == null || user.getPasswordResetCodeExpiresAt() == null) {
-            throw new RuntimeException("No password reset code found. Please request a new code.");
-        }
-
-        if (LocalDateTime.now().isAfter(user.getPasswordResetCodeExpiresAt())) {
-            throw new RuntimeException("Password reset code has expired. Please request a new code.");
-        }
-
-        if (!user.getPasswordResetCode().equals(request.code().trim())) {
-            throw new RuntimeException("Invalid password reset code");
-        }
-
-        user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
-        user.setPasswordResetCode(null);
-        user.setPasswordResetCodeExpiresAt(null);
-
-        userRepository.save(user);
-
-        return new MessageResponse("Password reset successfully");
+        throw new RuntimeException("Email-only password reset is disabled. Use your Recovery Kit to reset your password safely, or choose Reset & Erase to reset the account and permanently delete old vault data.");
     }
 
     private AuthResponse toAuthResponse(

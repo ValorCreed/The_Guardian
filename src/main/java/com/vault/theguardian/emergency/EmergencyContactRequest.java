@@ -4,7 +4,10 @@ import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 
 public record EmergencyContactRequest(
-        @Email @NotBlank String contactEmail,
+        @NotBlank(message = "Contact email is required")
+        @Email(message = "Enter a valid contact email")
+        String contactEmail,
+
         String contactName,
         String relationship,
         Integer waitingPeriodHours,

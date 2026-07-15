@@ -3,6 +3,7 @@ package com.vault.theguardian.notes;
 import com.vault.theguardian.notification.NotificationService;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
+import com.vault.theguardian.vault.VaultCryptoService;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -13,13 +14,16 @@ public class SecureNoteService {
     private final SecureNoteRepository secureNoteRepository;
     private final SubscriptionService subscriptionService;
     private final NotificationService notificationService;
+    private final VaultCryptoService vaultCryptoService;
 
     public SecureNoteService(SecureNoteRepository secureNoteRepository,
                              SubscriptionService subscriptionService,
-                             NotificationService notificationService) {
+                             NotificationService notificationService,
+                             VaultCryptoService vaultCryptoService) {
         this.secureNoteRepository = secureNoteRepository;
         this.subscriptionService = subscriptionService;
         this.notificationService = notificationService;
+        this.vaultCryptoService = vaultCryptoService;
     }
 
     public SecureNoteResponse createNote(User user, SecureNoteRequest request) {
@@ -32,9 +36,9 @@ public class SecureNoteService {
         LocalDateTime now = LocalDateTime.now();
 
         SecureNote note = SecureNote.builder()
-                .title(request.title().trim())
+                .title(cleanTitle(request.title()))
                 .category(cleanCategory(request.category()))
-                .encryptedContent(request.encryptedContent())
+                .encryptedContent(vaultCryptoService.encryptNullable(request.encryptedContent()))
                 .pinned(Boolean.TRUE.equals(request.pinned()))
                 .createdAt(now)
                 .updatedAt(now)
@@ -60,9 +64,9 @@ public class SecureNoteService {
     public SecureNoteResponse updateNote(User user, Long id, SecureNoteRequest request) {
         SecureNote note = getOwnedNote(user, id);
 
-        note.setTitle(request.title().trim());
+        note.setTitle(cleanTitle(request.title()));
         note.setCategory(cleanCategory(request.category()));
-        note.setEncryptedContent(request.encryptedContent());
+        note.setEncryptedContent(vaultCryptoService.encryptNullable(request.encryptedContent()));
         note.setPinned(Boolean.TRUE.equals(request.pinned()));
         note.setUpdatedAt(LocalDateTime.now());
 
@@ -89,6 +93,13 @@ public class SecureNoteService {
         return note;
     }
 
+    private String cleanTitle(String title) {
+        if (title == null || title.trim().isBlank()) {
+            return "Untitled note";
+        }
+        return title.trim();
+    }
+
     private String cleanCategory(String category) {
         if (category == null || category.trim().isBlank()) {
             return "General";
@@ -102,7 +113,7 @@ public class SecureNoteService {
                 note.getId(),
                 note.getTitle(),
                 note.getCategory(),
-                note.getEncryptedContent(),
+                vaultCryptoService.decryptForResponse(note.getEncryptedContent()),
                 note.isPinned(),
                 note.getCreatedAt(),
                 note.getUpdatedAt()

@@ -52,6 +52,8 @@ public class SecurityConfig {
                                 "/vault/auth/forgot-password",
                                 "/vault/auth/reset-password",
                                 "/vault/auth/verify-2fa",
+                                "/vault/recovery-kit/reset-password",
+                                "/vault/recovery-kit/reset-account",
                                 "/vault/payments/callback"
                         ).permitAll()
                         .anyRequest().authenticated()
@@ -149,6 +151,8 @@ public class SecurityConfig {
                 || path.equals("/vault/auth/forgot-password")
                 || path.equals("/vault/auth/reset-password")
                 || path.equals("/vault/auth/verify-2fa")
+                || path.equals("/vault/recovery-kit/reset-password")
+                || path.equals("/vault/recovery-kit/reset-account")
                 || path.equals("/vault/payments/callback");
     }
 
