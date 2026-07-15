@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, Ellipse, RadialGradient, Stop } from 'react-native-svg';
@@ -104,10 +104,11 @@ const makeStyles = (C: any) =>
     },
 
     title: {
-      fontSize: 30,
+      fontSize: 32,
       fontWeight: '900',
       color: C.text,
       marginBottom: 14,
+      fontFamily : Platform.OS === 'ios' ? 'Georgia' : 'serif',
     },
 
     subtitle: {

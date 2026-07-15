@@ -18,11 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Svg, { Line, Circle } from 'react-native-svg';
 
 import { api, saveLoginSession } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import { saveBiometricCredentials, biometricLogin } from '../utils/secureAuth';
-import GuardianLogoTile from '../components/GuardianLogoTitle';
 
 export default function UnlockScreen() {
   const { isDark, colors: C, reloadTheme } = useAppTheme();
@@ -68,7 +68,6 @@ export default function UnlockScreen() {
           router.replace('/login');
           return true;
         }
-
         return false;
       };
 
@@ -91,7 +90,6 @@ export default function UnlockScreen() {
 
     try {
       setLoading(true);
-
       const data = await biometricLogin();
 
       if (data.requiresTwoFactor) {
@@ -163,9 +161,7 @@ export default function UnlockScreen() {
       Alert.alert(
         isDeviceLimitError ? 'Device limit reached' : 'Login failed',
         isDeviceLimitError
-          ? `${message}
-
-To use this device, open The Guardian on your active device and remove the old session from Settings > Trusted Devices.`
+          ? `${message}\n\nTo use this device, open The Guardian on your active device and remove the old session from Settings > Trusted Devices.`
           : message
       );
     } finally {
@@ -173,12 +169,15 @@ To use this device, open The Guardian on your active device and remove the old s
     }
   };
 
+  
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
         barStyle={isDark ? 'light-content' : 'dark-content'}
         backgroundColor={C.background}
       />
+
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -193,98 +192,73 @@ To use this device, open The Guardian on your active device and remove the old s
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
-          <View style={styles.logoContainer}>
-            <GuardianLogoTile
-              size={60}
-              logoSize={48}
-              radius={16}
-              style={styles.logoBox}
-            />
-          </View>
-
           <Text style={styles.title}>Welcome back</Text>
-
           <Text style={styles.subtitle}>
             Unlock your vault with your master password.
           </Text>
 
-          <Text style={styles.label}>Email</Text>
+          {/* Main Form Card */}
+          <View style={styles.formCard}>
+            <Text style={styles.label}>Email</Text>
+            <View style={styles.inputBox}>
+              <Ionicons name="mail-outline" size={20} color={C.primary || '#115E41'} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="you@example.com"
+                placeholderTextColor={C.tabInactive}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                autoCorrect={false}
+                autoComplete="email"
+                textContentType="username"
+                importantForAutofill="yes"
+                returnKeyType="next"
+              />
+            </View>
 
-          <View style={styles.inputBox}>
-            <TextInput
-              style={styles.input}
-              placeholder="you@example.com"
-              placeholderTextColor={C.tabInactive}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              autoCorrect={false}
-              autoComplete="email"
-              textContentType="username"
-              importantForAutofill="yes"
-              returnKeyType="next"
-            />
-          </View>
-
-          <Text style={styles.label}>Master Password</Text>
-
-          <View style={styles.inputBox}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter master password"
-              placeholderTextColor={C.tabInactive}
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="current-password"
-              textContentType="password"
-              importantForAutofill="yes"
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-            />
+            <Text style={styles.label}>Master Password</Text>
+            <View style={styles.inputBox}>
+              <Ionicons name="lock-closed-outline" size={20} color={C.primary || '#115E41'} style={styles.inputIcon} />
+              <TextInput
+                style={styles.input}
+                placeholder="Enter master password"
+                placeholderTextColor={C.tabInactive}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="current-password"
+                textContentType="password"
+                importantForAutofill="yes"
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+              />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((current) => !current)}
+                activeOpacity={0.6}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={C.tabInactive}
+                />
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
-              style={styles.eyeButton}
-              onPress={() => setShowPassword((current) => !current)}
               activeOpacity={0.6}
+              onPress={() => router.push('/forgotpassword')}
+              style={styles.forgotPasswordContainer}
             >
-              <Ionicons
-                name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                size={20}
-                color={C.tabInactive}
-              />
+              <Text style={styles.forgotText}>Forgot Password?</Text>
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            activeOpacity={0.6}
-            onPress={() => router.push('/forgotpassword')}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
-
-          {biometricEnabled && (
-            <TouchableOpacity
-              style={styles.biometricBtn}
-              onPress={handleBiometricLogin}
-              activeOpacity={0.7}
-              disabled={loading}
-            >
-              <Ionicons
-                name="finger-print-outline"
-                size={26}
-                color={C.primary}
-              />
-
-              <Text style={styles.biometricText}>
-                Use Face ID / Fingerprint
-              </Text>
-            </TouchableOpacity>
-          )}
-
+          {/* Unlock Button */}
           <View style={styles.buttonArea}>
             <TouchableOpacity
               style={[styles.unlockButton, loading && styles.unlockButtonDisabled]}
@@ -299,6 +273,26 @@ To use this device, open The Guardian on your active device and remove the old s
               )}
             </TouchableOpacity>
           </View>
+
+          {/* Biometric Button (if enabled) */}
+          {biometricEnabled && (
+            <TouchableOpacity
+              style={styles.biometricBtn}
+              onPress={handleBiometricLogin}
+              activeOpacity={0.7}
+              disabled={loading}
+            >
+              <Ionicons
+                name="finger-print-outline"
+                size={26}
+                color={C.primary || '#115E41'}
+              />
+              <Text style={styles.biometricText}>
+                Use Face ID / Fingerprint
+              </Text>
+            </TouchableOpacity>
+          )}
+
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -309,87 +303,118 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: C.background,
+      backgroundColor: C.background || '#F8F9FA',
     },
-
+    
     keyboardView: {
       flex: 1,
     },
-
     scrollView: {
       flex: 1,
     },
-
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 80,
-      paddingBottom: 180,
+      paddingTop: 20,
+      paddingBottom: 40,
     },
-
-    logoContainer: {
-      marginBottom: 24,
+    backButton: {
+      marginBottom: 30,
+      marginLeft: -8, // Offset slightly to align chevron visually with text
     },
-
-    logoBox: {},
-
     title: {
-      fontSize: 28,
-      fontWeight: '700',
-      color: C.text,
+      fontSize: 42,
+      fontWeight: '800',
+      paddingTop: 100,
+      color: C.text || '#0F172A',
       marginBottom: 8,
+      fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', // Serif font to match the design
     },
-
     subtitle: {
-      fontSize: 15,
-      color: C.textSecondary,
-      lineHeight: 22,
+      fontSize: 16,
+      color: C.textSecondary || '#64748B',
       marginBottom: 32,
     },
-
-    label: {
-      fontSize: 13,
-      color: C.textSecondary,
-      marginBottom: 8,
-      marginLeft: 2,
-      fontWeight: '700',
+    formCard: {
+      backgroundColor: '#FFFFFF', // Forced white for the card background
+      borderRadius: 16,
+      borderWidth: 1,
+      borderColor: C.primary || '#115E41', // Dark green border
+      padding: 20,
+      // Shadow styling for the floating card effect
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
+      elevation: 4,
     },
-
+    label: {
+      fontSize: 14,
+      color: C.text || '#333333',
+      marginBottom: 8,
+      fontWeight: '500',
+    },
     inputBox: {
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: C.backgroundElement,
-      borderRadius: 14,
-      paddingHorizontal: 16,
-      paddingVertical: 14,
+      backgroundColor: '#FFFFFF',
+      borderRadius: 8,
+      paddingHorizontal: 12,
       marginBottom: 20,
       borderWidth: 1,
-      borderColor: C.border,
+      borderColor: C.border || '#D1D5DB', // Light gray inner border
+      height: 52,
     },
-
+    inputIcon: {
+      marginRight: 10,
+    },
     input: {
       flex: 1,
       fontSize: 15,
-      color: C.text,
+      color: C.text || '#0F172A',
       paddingVertical: 0,
     },
-
     eyeButton: {
       width: 36,
       height: 36,
       borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: 8,
     },
-
+    forgotPasswordContainer: {
+      alignSelf: 'flex-end',
+      marginTop: -4,
+    },
     forgotText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: C.primary,
-      marginTop: 4,
+      fontSize: 14,
+      fontWeight: '700',
+      color: C.primary || '#115E41',
     },
-
+    buttonArea: {
+      marginTop: 32,
+    },
+    unlockButton: {
+      backgroundColor: C.primary || '#115E41',
+      borderRadius: 30,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 56,
+      // Green glow shadow
+      shadowColor: C.primary || '#115E41',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.4,
+      shadowRadius: 10,
+      elevation: 8,
+    },
+    unlockButtonDisabled: {
+      opacity: 0.7,
+    },
+    unlockButtonText: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
     biometricBtn: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -397,36 +422,11 @@ const makeStyles = (C: any) =>
       gap: 10,
       marginTop: 24,
       padding: 14,
-      backgroundColor: C.actionCard,
-      borderRadius: 16,
+      backgroundColor: 'transparent',
     },
-
     biometricText: {
       fontSize: 15,
       fontWeight: '600',
-      color: C.primary,
-    },
-
-    buttonArea: {
-      marginTop: 28,
-    },
-
-    unlockButton: {
-      backgroundColor: C.backgroundbutton,
-      borderRadius: 30,
-      paddingVertical: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: 56,
-    },
-
-    unlockButtonDisabled: {
-      opacity: 0.7,
-    },
-
-    unlockButtonText: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: '#FFFFFF',
+      color: C.primary || '#115E41',
     },
   });
