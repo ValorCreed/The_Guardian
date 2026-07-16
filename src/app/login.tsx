@@ -87,6 +87,7 @@ const WelcomeScreen = () => {
       }),
     ]).start();
 
+    ////Floating logo animation loop
     const floatingLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(floatAnim, {

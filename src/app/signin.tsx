@@ -18,11 +18,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Svg, { Line, Circle } from 'react-native-svg';
 
 import { api, saveLoginSession, isDeviceLimitError } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import { saveBiometricCredentials, biometricLogin } from '../utils/secureAuth';
+import GuardianLogoTile from '../components/GuardianLogoTitle';
 
 export default function UnlockScreen() {
   const { isDark, colors: C, reloadTheme } = useAppTheme();
@@ -68,6 +68,7 @@ export default function UnlockScreen() {
           router.replace('/login');
           return true;
         }
+
         return false;
       };
 
@@ -86,6 +87,7 @@ export default function UnlockScreen() {
 
     try {
       setLoading(true);
+
       const data = await biometricLogin();
 
       if (data.requiresTwoFactor) {
@@ -191,8 +193,6 @@ export default function UnlockScreen() {
     }
   };
 
-  
-
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
@@ -213,6 +213,7 @@ export default function UnlockScreen() {
           <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.iconBox} />
 
           <Text style={styles.title}>Welcome back</Text>
+
           <Text style={styles.subtitle}>
             Sign in with your master password to unlock The Guardian.
           </Text>
@@ -287,7 +288,7 @@ export default function UnlockScreen() {
               <Ionicons name="finger-print-outline" size={24} color={C.primary} />
               <Text style={styles.biometricText}>Use Biometrics</Text>
             </TouchableOpacity>
-          </View>
+          )}
 
           <TouchableOpacity
             style={[styles.continueButton, loading && styles.disabledButton]}
@@ -318,15 +319,17 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: {
       flex: 1,
-      backgroundColor: C.background || '#F8F9FA',
+      backgroundColor: C.background,
     },
-    
+
     keyboardView: {
       flex: 1,
     },
+
     scrollView: {
       flex: 1,
     },
+
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
@@ -343,8 +346,8 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
       color: C.text,
       marginBottom: 8,
-      fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', // Serif font to match the design
     },
+
     subtitle: {
       fontSize: 14,
       color: C.textSecondary,
@@ -360,19 +363,7 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       marginBottom: 18,
     },
-    formCard: {
-      backgroundColor: '#FFFFFF', // Forced white for the card background
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: C.primary || '#115E41', // Dark green border
-      padding: 20,
-      // Shadow styling for the floating card effect
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.05,
-      shadowRadius: 12,
-      elevation: 4,
-    },
+
     label: {
       fontSize: 13,
       color: C.text,
@@ -402,8 +393,7 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       marginBottom: 10,
       borderWidth: 1,
-      borderColor: C.border || '#D1D5DB', // Light gray inner border
-      height: 52,
+      borderColor: C.border,
     },
 
     passwordInput: {
@@ -413,6 +403,7 @@ const makeStyles = (C: any) =>
       paddingVertical: 15,
       paddingRight: 10,
     },
+
     eyeButton: {
       width: 42,
       height: 42,
@@ -426,6 +417,7 @@ const makeStyles = (C: any) =>
       paddingVertical: 6,
       paddingHorizontal: 4,
     },
+
     forgotText: {
       fontSize: 14,
       fontWeight: '900',

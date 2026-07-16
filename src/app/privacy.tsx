@@ -2,7 +2,7 @@ import React from 'react';
 import { ScrollView, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { Database, FileLock2, ShieldCheck, Users, Bug, Trash2 } from 'lucide-react-native';
+import { BarChart3, Database, FileLock2, ShieldCheck, Users, Bug, Trash2 } from 'lucide-react-native';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { hapticLight } from '../utils/haptics';
@@ -37,6 +37,11 @@ export default function PrivacyPolicyScreen() {
       icon: <Users size={20} color={C.primary} />,
       title: 'Family sharing and emergency access',
       body: 'Family sharing and emergency access only expose the item types and vault records you explicitly allow. Shared users should only see the vault items they are permitted to access.',
+    },
+    {
+      icon: <BarChart3 size={20} color={C.primary} />,
+      title: 'Privacy-preserving analytics',
+      body: 'The Guardian uses limited, always-on product analytics to improve reliability, security, and user experience. These events may include screen views, feature usage, plan-limit prompts, upload success or failure, API error categories, and bug report submission status. Analytics events are designed to be privacy-safe and must never include passwords, card numbers, CVVs, secure note contents, document contents, recovery codes, JWTs, encryption secrets, email addresses, or full names.',
     },
     {
       icon: <Bug size={20} color={C.primary} />,

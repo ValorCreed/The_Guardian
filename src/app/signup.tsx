@@ -165,7 +165,13 @@ const RegisterScreen = () => {
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           contentContainerStyle={styles.scrollContent}
         >
-          
+          <GuardianLogoTile
+            size={62}
+            logoSize={50}
+            radius={18}
+            style={styles.iconBox}
+          />
+
           <Text style={styles.title}>Create your account</Text>
 
           <Text style={styles.subtitle}>
@@ -323,10 +329,8 @@ const makeStyles = (C: any) =>
     title: {
       fontSize: 30,
       fontWeight: '900',
-      paddingTop: 50,
       color: C.text,
       marginBottom: 8,
-      fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif',
     },
 
     subtitle: {
@@ -341,7 +345,7 @@ const makeStyles = (C: any) =>
       borderRadius: 24,
       padding: 16,
       borderWidth: 1,
-      borderColor: C.primary || '#115E41',
+      borderColor: C.border,
       marginBottom: 18,
     },
 

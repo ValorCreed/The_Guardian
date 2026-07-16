@@ -5,10 +5,21 @@ import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
 import { UploadType } from 'expo-file-system';
 import { markOfflineVaultStale } from './offlineVault';
+import {
+  captureAnalyticsEvent,
+  clearAnalyticsUser,
+  getAnalyticsFileKind,
+  getAnalyticsSizeBucket,
+  identifyAnalyticsUser,
+  trackApiFailure,
+  trackLoginSuccess,
+  trackLogout,
+  trackPlanLimitReached,
+} from './analytics';
 
 // export const API_BASE_URL = 'http://10.229.103.37:8080';
-export const API_BASE_URL = 'your-api-base-url';
-
+//export const API_BASE_URL = 'http://10.19.4.37:8080';
+export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
 /**
  * REQUEST TIMEOUT SETTINGS
  *
@@ -59,6 +70,7 @@ export type LoginResponse = {
   token?: string | null;
   jwt?: string | null;
   accessToken?: string | null;
+  id?: number;
   userId?: number;
   email?: string;
   fullname?: string;
@@ -68,6 +80,8 @@ export type LoginResponse = {
   twoFactorEnabled?: boolean;
   requiresTwoFactor?: boolean;
   user?: {
+    id?: number;
+    userId?: number;
     email?: string;
     fullname?: string;
     name?: string;
@@ -711,6 +725,26 @@ function getServerMessage(data: any, fallbackText?: string) {
   );
 }
 
+function isOptionalFamily401(path: string, status: number) {
+  if (status !== 401) return false;
+
+  return (
+    path.includes('/vault/family/shared-passwords') ||
+    path.includes('/vault/family/member-password-risks')
+  );
+}
+
+async function hasAuthToken() {
+  const token = await getToken();
+  return !!token;
+}
+
+async function isFamilyPlanCached() {
+  const plan = String(await AsyncStorage.getItem('subscriptionPlan') || '').toUpperCase();
+  return plan === 'FAMILY';
+}
+
+
 export function getFriendlyErrorMessage(status?: number, path?: string, rawMessage?: string) {
   let message = String(rawMessage || '').trim();
 
@@ -971,6 +1005,8 @@ async function request<T>(
       errorMessage.includes('canceled') ||
       errorMessage.includes('cancelled')
     ) {
+      trackApiFailure(path, undefined, 'REQUEST_TIMEOUT');
+
       throw new GuardianApiError(
         getFriendlyErrorMessage(
           undefined,
@@ -984,6 +1020,8 @@ async function request<T>(
         }
       );
     }
+
+    trackApiFailure(path, undefined, 'NETWORK_UNREACHABLE');
 
     throw new GuardianApiError(
       getFriendlyErrorMessage(undefined, path, 'Network request failed'),
@@ -1009,13 +1047,34 @@ async function request<T>(
   if (!response.ok) {
     const serverMessage = getServerMessage(data, text);
     const rawCode = String(data?.code || data?.errorCode || '').trim();
+    const quietOptional401 = isOptionalFamily401(path, response.status);
 
-    console.log('API RESPONSE ERROR', {
-      path,
-      status: response.status,
-      serverMessage,
-      data,
-    });
+    if (!quietOptional401) {
+      console.log('API RESPONSE ERROR', {
+        path,
+        status: response.status,
+        serverMessage,
+        data,
+      });
+    }
+
+    const derivedCode = rawCode || (
+      String(serverMessage || '').toUpperCase().includes('DEVICE_LIMIT_REACHED')
+        ? 'DEVICE_LIMIT_REACHED'
+        : String(serverMessage || '').toUpperCase().includes('PLAN_LIMIT_REACHED') ||
+          String(serverMessage || '').toLowerCase().includes('free plan limit reached') ||
+          String(serverMessage || '').toLowerCase().includes('password limit reached')
+            ? 'PLAN_LIMIT_REACHED'
+            : undefined
+    );
+
+    if (!quietOptional401) {
+      trackApiFailure(path, response.status, derivedCode || 'HTTP_ERROR');
+    }
+
+    if (derivedCode === 'PLAN_LIMIT_REACHED') {
+      trackPlanLimitReached(path, response.status);
+    }
 
     throw new GuardianApiError(
       getFriendlyErrorMessage(response.status, path, serverMessage),
@@ -1023,15 +1082,7 @@ async function request<T>(
         status: response.status,
         path,
         rawMessage: serverMessage,
-        code: rawCode || (
-          String(serverMessage || '').toUpperCase().includes('DEVICE_LIMIT_REACHED')
-            ? 'DEVICE_LIMIT_REACHED'
-            : String(serverMessage || '').toUpperCase().includes('PLAN_LIMIT_REACHED') ||
-              String(serverMessage || '').toLowerCase().includes('free plan limit reached') ||
-              String(serverMessage || '').toLowerCase().includes('password limit reached')
-                ? 'PLAN_LIMIT_REACHED'
-                : undefined
-        ),
+        code: derivedCode,
         data,
       }
     );
@@ -1408,6 +1459,7 @@ export const api = {
       method: 'POST',
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('subscription_cancelled');
     return result;
   },
 
@@ -1416,6 +1468,7 @@ export const api = {
       method: 'POST',
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('subscription_upgraded', { plan });
     return result;
   },
 
@@ -1443,11 +1496,13 @@ export const api = {
     return result;
   },
 
-  initializePayment: (plan: 'PREMIUM' | 'FAMILY') =>
-    request<{ authorizationUrl: string; accessCode: string; reference: string }>('/vault/payments/initialize', {
+  initializePayment: async (plan: 'PREMIUM' | 'FAMILY') => {
+    void captureAnalyticsEvent('subscription_checkout_started', { plan });
+    return request<{ authorizationUrl: string; accessCode: string; reference: string }>('/vault/payments/initialize', {
       method: 'POST',
       body: JSON.stringify({ plan }),
-    }, true, LONG_REQUEST_TIMEOUT_MS),
+    }, true, LONG_REQUEST_TIMEOUT_MS);
+  },
 
   verifyPayment: async (reference: string) => {
     const result = await request('/vault/payments/verify', {
@@ -1455,6 +1510,7 @@ export const api = {
       body: JSON.stringify({ reference }),
     }, true, LONG_REQUEST_TIMEOUT_MS);
     clearVaultCaches();
+    void captureAnalyticsEvent('subscription_payment_verified');
     return result;
   },
 
@@ -1464,6 +1520,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('vault_item_created', { item_type: 'PASSWORD' });
     return result;
   },
 
@@ -1565,18 +1622,29 @@ export const api = {
 
           if (status >= 200 && status < 300) {
             clearVaultCaches();
+            void captureAnalyticsEvent('vault_item_created', {
+              item_type: 'DOCUMENT',
+              file_kind: getAnalyticsFileKind(file.type),
+              size_bucket: getAnalyticsSizeBucket(file.size),
+            });
             resolve(data);
             return;
           }
 
           const serverMessage = getServerMessage(data, responseText);
+          const uploadCode = String(data?.code || data?.errorCode || '').trim() || 'UPLOAD_HTTP_ERROR';
+          trackApiFailure('/vault/documents/upload', status, uploadCode);
+          if (uploadCode === 'PLAN_LIMIT_REACHED') {
+            trackPlanLimitReached('/vault/documents/upload', status);
+          }
+
           reject(new GuardianApiError(
             getFriendlyErrorMessage(status, '/vault/documents/upload', serverMessage),
             {
               status,
               path: '/vault/documents/upload',
               rawMessage: serverMessage,
-              code: String(data?.code || data?.errorCode || '').trim() || undefined,
+              code: uploadCode,
               data,
             }
           ));
@@ -1592,6 +1660,8 @@ export const api = {
             }));
             return;
           }
+
+          trackApiFailure('/vault/documents/upload', undefined, 'UPLOAD_FAILED');
 
           reject(new GuardianApiError(
             'The upload was interrupted. Please check your connection and try again.',
@@ -1612,6 +1682,8 @@ export const api = {
 
         xhr.ontimeout = () => {
           if (timeoutId) clearTimeout(timeoutId);
+          trackApiFailure('/vault/documents/upload', undefined, 'UPLOAD_TIMEOUT');
+
           reject(new GuardianApiError(
             'The upload took too long and timed out. Try again on a stronger connection or choose a smaller file.',
             {
@@ -1715,6 +1787,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('vault_item_created', { item_type: 'DOCUMENT' });
     return result;
   },
 
@@ -1769,6 +1842,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('vault_item_created', { item_type: 'CARD' });
     return result;
   },
 
@@ -1807,6 +1881,7 @@ export const api = {
       }),
     });
     clearVaultCaches();
+    void captureAnalyticsEvent('vault_item_created', { item_type: 'NOTE' });
     return result;
   },
 
@@ -1982,11 +2057,18 @@ export const api = {
   getSharedFamilyItems: () =>
     cachedGet<SharedFamilyItems>('/vault/family/shared-items', normalizeSharedFamilyItems, VAULT_LIST_TIMEOUT_MS),
 
-  getFamilyMemberPasswordRisks: () =>
-    cachedGet<FamilyMemberPasswordRisk[]>('/vault/family/member-password-risks', undefined, VAULT_LIST_TIMEOUT_MS),
+  getFamilyMemberPasswordRisks: async () => {
+    if (!(await hasAuthToken())) return [];
+    if (!(await isFamilyPlanCached())) return [];
 
-  getSharedPasswordItems: () =>
-    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS),
+    return cachedGet<FamilyMemberPasswordRisk[]>('/vault/family/member-password-risks', undefined, VAULT_LIST_TIMEOUT_MS);
+  },
+
+  getSharedPasswordItems: async () => {
+    if (!(await hasAuthToken())) return [];
+
+    return cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS);
+  },
 
   getSharedPasswordItem: (id: number | string) =>
     cachedGet<SharedPasswordItem>(`/vault/family/shared-passwords/${id}`, (item) => ({
@@ -2033,8 +2115,11 @@ export const api = {
     }) as SharedNoteItem),
 
   // Backward-compatible names from the first family version.
-  getSharedVaultItems: () =>
-    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS),
+  getSharedVaultItems: async () => {
+    if (!(await hasAuthToken())) return [];
+
+    return cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS);
+  },
 
   getSharedVaultItem: (id: number | string) =>
     cachedGet<SharedPasswordItem>(`/vault/family/shared-passwords/${id}`, (item) => ({
@@ -2105,6 +2190,10 @@ export const api = {
       }),
     });
     clearCache('GET:/vault/support/bug-reports/my');
+    void captureAnalyticsEvent('bug_report_submitted', {
+      category: body.category.trim(),
+      severity: body.severity.trim(),
+    });
     return result;
   },
 
@@ -2166,6 +2255,9 @@ export async function saveLoginSession(data: LoginResponse) {
     throw new Error('Login worked, but no token was returned by the servers.');
   }
 
+  const rawUserId = data.userId ?? data.id ?? data.user?.userId ?? data.user?.id;
+  const userId = rawUserId === undefined || rawUserId === null ? '' : String(rawUserId);
+
   const email = data.email || data.user?.email || '';
 
   const name =
@@ -2184,6 +2276,10 @@ export async function saveLoginSession(data: LoginResponse) {
   await AsyncStorage.setItem('token', token);
   await AsyncStorage.setItem('userEmail', cleanEmail);
   await AsyncStorage.setItem('userName', name);
+
+  if (userId) {
+    await AsyncStorage.setItem('userId', userId);
+  }
 
   /**
    * This key is intentionally not removed during logout.
@@ -2215,8 +2311,16 @@ export async function saveLoginSession(data: LoginResponse) {
   await AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true');
 
   clearCache();
+
+  await identifyAnalyticsUser({
+    userId,
+    plan: data.plan || 'UNKNOWN',
+  });
+
+  trackLoginSuccess();
 }
 export async function logout() {
+  trackLogout();
   tokenCache = null;
 
   /**
@@ -2231,10 +2335,13 @@ export async function logout() {
     'token',
     'userName',
     'userEmail',
+    'userId',
     'subscriptionPlan',
     'emailVerified',
     'twoFactorEnabled',
   ]);
+
+  await clearAnalyticsUser();
 
   clearCache();
 }

@@ -10,6 +10,7 @@ import { AppAlertProvider } from '../context/AppAlertContext';
 import { useAutoLock } from '../hooks/useAutoLock';
 import FloatingTabBar from '../components/FloatingTabBar';
 import AnimatedBlurBackButton from '../components/AnimatedBlurBackButton';
+import { AnalyticsProvider, AnalyticsRouteTracker } from '../services/analytics';
 
 const TAB_SCREENS = ['/home', '/vault', '/security', '/family', '/settings'];
 
@@ -321,6 +322,7 @@ function AppStack() {
   return (
     <BlurTargetProvider targetRef={blurTargetRef}>
       <AppAlertProvider>
+        <AnalyticsRouteTracker pathname={pathname} />
         <View style={{ flex: 1, backgroundColor: colors.background }}>
           <BlurTargetView
             ref={blurTargetRef}
@@ -403,7 +405,9 @@ function AppStack() {
 export default function RootLayout() {
   return (
     <AppThemeProvider>
-      <AppStack />
+      <AnalyticsProvider>
+        <AppStack />
+      </AnalyticsProvider>
     </AppThemeProvider>
   );
 }

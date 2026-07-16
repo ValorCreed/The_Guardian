@@ -19,8 +19,8 @@ export type AutoLockSettings = {
 };
 
 const DEFAULT_TIMEOUT = 30000;
-const LAST_BACKGROUND_AT_KEY = 'lastBackgroundAt';
-const AUTO_LOCK_TIMEOUT_KEY = 'autoLockTimeout';
+export const LAST_BACKGROUND_AT_KEY = 'lastBackgroundAt';
+export const AUTO_LOCK_TIMEOUT_KEY = 'autoLockTimeout';
 
 const AUTH_SCREENS = [
   '/',
@@ -29,9 +29,11 @@ const AUTH_SCREENS = [
   '/signin',
   '/signup',
   '/forgotpassword',
+  '/resetpassword',
   '/verifyemail',
   '/twofactor',
   '/verification',
+  '/accountrecovery',
 ];
 
 const shouldUseAutoLock = (pathname: string) => {
@@ -128,6 +130,33 @@ export const formatAutoLockSetting = (
   return `after ${formatAutoLockTimeout(timeout || DEFAULT_TIMEOUT)}`;
 };
 
+
+const getStoredBackgroundTime = async () => {
+  const savedTime = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
+
+  if (!savedTime) return null;
+
+  const parsedTime = Number(savedTime);
+
+  if (!Number.isFinite(parsedTime) || parsedTime <= 0) {
+    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+    return null;
+  }
+
+  return parsedTime;
+};
+
+export const isAutoLockDue = async () => {
+  const lastBackgroundAt = await getStoredBackgroundTime();
+
+  if (!lastBackgroundAt) return false;
+
+  const timeout = await getAutoLockTimeout();
+  const timeAway = Date.now() - lastBackgroundAt;
+
+  return timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
+};
+
 export const useAutoLock = () => {
   const pathname = usePathname();
 
@@ -167,22 +196,40 @@ export const useAutoLock = () => {
     if (!mountedRef.current) return;
     if (!shouldUseAutoLock(pathname)) return;
 
-    const lastBackgroundAt = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
+    const lastBackgroundAt = await getStoredBackgroundTime();
 
     if (!lastBackgroundAt) return;
 
     const timeout = await getAutoLockTimeout();
-    const timeAway = Date.now() - Number(lastBackgroundAt);
+    const timeAway = Date.now() - lastBackgroundAt;
+    const shouldLock = timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
 
+    /*
+     * Always clear the old timestamp after checking it. If the app comes back
+     * before the timeout, the next background event will store a fresh time.
+     * If the timeout expired, lockVault() will also keep the vault locked.
+     */
     await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
 
-    if (timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout) {
+    if (shouldLock) {
       await lockVault();
     }
   }, [lockVault, pathname]);
 
   useEffect(() => {
     mountedRef.current = true;
+
+    /*
+     * Cold-start protection:
+     * If the app was sent to the background, then killed from Recent Apps,
+     * JavaScript timers and AppState listeners stop running. The old code only
+     * checked the timeout on a background -> active transition, so a killed app
+     * could reopen unlocked even after the timeout had elapsed.
+     *
+     * This startup check reads the persisted background timestamp and locks the
+     * vault as soon as the protected app tree mounts again.
+     */
+    checkIfShouldLock();
 
     const subscription = AppState.addEventListener('change', async (nextState) => {
       const previousState = appState.current;
