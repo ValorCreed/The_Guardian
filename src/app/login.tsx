@@ -35,7 +35,7 @@ const isVeryDarkColor = (value?: string) => {
   return r + g + b < 70;
 };
 
-const LoginScreen = () => {
+const WelcomeScreen = () => {
   const router = useRouter();
   const { colors: C } = useAppTheme();
 
@@ -247,7 +247,7 @@ const LoginScreen = () => {
   );
 };
 
-export default LoginScreen;
+export default WelcomeScreen;
 
 const makeStyles = (P: any) => {
   const compact = SCREEN_HEIGHT < 760;
