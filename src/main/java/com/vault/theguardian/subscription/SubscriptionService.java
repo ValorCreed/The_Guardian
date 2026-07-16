@@ -8,6 +8,13 @@ import java.time.LocalDateTime;
 
 @Service
 public class SubscriptionService {
+
+    private static final long FREE_PASSWORD_LIMIT = 10;
+    private static final long FREE_SECURE_NOTE_LIMIT = 5;
+
+    private static final long FREE_EMERGENCY_CONTACT_LIMIT = 1;
+    private static final long PREMIUM_EMERGENCY_CONTACT_LIMIT = 3;
+    private static final long FAMILY_EMERGENCY_CONTACT_LIMIT = 6;
     private final SubscriptionRepository subscriptionRepository;
     private final NotificationService notificationService;
 
@@ -63,11 +70,15 @@ public class SubscriptionService {
         return saved;
     }
 
+    public long getFreePasswordLimit() {
+        return FREE_PASSWORD_LIMIT;
+    }
+
     public boolean canCreateVaultItem(User user, long currentVaultCount) {
         Subscription subscription = getMySubscription(user);
 
         if (!isPaidSubscription(subscription)) {
-            return currentVaultCount < 50;
+            return currentVaultCount < FREE_PASSWORD_LIMIT;
         }
 
         return true;
@@ -122,7 +133,7 @@ public class SubscriptionService {
         Subscription subscription = getMySubscription(user);
 
         if (!isPaidSubscription(subscription)) {
-            return currentNoteCount < 5;
+            return currentNoteCount < FREE_SECURE_NOTE_LIMIT;
         }
 
         return true;
@@ -133,15 +144,15 @@ public class SubscriptionService {
         Subscription subscription = getMySubscription(user);
 
         if (!isPaidSubscription(subscription)) {
-            return currentEmergencyContactCount < 1;
+            return currentEmergencyContactCount < FREE_EMERGENCY_CONTACT_LIMIT;
         }
 
         if (subscription.getPlan() == SubscriptionPlan.PREMIUM) {
-            return currentEmergencyContactCount < 3;
+            return currentEmergencyContactCount < PREMIUM_EMERGENCY_CONTACT_LIMIT;
         }
 
         if (subscription.getPlan() == SubscriptionPlan.FAMILY) {
-            return currentEmergencyContactCount < 6;
+            return currentEmergencyContactCount < FAMILY_EMERGENCY_CONTACT_LIMIT;
         }
 
         return false;

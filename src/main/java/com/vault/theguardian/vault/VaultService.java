@@ -1,6 +1,7 @@
 package com.vault.theguardian.vault;
 
 import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.subscription.PlanLimitException;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
@@ -29,7 +30,12 @@ public class VaultService {
         long count = vaultItemRepository.countByUser(user);
 
         if (!subscriptionService.canCreateVaultItem(user, count)) {
-            throw new RuntimeException("Free plan limit reached. Upgrade to Premium.");
+            long limit = subscriptionService.getFreePasswordLimit();
+            throw new PlanLimitException(
+                    "PASSWORD",
+                    limit,
+                    "Your Free plan can save up to " + limit + " passwords. Upgrade to Premium or Family for unlimited password storage."
+            );
         }
 
         LocalDateTime now = LocalDateTime.now();

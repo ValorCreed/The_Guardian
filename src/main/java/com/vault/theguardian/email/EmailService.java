@@ -169,6 +169,102 @@ public class EmailService {
         );
     }
 
+
+    public boolean sendBugReportNotification(
+            String toEmail,
+            String reporterName,
+            String reporterEmail,
+            Long reportId,
+            String title,
+            String category,
+            String severity,
+            String description,
+            String stepsToReproduce,
+            String deviceInfo,
+            String appVersion,
+            java.time.LocalDateTime createdAt
+    ) {
+        String safeTitle = escapeHtml(nullToFallback(title, "Untitled bug report"));
+        String safeCategory = escapeHtml(nullToFallback(category, "General"));
+        String safeSeverity = escapeHtml(nullToFallback(severity, "Medium"));
+        String safeReporterName = escapeHtml(nullToFallback(reporterName, "Unknown user"));
+        String safeReporterEmail = escapeHtml(nullToFallback(reporterEmail, "Unknown email"));
+        String safeDescription = toHtmlParagraph(description);
+        String safeSteps = toHtmlParagraph(stepsToReproduce);
+        String safeDeviceInfo = toHtmlParagraph(deviceInfo);
+        String safeAppVersion = escapeHtml(nullToFallback(appVersion, "Not provided"));
+        String safeCreatedAt = escapeHtml(createdAt == null ? "Unknown time" : createdAt.toString());
+
+        String subject = "New Bug Report #" + reportId + ": " + nullToFallback(title, "Untitled");
+
+        String html = """
+                <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
+                    <div style="max-width: 680px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px; border: 1px solid #d9eee5;">
+                        <h2 style="color: #154B2D; margin: 0 0 8px;">The Guardian</h2>
+                        <p style="color: #333333; font-size: 15px; margin-top: 0;">New bug report submitted</p>
+
+                        <div style="background: #E8F8F3; border: 1px solid #BFE9D8; border-radius: 14px; padding: 16px; margin: 20px 0;">
+                            <p style="margin: 0 0 8px; color: #154B2D;"><strong>Report ID:</strong> #%s</p>
+                            <p style="margin: 0 0 8px; color: #154B2D;"><strong>Title:</strong> %s</p>
+                            <p style="margin: 0 0 8px; color: #154B2D;"><strong>Category:</strong> %s</p>
+                            <p style="margin: 0; color: #154B2D;"><strong>Severity:</strong> %s</p>
+                        </div>
+
+                        <h3 style="color: #154B2D; margin-bottom: 8px;">Reporter</h3>
+                        <p style="color: #555555; line-height: 1.5;">
+                            <strong>Name:</strong> %s<br />
+                            <strong>Email:</strong> %s<br />
+                            <strong>Submitted:</strong> %s
+                        </p>
+
+                        <h3 style="color: #154B2D; margin-bottom: 8px;">Description</h3>
+                        <div style="color: #555555; line-height: 1.6; background: #fafafa; padding: 14px; border-radius: 12px; border: 1px solid #eeeeee;">
+                            %s
+                        </div>
+
+                        <h3 style="color: #154B2D; margin-bottom: 8px;">Steps to reproduce</h3>
+                        <div style="color: #555555; line-height: 1.6; background: #fafafa; padding: 14px; border-radius: 12px; border: 1px solid #eeeeee;">
+                            %s
+                        </div>
+
+                        <h3 style="color: #154B2D; margin-bottom: 8px;">Diagnostics</h3>
+                        <p style="color: #555555; line-height: 1.5;">
+                            <strong>App version:</strong> %s
+                        </p>
+                        <div style="color: #555555; line-height: 1.6; background: #fafafa; padding: 14px; border-radius: 12px; border: 1px solid #eeeeee;">
+                            %s
+                        </div>
+
+                        <p style="color: #888888; font-size: 13px; margin-top: 24px;">
+                            This notification contains only bug report details and safe diagnostics. It does not include vault passwords, card numbers, CVV, notes, documents, recovery codes, JWT tokens, or encryption secrets.
+                        </p>
+
+                        <p style="color: #154B2D; font-size: 13px; font-weight: bold; margin-top: 24px;">
+                            Your Life. Protected.
+                        </p>
+                    </div>
+                </div>
+                """.formatted(
+                reportId,
+                safeTitle,
+                safeCategory,
+                safeSeverity,
+                safeReporterName,
+                safeReporterEmail,
+                safeCreatedAt,
+                safeDescription,
+                safeSteps,
+                safeAppVersion,
+                safeDeviceInfo
+        );
+
+        return sendHtmlEmail(toEmail, subject, html);
+    }
+
+    private boolean sendHtmlEmail(String toEmail, String subject, String html) {
+        return sendHtmlEmail(toEmail, subject, html, null);
+    }
+
     private boolean sendHtmlEmail(String toEmail, String subject, String html, String code) {
         try {
             validateGmailApiConfig();
@@ -275,7 +371,10 @@ public class EmailService {
     private boolean handleEmailFailure(String toEmail, String code, Exception error) {
         System.out.println("EMAIL SEND FAILED for " + toEmail);
         System.out.println("Reason: " + error.getMessage());
-        System.out.println("Code for " + toEmail + " is: " + code);
+
+        if (!isBlank(code)) {
+            System.out.println("Code for " + toEmail + " is: " + code);
+        }
 
         if (demoMode) {
             System.out.println("DEMO_MODE is true. Email failure will not break the user flow.");
@@ -285,6 +384,35 @@ public class EmailService {
         throw new RuntimeException(
                 "We could not send the email right now. Please try again shortly."
         );
+    }
+
+
+    private String toHtmlParagraph(String value) {
+        if (isBlank(value)) {
+            return "<em>Not provided</em>";
+        }
+
+        return escapeHtml(value)
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .replace("\n", "<br />");
+    }
+
+    private String nullToFallback(String value, String fallback) {
+        return isBlank(value) ? fallback : value.trim();
+    }
+
+    private String escapeHtml(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private void validateGmailApiConfig() {

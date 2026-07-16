@@ -5,6 +5,7 @@ import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
@@ -18,6 +19,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.filter.OncePerRequestFilter;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 
 @Configuration
@@ -76,15 +78,23 @@ public class SecurityConfig {
                     HttpServletRequest request,
                     HttpServletResponse response,
                     FilterChain filterChain
-            ) {
+            ) throws ServletException, IOException {
+                String path = request.getServletPath();
+
+                if (isPublicPath(path)) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+
+                /*
+                 * IMPORTANT:
+                 * Keep authentication validation inside this try block, but call
+                 * filterChain.doFilter(...) after it. If controller/service errors
+                 * are caught here, normal app errors like plan limits become 401
+                 * "session expired" responses. That is what caused the misleading
+                 * alert when a Free user reached the password limit.
+                 */
                 try {
-                    String path = request.getServletPath();
-
-                    if (isPublicPath(path)) {
-                        filterChain.doFilter(request, response);
-                        return;
-                    }
-
                     String authHeader = request.getHeader("Authorization");
 
                     if (authHeader == null || !authHeader.startsWith("Bearer ")) {
@@ -132,11 +142,17 @@ public class SecurityConfig {
                             new UsernamePasswordAuthenticationToken(user, null, java.util.List.of());
 
                     SecurityContextHolder.getContext().setAuthentication(authentication);
-                    filterChain.doFilter(request, response);
-
                 } catch (Exception e) {
+                    SecurityContextHolder.clearContext();
                     response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    return;
                 }
+
+                /*
+                 * Let controller/service exceptions continue to Spring MVC so that
+                 * @RestControllerAdvice can return the correct user-friendly JSON.
+                 */
+                filterChain.doFilter(request, response);
             }
         };
     }

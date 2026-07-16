@@ -307,7 +307,10 @@ public class DocumentService {
                 document.getDocumentName(),
                 document.getDocumentType(),
                 "",
-                decryptTextForResponse(document.getEncryptedNotes())
+                decryptTextForResponse(document.getEncryptedNotes()),
+                document.getSizeBytes(),
+                document.getCreatedAt(),
+                document.getCreatedAt()
         );
     }
 
