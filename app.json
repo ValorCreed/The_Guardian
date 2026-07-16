@@ -2,7 +2,7 @@
   "expo": {
     "name": "The Guardian",
     "slug": "guardian",
-    "version": "2.5 Beta",
+    "version": "2.8 Beta",
     "orientation": "portrait",
     "scheme": "theguardian",
     "userInterfaceStyle": "automatic",

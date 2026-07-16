@@ -21,28 +21,28 @@ import {
 import { useAppTheme } from '../context/ThemeContext';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const APP_VERSION = '2.5 Beta';
+const APP_VERSION = '2.8 Beta';
 
 const DEVELOPERS = [
   {
-    name: 'Isaac Peprah',
-    role: 'Backend & Frontend Developer, CTO II',
+    name: 'Peprah Isaac Korankye',
+    role: 'isaacpeprahkorankye@gmail.com',
   },
   {
     name: 'Kingswell Ampoti',
-    role: 'Frontend Developer, CTO',
+    role: 'kingsleyampoti4@gmail.com',
   },
   {
-    name: 'Kelvin',
-    role: 'UI/UX Designer & Branding Prodigy',
+    name: 'Kelvin Obirigya',
+    role: 'kelvinobirigya@gmail.com',
   },
   {
     name: 'Developer Four',
-    role: 'Database Engineer',
+    role: 'UNKNOWN',
   },
   {
     name: 'Developer Five',
-    role: 'Security Engineer',
+    role: 'UNKNOWN',
   },
 ];
 
