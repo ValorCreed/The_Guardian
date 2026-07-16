@@ -21,7 +21,7 @@ import {
 import { useAppTheme } from '../context/ThemeContext';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const APP_VERSION = '2.0.3 (Internal Beta)';
+const APP_VERSION = '2.5 Beta';
 
 const DEVELOPERS = [
   {

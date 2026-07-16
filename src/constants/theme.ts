@@ -3,15 +3,19 @@ export const Colors = {
     // Text
     text: '#111827',
     textSecondary: '#6B7280',
+    textPrimary: '#111827',
 
     // Backgrounds
     background: '#F8FAF9',
     backgroundElement: '#FFFFFF',
+    surface: '#FFFFFF',
     backgroundSelected: '#E8F2EC',
 
     // Brand Colors
     primary: '#065F46',
+    primaryDark: '#044E3A',
     primaryLight: '#10B981',
+    primaryMuted: '#DFF4EA',
 
     // Buttons
     backgroundbutton: '#065F46',
@@ -42,23 +46,27 @@ export const Colors = {
     inputBorder: '#D1D5DB',
 
     // Tab Bar
-    tabInactive: '#9CA3AF',
+    tabInactive: '#6B7280',
     tabActive: '#065F46',
   },
 
   dark: {
     // Text
     text: '#FFFFFF',
-    textSecondary: '#9CA3AF',
+    textSecondary: '#A7B0BE',
+    textPrimary: '#F9FAFB',
 
     // Backgrounds
     background: '#0A0F14',
     backgroundElement: '#111827',
+    surface: '#111827',
     backgroundSelected: '#1F2937',
 
     // Brand Colors
     primary: '#10B981',
+    primaryDark: '#065F46',
     primaryLight: '#34D399',
+    primaryMuted: '#123F31',
 
     // Buttons
     backgroundbutton: '#065F46',
@@ -89,7 +97,58 @@ export const Colors = {
     inputBorder: '#374151',
 
     // Tab Bar
-    tabInactive: '#6B7280',
+    tabInactive: '#D1D5DB',
     tabActive: '#10B981',
   },
+
+  oled: {
+    // Text
+    text: '#FFFFFF',
+    textSecondary: '#A9B4C2',
+    textPrimary: '#FFFFFF',
+
+    // Backgrounds
+    background: '#000000',
+    backgroundElement: '#050A08',
+    surface: '#050A08',
+    backgroundSelected: '#071A14',
+
+    // Brand Colors
+    primary: '#10B981',
+    primaryDark: '#065F46',
+    primaryLight: '#34D399',
+    primaryMuted: '#062D22',
+
+    // Buttons
+    backgroundbutton: '#065F46',
+
+    // Status Colors
+    success: '#10B981',
+    warning: '#FBBF24',
+    danger: '#F87171',
+    info: '#60A5FA',
+
+    // Dashboard Cards
+    securityScore: '#F5B93D',
+    securityScoreBg: '#211700',
+
+    // Quick Actions
+    actionCard: '#08110E',
+    actionIconBg: '#065F46',
+
+    // Alerts
+    alertDangerBg: '#2A0707',
+    alertWarningBg: '#211700',
+
+    // Borders
+    border: '#18231F',
+
+    // Inputs
+    inputBackground: '#050A08',
+    inputBorder: '#1F2A25',
+
+    // Tab Bar
+    tabInactive: '#D1D5DB',
+    tabActive: '#10B981',
+  }
 } as const;

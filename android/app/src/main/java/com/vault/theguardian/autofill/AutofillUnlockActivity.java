@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 import android.service.autofill.Dataset;
 
 import java.util.ArrayList;
@@ -179,6 +180,13 @@ public class AutofillUnlockActivity extends Activity {
 
     private void returnCredential(GuardianAutofillCredential credential) {
         try {
+            if (usernameIds.isEmpty() && passwordIds.isEmpty()) {
+                Toast.makeText(this, "No fillable login fields were found.", Toast.LENGTH_LONG).show();
+                setResult(RESULT_CANCELED);
+                finish();
+                return;
+            }
+
             Dataset.Builder builder = new Dataset.Builder(
                     GuardianAutofillService.createPresentation(this, credential.presentationTitle())
             );
@@ -203,6 +211,7 @@ public class AutofillUnlockActivity extends Activity {
             result.putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, builder.build());
             setResult(RESULT_OK, result);
         } catch (Exception error) {
+            Toast.makeText(this, "Could not return this login to Android Autofill.", Toast.LENGTH_LONG).show();
             setResult(RESULT_CANCELED);
         }
 

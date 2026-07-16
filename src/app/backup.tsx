@@ -41,6 +41,7 @@ import {
   BackupStatusResponse,
 } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -140,6 +141,8 @@ export default function BackupScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
+  useSensitiveScreenProtection(true);
+
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -234,7 +237,7 @@ export default function BackupScreen() {
         'Backup is only available on the Premium and Family plans.',
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Upgrade', onPress: () => router.push('/subscription') },
+          { text: 'Upgrade', onPress: () => router.push('/subscription?from=backup') },
         ]
       );
       return;
@@ -491,7 +494,7 @@ export default function BackupScreen() {
       <TouchableOpacity
         style={styles.primaryButton}
         activeOpacity={0.86}
-        onPress={() => router.push('/subscription')}
+        onPress={() => router.push('/subscription?from=backup')}
       >
         <Text style={styles.primaryButtonText}>Upgrade plan</Text>
       </TouchableOpacity>

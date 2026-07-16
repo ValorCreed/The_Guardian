@@ -1,6 +1,8 @@
-const safeEncode = (text: string) => {
-  return encodeURIComponent(text);
-};
+/*
+ * Real vault encryption happens on the Spring Boot backend before values are stored.
+ * These helpers now only format frontend payloads and decode older values that were
+ * saved by the previous encodeURIComponent-based implementation.
+ */
 
 const safeDecode = (text: string) => {
   try {
@@ -11,22 +13,38 @@ const safeDecode = (text: string) => {
 };
 
 export const encryptPassword = (password: string) => {
-  return safeEncode(password);
+  return password;
 };
 
-export const decryptPassword = (encryptedPassword: string) => {
-  return safeDecode(encryptedPassword || '');
+export const decryptPassword = (passwordFromApi: string) => {
+  return passwordFromApi || '';
 };
 
+/*
+ * Do not URL-encode simple strings anymore.
+ * The backend encrypts these raw values using AES-GCM.
+ *
+ * Old behavior turned "Morgan" into %22Morgan%22 because it JSON-stringified and
+ * URL-encoded simple strings. That is why cardholder names looked strange.
+ */
 export const encryptJson = (data: any) => {
-  return safeEncode(JSON.stringify(data));
+  if (data === undefined || data === null) return '';
+  if (typeof data === 'string') return data;
+  return JSON.stringify(data);
 };
 
 export const decryptJson = <T,>(encryptedData: string, fallback: T): T => {
+  if (!encryptedData) return fallback;
+
+  const decoded = safeDecode(encryptedData).trim();
+
   try {
-    if (!encryptedData) return fallback;
-    return JSON.parse(safeDecode(encryptedData));
+    return JSON.parse(decoded) as T;
   } catch {
+    if (typeof fallback === 'string') {
+      return decoded as T;
+    }
+
     return fallback;
   }
 };

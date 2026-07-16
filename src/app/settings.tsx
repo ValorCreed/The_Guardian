@@ -23,7 +23,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
 import {
   Bell,
+  Bug,
   ChevronRight,
+  FileText,
   CloudUpload,
   Crown,
   Fingerprint,
@@ -37,22 +39,70 @@ import {
   Trash2,
   Wand2,
 } from 'lucide-react-native';
+import { Ionicons } from '@expo/vector-icons';
 
-import { useAppTheme } from '../context/ThemeContext';
+import { useAppTheme, type ThemeMode } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
 import { api, logout } from '../services/api';
+import {
+  clearOfflineVaultSnapshot,
+  formatOfflineSavedAt,
+  getOfflineVaultStatus,
+} from '../services/offlineVault';
+import type { OfflineVaultStatus } from '../services/offlineVault';
 import {
   clearBiometricCredentials,
   hasBiometricCredentials,
   setBiometricEnabled,
 } from '../utils/secureAuth';
+import {
+  getHapticsEnabledPreference,
+  hapticLight,
+  hapticMedium,
+  hapticToggleOff,
+  hapticToggleOn,
+  hapticWarning,
+  setHapticsEnabledPreference,
+} from '../utils/haptics';
+
+const AUTO_LOCK_ON_APP_CLOSE = -1;
 
 const TIMEOUT_OPTIONS = [
+  { label: 'When app closes', value: AUTO_LOCK_ON_APP_CLOSE },
   { label: '30 seconds', value: 30000 },
   { label: '1 minute', value: 60000 },
+  { label: '3 minutes', value: 180000 },
   { label: '5 minutes', value: 300000 },
-  { label: '15 minutes', value: 900000 },
-  { label: '1 hour', value: 3600000 },
+];
+
+const getAutoLockDescription = (option: { label: string; value: number }) => {
+  if (option.value === AUTO_LOCK_ON_APP_CLOSE) {
+    return 'Locks as soon as the app closes or goes to the background';
+  }
+
+  return `Locks after leaving app for ${option.label}`;
+};
+
+const THEME_OPTIONS: Array<{
+  label: string;
+  value: ThemeMode;
+  description: string;
+}> = [
+  {
+    label: 'Light',
+    value: 'light',
+    description: 'Bright and clean',
+  },
+  {
+    label: 'Dark',
+    value: 'dark',
+    description: 'Comfortable low-light mode',
+  },
+  {
+    label: 'OLED',
+    value: 'oled',
+    description: 'Pure black for OLED screens',
+  },
 ];
 
 type SubscriptionPlan = 'FREE' | 'PREMIUM' | 'FAMILY';
@@ -240,7 +290,7 @@ function PlanBadge({
 }
 
 export default function SettingsScreen() {
-  const { isDark, toggleTheme, colors: C } = useAppTheme();
+  const { mode, isDark, setThemeMode, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [fullName, setFullName] = useState('User');
@@ -254,30 +304,44 @@ export default function SettingsScreen() {
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [offlineStatus, setOfflineStatus] = useState<OfflineVaultStatus | null>(null);
+  const [hapticsEnabled, setHapticsEnabled] = useState(true);
 
   const loadSettings = useCallback(async () => {
     const savedName = await AsyncStorage.getItem('userName');
     const savedEmail = await AsyncStorage.getItem('userEmail');
     const savedBiometric = await AsyncStorage.getItem('biometricUnlock');
     const savedTimeout = await AsyncStorage.getItem('autoLockTimeout');
+    const savedHapticsEnabled = await getHapticsEnabledPreference();
 
     setFullName(savedName || 'User');
     setEmail(savedEmail || '');
     setBiometricUnlock(savedBiometric === 'true');
+    setHapticsEnabled(savedHapticsEnabled);
 
     if (savedTimeout) {
+      const parsedTimeout = savedTimeout === 'app_close'
+        ? AUTO_LOCK_ON_APP_CLOSE
+        : Number(savedTimeout);
+
       const found = TIMEOUT_OPTIONS.find(
-        (option) => option.value === Number(savedTimeout)
+        (option) => option.value === parsedTimeout
       );
 
-      if (found) {
-        setSelectedTimeout(found);
-      }
+      setSelectedTimeout(found || TIMEOUT_OPTIONS[1]);
+    } else {
+      setSelectedTimeout(TIMEOUT_OPTIONS[1]);
     }
 
     const compatible = await LocalAuthentication.hasHardwareAsync();
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     setBiometricAvailable(compatible && enrolled);
+
+    try {
+      setOfflineStatus(await getOfflineVaultStatus());
+    } catch {
+      setOfflineStatus(null);
+    }
 
     try {
       setPlanLoading(true);
@@ -315,6 +379,7 @@ export default function SettingsScreen() {
 
   const handleBiometricToggle = async (value: boolean) => {
     if (!value) {
+      hapticToggleOff();
       setBiometricUnlock(false);
       await setBiometricEnabled(false);
       await clearBiometricCredentials();
@@ -350,6 +415,7 @@ export default function SettingsScreen() {
       return;
     }
 
+    hapticToggleOn();
     setBiometricUnlock(true);
     await setBiometricEnabled(true);
   };
@@ -363,6 +429,29 @@ export default function SettingsScreen() {
         { text: 'Lock', style: 'destructive', onPress: lockVault },
       ]
     );
+  };
+
+  const handleHapticsToggle = async (value: boolean) => {
+    if (value) {
+      await setHapticsEnabledPreference(true);
+      setHapticsEnabled(true);
+      hapticToggleOn();
+      return;
+    }
+
+    hapticToggleOff();
+    setHapticsEnabled(false);
+    await setHapticsEnabledPreference(false);
+  };
+
+  const handleThemeSelect = async (nextMode: ThemeMode) => {
+    if (nextMode === mode) {
+      hapticLight();
+      return;
+    }
+
+    await setThemeMode(nextMode);
+    hapticMedium();
   };
 
   const closeDeleteModal = () => {
@@ -447,6 +536,30 @@ export default function SettingsScreen() {
     );
   };
 
+  const handleClearOfflineVault = () => {
+    if (!offlineStatus?.hasSnapshot) {
+      Alert.alert('Offline vault', 'There is no offline vault snapshot saved on this device yet.');
+      return;
+    }
+
+    Alert.alert(
+      'Clear offline vault?',
+      'This removes the saved offline copy from this device only. Your online vault will not be deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Clear',
+          style: 'destructive',
+          onPress: async () => {
+            await clearOfflineVaultSnapshot();
+            setOfflineStatus(await getOfflineVaultStatus());
+            Alert.alert('Offline vault cleared', 'The saved offline vault snapshot was removed from this device.');
+          },
+        },
+      ]
+    );
+  };
+
   const handleDeleteAccount = () => {
     if (deleteAccountLoading) return;
 
@@ -481,7 +594,7 @@ export default function SettingsScreen() {
           <TouchableOpacity
             style={styles.accountCard}
             activeOpacity={0.75}
-            onPress={() => router.push('/userinfo')}
+            onPress={() => { hapticLight(); router.push('/userinfo'); }}
           >
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{getInitials(fullName, email)}</Text>
@@ -503,7 +616,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => router.push('/autolock')}
+              onPress={() => { hapticLight(); router.push('/autolock'); }}
             >
               <View style={styles.iconCircle}>
                 <Lock size={20} color={iconColor} />
@@ -512,7 +625,7 @@ export default function SettingsScreen() {
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Auto-lock timeout</Text>
                 <Text style={styles.rowSub}>
-                  Locks after leaving app for {selectedTimeout.label}
+                  {getAutoLockDescription(selectedTimeout)}
                 </Text>
               </View>
 
@@ -543,7 +656,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => router.push('/twofasetup')}
+              onPress={() => { hapticLight(); router.push('/twofasetup'); }}
             >
               <View style={styles.iconCircle}>
                 <KeyRound size={20} color={iconColor} />
@@ -562,7 +675,26 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => router.push('/autofill')}
+              onPress={() => { hapticLight(); router.push('/recoverykit'); }}
+            >
+              <View style={styles.iconCircle}>
+                <Ionicons name="medkit-outline" size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Recovery kit</Text>
+                <Text style={styles.rowSub}>
+                  Generate an offline recovery key for account recovery
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
+              activeOpacity={0.6}
+              onPress={() => { hapticLight(); router.push('/autofill'); }}
             >
               <View style={styles.iconCircle}>
                 <Wand2 size={20} color={iconColor} />
@@ -581,7 +713,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => router.push('/devices')}
+              onPress={() => { hapticLight(); router.push('/devices'); }}
             >
               <View style={styles.iconCircle}>
                 <Smartphone size={20} color={iconColor} />
@@ -600,7 +732,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={() => router.push('/emergencyaccess')}
+              onPress={() => { hapticLight(); router.push('/emergencyaccess'); }}
             >
               <View style={styles.iconCircle}>
                 <ShieldAlert size={20} color={iconColor} />
@@ -620,16 +752,71 @@ export default function SettingsScreen() {
           <Text style={styles.sectionLabel}>PREFERENCES</Text>
 
           <View style={styles.card}>
-            <View style={[styles.row, styles.rowDivider]}>
-              <View style={styles.iconCircle}>
-                <Palette size={20} color={iconColor} />
+            <View style={[styles.preferenceBlock, styles.rowDivider]}>
+              <View style={styles.preferenceHeader}>
+                <View style={styles.iconCircle}>
+                  <Palette size={20} color={iconColor} />
+                </View>
+
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowLabel}>Appearance</Text>
+                  <Text style={styles.rowSub}>
+                    Choose Light, Dark, or OLED black mode
+                  </Text>
+                </View>
               </View>
 
-              <Text style={styles.rowLabel}>Dark mode</Text>
+              <View style={styles.themePicker}>
+                {THEME_OPTIONS.map((option) => {
+                  const selected = mode === option.value;
+
+                  return (
+                    <TouchableOpacity
+                      key={option.value}
+                      style={[
+                        styles.themeOption,
+                        selected && styles.themeOptionSelected,
+                      ]}
+                      activeOpacity={0.82}
+                      onPress={() => handleThemeSelect(option.value)}
+                    >
+                      <Text
+                        style={[
+                          styles.themeOptionLabel,
+                          selected && styles.themeOptionLabelSelected,
+                        ]}
+                      >
+                        {option.label}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.themeOptionSub,
+                          selected && styles.themeOptionSubSelected,
+                        ]}
+                      >
+                        {option.description}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+
+            <View style={[styles.row, styles.rowDivider]}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="pulse-outline" size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Haptic feedback</Text>
+                <Text style={styles.rowSub}>
+                  Feel subtle taps for important vault actions
+                </Text>
+              </View>
 
               <Switch
-                value={isDark}
-                onValueChange={toggleTheme}
+                value={hapticsEnabled}
+                onValueChange={handleHapticsToggle}
                 trackColor={{ false: C.border, true: C.primary }}
                 thumbColor="#fff"
                 ios_backgroundColor={C.border}
@@ -639,7 +826,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={() => router.push('/notifications')}
+              onPress={() => { hapticLight(); router.push('/notifications'); }}
             >
               <View style={styles.iconCircle}>
                 <Bell size={20} color={iconColor} />
@@ -662,7 +849,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={[styles.row, styles.rowDivider]}
               activeOpacity={0.6}
-              onPress={() => router.push('/backup')}
+              onPress={() => { hapticLight(); router.push('/backup'); }}
             >
               <View style={styles.iconCircle}>
                 <CloudUpload size={20} color={iconColor} />
@@ -679,9 +866,30 @@ export default function SettingsScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
+              activeOpacity={0.6}
+              onPress={() => { hapticWarning(); handleClearOfflineVault(); }}
+            >
+              <View style={styles.iconCircle}>
+                <Ionicons name="archive-outline" size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Offline vault</Text>
+                <Text style={styles.rowSub}>
+                  {offlineStatus?.hasSnapshot
+                    ? `${offlineStatus.totalCount} items saved · ${formatOfflineSavedAt(offlineStatus.savedAt)}`
+                    : 'No offline snapshot saved yet'}
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={() => router.push('/subscription')}
+              onPress={() => { hapticLight(); router.push('/subscription?from=settings'); }}
             >
               <View style={styles.iconCircle}>
                 <Crown size={20} color={iconColor} />
@@ -699,7 +907,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={() => router.push('/about')}
+              onPress={() => { hapticLight(); router.push('/about'); }}
             >
               <View style={styles.iconCircle}>
                 <Info size={20} color={iconColor} />
@@ -716,13 +924,105 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
 
+          <Text style={styles.sectionLabel}>LEGAL</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={[styles.row, styles.rowDivider]}
+              activeOpacity={0.6}
+              onPress={() => { hapticLight(); router.push('/privacy'); }}
+            >
+              <View style={styles.iconCircle}>
+                <ShieldAlert size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Privacy Policy</Text>
+                <Text style={styles.rowSub}>
+                  How The Guardian handles vault, device, and support data
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => { hapticLight(); router.push('/terms'); }}
+            >
+              <View style={styles.iconCircle}>
+                <FileText size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Terms of Service</Text>
+                <Text style={styles.rowSub}>
+                  Rules for using The Guardian and its vault features
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.sectionLabel}>SUPPORT</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => { hapticLight(); router.push('/bugreport'); }}
+            >
+              <View style={styles.iconCircle}>
+                <Bug size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Report a bug</Text>
+                <Text style={styles.rowSub}>
+                  Send a safe bug report without including vault secrets
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
+
+          {/* TEMP VERIFICATION TEST BUTTON
+              Keep this while testing the post-signup verification screen.
+              Before production release, comment out or delete this entire block. */}
+          {/* <Text style={styles.sectionLabel}>TESTING</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => { hapticLight(); router.push('/verification?from=settings'); }}
+            >
+              <View style={styles.iconCircle}>
+                <Ionicons name="shield-checkmark-outline" size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>Open verification page</Text>
+                <Text style={styles.rowSub}>
+                  Temporary shortcut for testing the legal acceptance screen
+                </Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View> */}
+          {/* END TEMP VERIFICATION TEST BUTTON */}
+
           <Text style={styles.sectionLabel}>DANGER ZONE</Text>
 
           <View style={styles.dangerCard}>
             <TouchableOpacity
               style={[styles.row, styles.dangerRowDivider]}
               activeOpacity={0.6}
-              onPress={handleLockNow}
+              onPress={() => { hapticWarning(); handleLockNow(); }}
             >
               <View style={styles.dangerIconCircle}>
                 <LockKeyhole size={20} color={C.danger} />
@@ -741,7 +1041,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={handleDeleteAccount}
+              onPress={() => { hapticWarning(); handleDeleteAccount(); }}
               disabled={deleteAccountLoading}
             >
               <View style={styles.dangerIconCircle}>
@@ -815,7 +1115,7 @@ export default function SettingsScreen() {
                 styles.deleteConfirmButton,
                 deleteAccountLoading && styles.deleteDisabledButton,
               ]}
-              onPress={performDeleteAccount}
+              onPress={() => { hapticWarning(); performDeleteAccount(); }}
               disabled={deleteAccountLoading}
               activeOpacity={0.82}
             >
@@ -831,7 +1131,7 @@ export default function SettingsScreen() {
 
             <TouchableOpacity
               style={styles.deleteCancelButton}
-              onPress={closeDeleteModal}
+              onPress={() => { hapticLight(); closeDeleteModal(); }}
               disabled={deleteAccountLoading}
               activeOpacity={0.75}
             >
@@ -890,170 +1190,157 @@ const localStyles = StyleSheet.create({
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
-    safeArea: {
-      flex: 1,
-      backgroundColor: C.background,
-    },
-
+    safeArea: { flex: 1, backgroundColor: C.background },
     scrollContent: {
       marginTop: 35,
-      paddingHorizontal: 16,
+      paddingHorizontal: 18,
       paddingTop: 16,
-      paddingBottom: 140,
+      paddingBottom: 175,
     },
-
     title: {
-      fontSize: 32,
-      fontWeight: '700',
+      fontSize: 36,
+      fontWeight: '900',
       color: C.text,
-      marginBottom: 16,
+      marginBottom: 18,
+      letterSpacing: -0.7,
     },
-
     accountCard: {
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
-      padding: 14,
-      marginBottom: 24,
+      borderRadius: 28,
+      padding: 16,
+      marginBottom: 26,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
     },
-
     avatar: {
-      width: 44,
-      height: 44,
-      borderRadius: 22,
+      width: 50,
+      height: 50,
+      borderRadius: 20,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: 12,
+      marginRight: 13,
     },
-
-    avatarText: {
-      color: '#fff',
-      fontWeight: '700',
-      fontSize: 15,
-    },
-
-    accountInfo: {
-      flex: 1,
-    },
-
-    accountName: {
-      fontSize: 16,
-      fontWeight: '700',
-      color: C.text,
-    },
-
-    accountEmail: {
-      fontSize: 13,
-      color: C.textSecondary,
-      marginTop: 2,
-    },
-
+    avatarText: { color: '#fff', fontWeight: '900', fontSize: 15 },
+    accountInfo: { flex: 1 },
+    accountName: { fontSize: 17, fontWeight: '900', color: C.text, letterSpacing: -0.2 },
+    accountEmail: { fontSize: 13, color: C.textSecondary, marginTop: 3, fontWeight: '600' },
     sectionLabel: {
       fontSize: 12,
-      fontWeight: '700',
+      fontWeight: '900',
       color: C.textSecondary,
-      letterSpacing: 0.5,
-      marginBottom: 8,
+      letterSpacing: 0.7,
+      marginBottom: 10,
       marginLeft: 4,
+      textTransform: 'uppercase',
     },
-
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
-      marginBottom: 24,
+      borderRadius: 24,
+      marginBottom: 26,
       overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.045,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
     },
-
-    row: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 14,
-      paddingHorizontal: 14,
-    },
-
-    rowDivider: {
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
-    },
-
+    row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 16 },
+    rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     iconCircle: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: C.backgroundSelected,
+      width: 42,
+      height: 42,
+      borderRadius: 17,
+      backgroundColor: C.actionCard || C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 14,
     },
-
-    rowLabel: {
+    rowLabel: { flex: 1, fontSize: 15, color: C.text, fontWeight: '900' },
+    rowSub: { fontSize: 12, color: C.textSecondary, marginTop: 3, lineHeight: 17, fontWeight: '600' },
+    preferenceBlock: { paddingVertical: 16, paddingHorizontal: 16 },
+    preferenceHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
+    themePicker: {
+      flexDirection: 'row',
+      gap: 8,
+      backgroundColor: C.background,
+      padding: 5,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    themeOption: {
       flex: 1,
-      fontSize: 16,
+      borderRadius: 14,
+      paddingVertical: 10,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 58,
+    },
+    themeOptionSelected: {
+      backgroundColor: C.primary,
+      shadowColor: C.primary,
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    themeOptionLabel: {
       color: C.text,
-      fontWeight: '500',
+      fontSize: 13,
+      fontWeight: '900',
     },
-
-    rowSub: {
-      fontSize: 12,
+    themeOptionLabelSelected: { color: '#FFFFFF' },
+    themeOptionSub: {
       color: C.textSecondary,
-      marginTop: 2,
-      lineHeight: 16,
+      fontSize: 10,
+      fontWeight: '700',
+      textAlign: 'center',
+      marginTop: 3,
+      lineHeight: 13,
     },
-
+    themeOptionSubSelected: { color: 'rgba(255,255,255,0.86)' },
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.62)',
+      backgroundColor: 'rgba(0,0,0,0.66)',
       alignItems: 'center',
       justifyContent: 'center',
       padding: 22,
     },
-
     deleteModalCard: {
       width: '100%',
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
-      padding: 20,
+      borderRadius: 28,
+      padding: 22,
       borderWidth: 1,
       borderColor: C.danger,
     },
-
     deleteModalIcon: {
-      width: 54,
-      height: 54,
-      borderRadius: 27,
+      width: 56,
+      height: 56,
+      borderRadius: 22,
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: 12,
+      marginBottom: 14,
     },
-
-    deleteModalTitle: {
-      color: C.text,
-      fontSize: 21,
-      fontWeight: '900',
-      marginBottom: 8,
-    },
-
-    deleteModalText: {
-      color: C.textSecondary,
-      fontSize: 13,
-      lineHeight: 19,
-      marginBottom: 18,
-    },
-
-    deleteInputLabel: {
-      color: C.text,
-      fontSize: 13,
-      fontWeight: '800',
-      marginBottom: 8,
-    },
-
+    deleteModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', marginBottom: 8 },
+    deleteModalText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 18, fontWeight: '600' },
+    deleteInputLabel: { color: C.text, fontSize: 13, fontWeight: '900', marginBottom: 8 },
     deleteInput: {
       backgroundColor: C.background,
       color: C.text,
-      borderRadius: 16,
+      borderRadius: 17,
       borderWidth: 1,
       borderColor: C.border,
       paddingHorizontal: 16,
@@ -1061,7 +1348,6 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
       fontSize: 15,
     },
-
     deleteConfirmButton: {
       backgroundColor: C.danger,
       borderRadius: 999,
@@ -1072,64 +1358,28 @@ const makeStyles = (C: any) =>
       gap: 9,
       marginTop: 4,
     },
-
-    deleteDisabledButton: {
-      opacity: 0.65,
-    },
-
-    deleteConfirmButtonText: {
-      color: '#FFFFFF',
-      fontSize: 14,
-      fontWeight: '900',
-    },
-
-    deleteCancelButton: {
-      alignItems: 'center',
-      paddingVertical: 13,
-      marginTop: 8,
-    },
-
-    deleteCancelButtonText: {
-      color: C.textSecondary,
-      fontSize: 14,
-      fontWeight: '800',
-    },
-
+    deleteDisabledButton: { opacity: 0.65 },
+    deleteConfirmButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
+    deleteCancelButton: { alignItems: 'center', paddingVertical: 13, marginTop: 8 },
+    deleteCancelButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '900' },
     dangerCard: {
       backgroundColor: C.alertDangerBg,
-      borderRadius: 20,
-      marginBottom: 24,
+      borderRadius: 24,
+      marginBottom: 26,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: C.danger,
     },
-
-    dangerRowDivider: {
-      borderBottomWidth: 1,
-      borderBottomColor: C.danger,
-    },
-
+    dangerRowDivider: { borderBottomWidth: 1, borderBottomColor: C.danger },
     dangerIconCircle: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 42,
+      height: 42,
+      borderRadius: 17,
       backgroundColor: C.background,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 14,
     },
-
-    dangerRowLabel: {
-      fontSize: 16,
-      color: C.danger,
-      fontWeight: '700',
-    },
-
-    dangerRowSub: {
-      fontSize: 12,
-      color: C.danger,
-      marginTop: 2,
-      lineHeight: 16,
-      opacity: 0.85,
-    },
+    dangerRowLabel: { fontSize: 15, color: C.danger, fontWeight: '900' },
+    dangerRowSub: { fontSize: 12, color: C.danger, marginTop: 3, lineHeight: 17, opacity: 0.9, fontWeight: '700' },
   });

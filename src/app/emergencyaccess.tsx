@@ -216,7 +216,7 @@ export default function EmergencyAccessScreen() {
         </View>
 
         {!canAddMore && (
-          <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/subscription')}>
+          <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/subscription?from=emergencyaccess')}>
             <Ionicons name="lock-closed-outline" size={20} color={C.warning} />
             <Text style={styles.upgradeText}>You have reached your emergency contact limit. Upgrade for more contacts.</Text>
           </TouchableOpacity>
@@ -347,6 +347,8 @@ function RequestRow({ request, index, total, C, styles, working, onApprove, onDe
 
 function SentRequestRow({ request, index, total, C, styles }: any) {
   const color = statusColor(request.status, C);
+  const canOpenVault = request.status === 'AVAILABLE' || request.status === 'APPROVED';
+
   return (
     <View style={[styles.requestRow, index !== total - 1 && styles.divider]}>
       <View style={styles.smallIcon}><Ionicons name="send-outline" size={17} color={color} /></View>
@@ -354,6 +356,26 @@ function SentRequestRow({ request, index, total, C, styles }: any) {
         <Text style={styles.rowTitle}>{request.ownerEmail}</Text>
         <Text style={styles.rowSub}>Status: {request.status}</Text>
         <Text style={styles.timeText}>Requested {formatDate(request.requestedAt)}</Text>
+
+        {canOpenVault ? (
+          <TouchableOpacity
+            style={styles.openVaultButton}
+            activeOpacity={0.85}
+            onPress={() => router.push({
+              pathname: '/emergencyvault',
+              params: {
+                requestId: String(request.id),
+                ownerName: request.ownerName || request.ownerEmail,
+                ownerEmail: request.ownerEmail,
+              },
+            })}
+          >
+            <Ionicons name="lock-open-outline" size={16} color="#fff" />
+            <Text style={styles.openVaultButtonText}>Open emergency vault</Text>
+          </TouchableOpacity>
+        ) : request.status === 'PENDING' ? (
+          <Text style={styles.waitingText}>Access opens after {formatDate(request.availableAt)} unless the owner approves earlier.</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -410,4 +432,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   approveMiniText: { color: '#fff', fontWeight: '900', fontSize: 12 },
   denyMini: { backgroundColor: C.alertDangerBg, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14 },
   denyMiniText: { color: C.danger, fontWeight: '900', fontSize: 12 },
+  openVaultButton: { marginTop: 10, alignSelf: 'flex-start', backgroundColor: C.primary, borderRadius: 999, paddingVertical: 9, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  openVaultButtonText: { color: '#fff', fontSize: 12, fontWeight: '900' },
+  waitingText: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8, fontWeight: '700' },
 });

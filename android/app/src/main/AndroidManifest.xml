@@ -34,7 +34,7 @@
         <data android:scheme="exp+guardian"/>
       </intent-filter>
     </activity>
-    <activity android:name=".autofill.AutofillUnlockActivity" android:exported="true" android:theme="@style/AppTheme" android:screenOrientation="portrait" android:excludeFromRecents="true"/>
+    <activity android:name=".autofill.AutofillUnlockActivity" android:exported="true" android:theme="@style/AppTheme" android:screenOrientation="portrait" android:excludeFromRecents="true" android:noHistory="true"/>
     <service android:name=".autofill.GuardianAutofillService" android:permission="android.permission.BIND_AUTOFILL_SERVICE" android:exported="true">
       <intent-filter>
         <action android:name="android.service.autofill.AutofillService"/>

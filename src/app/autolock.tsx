@@ -21,43 +21,102 @@ import {
 
 import { useAppTheme } from '../context/ThemeContext';
 import {
-  formatAutoLockTimeout,
-  getAutoLockTimeout,
-  setAutoLockTimeout,
+  AUTO_LOCK_MODE_ON_APP_CLOSE,
+  AUTO_LOCK_MODE_TIMEOUT,
+  AutoLockMode,
+  formatAutoLockSetting,
+  getAutoLockSettings,
+  setAutoLockSettings,
 } from '../hooks/useAutoLock';
+import { hapticLight, hapticSelection, hapticSuccess } from '../utils/haptics';
 
-const TIMEOUT_OPTIONS = [
-  { label: '30 seconds', value: 30000 },
-  { label: '1 minute', value: 60000 },
-  { label: '5 minutes', value: 300000 },
-  { label: '15 minutes', value: 900000 },
-  { label: '1 hour', value: 3600000 },
+type AutoLockOption = {
+  label: string;
+  subtitle: string;
+  mode: AutoLockMode;
+  value?: number;
+};
+
+const TIMEOUT_OPTIONS: AutoLockOption[] = [
+  {
+    label: 'When app closes',
+    subtitle: 'Lock as soon as The Guardian moves to the background.',
+    mode: AUTO_LOCK_MODE_ON_APP_CLOSE,
+  },
+  {
+    label: '30 seconds',
+    subtitle: 'Recommended default for all new accounts.',
+    mode: AUTO_LOCK_MODE_TIMEOUT,
+    value: 30000,
+  },
+  {
+    label: '1 minute',
+    subtitle: 'A little more time when switching apps briefly.',
+    mode: AUTO_LOCK_MODE_TIMEOUT,
+    value: 60000,
+  },
+  {
+    label: '3 minutes',
+    subtitle: 'Balanced for normal phone use.',
+    mode: AUTO_LOCK_MODE_TIMEOUT,
+    value: 180000,
+  },
+  {
+    label: '5 minutes',
+    subtitle: 'Longest option. Use only on a private device.',
+    mode: AUTO_LOCK_MODE_TIMEOUT,
+    value: 300000,
+  },
 ];
 
 export default function AutoLockScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
-  const [selectedTimeout, setSelectedTimeout] = useState(60000);
+  const [selectedMode, setSelectedMode] = useState<AutoLockMode>(AUTO_LOCK_MODE_TIMEOUT);
+  const [selectedTimeout, setSelectedTimeout] = useState(30000);
 
-  const loadTimeout = useCallback(async () => {
-    const saved = await getAutoLockTimeout();
-    setSelectedTimeout(saved);
+  const loadSettings = useCallback(async () => {
+    const saved = await getAutoLockSettings();
+    setSelectedMode(saved.mode);
+    setSelectedTimeout(saved.timeout);
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      loadTimeout();
-    }, [loadTimeout])
+      loadSettings();
+    }, [loadSettings])
   );
 
-  const chooseTimeout = async (value: number) => {
-    setSelectedTimeout(value);
-    await setAutoLockTimeout(value);
+  const isOptionActive = (option: AutoLockOption) => {
+    if (option.mode === AUTO_LOCK_MODE_ON_APP_CLOSE) {
+      return selectedMode === AUTO_LOCK_MODE_ON_APP_CLOSE;
+    }
+
+    return selectedMode === AUTO_LOCK_MODE_TIMEOUT && selectedTimeout === option.value;
+  };
+
+  const chooseOption = async (option: AutoLockOption) => {
+    const nextTimeout =
+      option.mode === AUTO_LOCK_MODE_ON_APP_CLOSE
+        ? -1
+        : option.value || 30000;
+
+    hapticSelection();
+
+    setSelectedMode(option.mode);
+    setSelectedTimeout(nextTimeout);
+
+    await setAutoLockSettings({
+      mode: option.mode,
+      timeout: nextTimeout,
+    });
+
+    hapticSuccess();
 
     Alert.alert(
       'Auto-lock updated',
-      `Your vault will lock if you leave the app for ${formatAutoLockTimeout(value)}.`
+      `Your vault will lock ${formatAutoLockSetting(option.mode, nextTimeout)}.`
     );
   };
 
@@ -76,15 +135,15 @@ export default function AutoLockScreen() {
         <Text style={styles.title}>Auto-lock</Text>
 
         <Text style={styles.subtitle}>
-          Auto-lock protects your vault when you leave the app. The timer starts
-          only after the app goes to the background.
+          Auto-lock protects your vault when you leave the app. New accounts now
+          use 30 seconds by default unless the user chooses another option.
         </Text>
 
         <View style={styles.infoCard}>
           <InfoRow
             icon={<Smartphone size={21} color={C.primary} />}
-            title="When does the timer start?"
-            text="The timer starts when you leave the app, switch apps, open a file picker, or open the camera."
+            title="What counts as leaving?"
+            text="Switching apps, pressing Home, or moving The Guardian to the background starts auto-lock protection."
             styles={styles}
           />
 
@@ -92,8 +151,8 @@ export default function AutoLockScreen() {
 
           <InfoRow
             icon={<Clock3 size={21} color={C.primary} />}
-            title="What happens when you return?"
-            text="If you return before the timeout ends, your vault stays open. If you return after the timeout, the app locks."
+            title="30 seconds is the default"
+            text="This gives users a short grace period without leaving sensitive vault items open for too long."
             styles={styles}
           />
 
@@ -101,27 +160,27 @@ export default function AutoLockScreen() {
 
           <InfoRow
             icon={<ShieldCheck size={21} color={C.primary} />}
-            title="Why it matters"
-            text="This helps protect your passwords, cards, and documents if you leave your phone unlocked."
+            title="Strict option available"
+            text="Choose 'When app closes' to lock immediately when the app goes to the background."
             styles={styles}
           />
         </View>
 
-        <Text style={styles.sectionLabel}>LOCK AFTER LEAVING APP</Text>
+        <Text style={styles.sectionLabel}>LOCK VAULT</Text>
 
         <View style={styles.optionsCard}>
           {TIMEOUT_OPTIONS.map((option, index) => {
-            const active = selectedTimeout === option.value;
+            const active = isOptionActive(option);
 
             return (
               <TouchableOpacity
-                key={option.value}
+                key={`${option.mode}-${option.value ?? 'close'}`}
                 activeOpacity={0.72}
                 style={[
                   styles.optionRow,
                   index !== TIMEOUT_OPTIONS.length - 1 && styles.optionDivider,
                 ]}
-                onPress={() => chooseTimeout(option.value)}
+                onPress={() => chooseOption(option)}
               >
                 <View
                   style={[
@@ -134,9 +193,7 @@ export default function AutoLockScreen() {
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.optionTitle}>{option.label}</Text>
-                  <Text style={styles.optionSub}>
-                    Lock vault after {option.label} outside the app
-                  </Text>
+                  <Text style={styles.optionSub}>{option.subtitle}</Text>
                 </View>
 
                 {active && <Text style={styles.selectedText}>Selected</Text>}
@@ -148,7 +205,10 @@ export default function AutoLockScreen() {
         <TouchableOpacity
           style={styles.doneButton}
           activeOpacity={0.85}
-          onPress={() => router.back()}
+          onPress={() => {
+            hapticLight();
+            router.back();
+          }}
         >
           <Text style={styles.doneButtonText}>Done</Text>
         </TouchableOpacity>
@@ -262,12 +322,12 @@ const makeStyles = (C: any) =>
     },
 
     sectionLabel: {
-      fontSize: 12,
-      fontWeight: '800',
       color: C.textSecondary,
-      letterSpacing: 0.6,
+      fontSize: 12,
+      fontWeight: '900',
+      letterSpacing: 1.2,
+      marginBottom: 10,
       marginLeft: 4,
-      marginBottom: 8,
     },
 
     optionsCard: {
@@ -276,14 +336,15 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
-      marginBottom: 22,
+      marginBottom: 26,
     },
 
     optionRow: {
+      minHeight: 74,
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 16,
-      paddingVertical: 15,
+      paddingVertical: 14,
     },
 
     optionDivider: {
@@ -292,15 +353,15 @@ const makeStyles = (C: any) =>
     },
 
     radioCircle: {
-      width: 28,
-      height: 28,
-      borderRadius: 14,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
       borderWidth: 2,
       borderColor: C.border,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 14,
-      backgroundColor: C.backgroundSelected,
+      backgroundColor: C.background,
     },
 
     radioCircleActive: {
@@ -312,28 +373,33 @@ const makeStyles = (C: any) =>
       color: C.text,
       fontSize: 16,
       fontWeight: '800',
+      marginBottom: 4,
     },
 
     optionSub: {
       color: C.textSecondary,
-      fontSize: 12,
-      marginTop: 3,
-      lineHeight: 17,
+      fontSize: 13,
+      lineHeight: 18,
     },
 
     selectedText: {
       color: C.primary,
       fontSize: 12,
-      fontWeight: '800',
+      fontWeight: '900',
       marginLeft: 10,
     },
 
     doneButton: {
-      backgroundColor: C.backgroundbutton,
-      borderRadius: 50,
-      paddingVertical: 17,
+      height: 56,
+      borderRadius: 18,
+      backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: C.shadow,
+      shadowOpacity: 0.18,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     doneButtonText: {

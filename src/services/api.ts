@@ -1,10 +1,13 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
 import { UploadType } from 'expo-file-system';
+import { markOfflineVaultStale } from './offlineVault';
 
-// export const API_BASE_URL = 'http://192.168.8.115:8080';
-//export const API_BASE_URL = 'http://10.99.115.37:8080';
-export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
+export const API_BASE_URL = 'http://10.229.103.37:8080';
+//export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
 
 /**
  * REQUEST TIMEOUT SETTINGS
@@ -18,9 +21,39 @@ export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
  * LONG_REQUEST_TIMEOUT_MS:
  * Backup, restore, document upload, payment initialization.
  */
-const AUTH_REQUEST_TIMEOUT_MS = 100000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
-const LONG_REQUEST_TIMEOUT_MS = 45000;
+const AUTH_REQUEST_TIMEOUT_MS = 100000; //If taking too long i will adjust to 100000
+const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
+const LONG_REQUEST_TIMEOUT_MS = 30000; //If taking too long i will adjust to 45000
+const VAULT_LIST_TIMEOUT_MS = 30000; // Normal online vault load. Offline fallback uses a faster server probe first.
+const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 400000; // Documents can be large because the backend decrypts and returns Base64.
+const DOCUMENT_UPLOAD_TIMEOUT_MS = 300000; // Multipart uploads, especially PDFs/DOCX, need more time than normal API calls.
+
+
+export type BugReportRequestBody = {
+  title: string;
+  category: string;
+  severity: string;
+  description: string;
+  stepsToReproduce?: string;
+  includeDiagnostics?: boolean;
+  deviceInfo?: string;
+  appVersion?: string;
+};
+
+export type BugReportResponse = {
+  id: number;
+  title: string;
+  category: string;
+  severity: string;
+  description: string;
+  stepsToReproduce?: string | null;
+  includeDiagnostics: boolean;
+  deviceInfo?: string | null;
+  appVersion?: string | null;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
 
 export type LoginResponse = {
   token?: string | null;
@@ -50,6 +83,46 @@ export type RegisterResponse = LoginResponse & {
   emailWarning?: string;
   warning?: string;
 };
+
+export class GuardianApiError extends Error {
+  status?: number;
+  path?: string;
+  rawMessage?: string;
+  code?: string;
+  data?: any;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      path?: string;
+      rawMessage?: string;
+      code?: string;
+      data?: any;
+    } = {}
+  ) {
+    super(message);
+    this.name = 'GuardianApiError';
+    this.status = options.status;
+    this.path = options.path;
+    this.rawMessage = options.rawMessage;
+    this.code = options.code;
+    this.data = options.data;
+  }
+}
+
+export function isDeviceLimitError(error: any) {
+  const code = String(error?.code || '').toUpperCase();
+  const message = String(error?.message || error?.rawMessage || '').toLowerCase();
+
+  return (
+    code === 'DEVICE_LIMIT_REACHED' ||
+    error?.status === 409 ||
+    message.includes('device_limit_reached') ||
+    message.includes('one trusted device') ||
+    message.includes('only one active device')
+  );
+}
 
 export function getEmailDeliveryWarning(value: any): string | null {
   if (!value) return null;
@@ -132,6 +205,13 @@ export type SecureNoteBody = {
   pinned?: boolean;
 };
 
+export type DownloadedDocumentFile = {
+  uri: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes?: number;
+};
+
 export type EmergencyContactResponse = {
   id: number;
   contactEmail: string;
@@ -199,6 +279,50 @@ export type EmergencyOverviewResponse = {
   receivedRequests: EmergencyAccessRequestResponse[];
   sentRequests: EmergencyAccessRequestResponse[];
   auditLogs: EmergencyAuditLogResponse[];
+};
+
+export type EmergencyVaultItemResponse = {
+  id: number;
+  itemType: VaultItemType | string;
+  title: string;
+  usernameValue?: string | null;
+  encryptedPassword?: string | null;
+  website?: string | null;
+  notes?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  encryptedData?: string | null;
+  encryptedCardNumber?: string | null;
+  encryptedExpiryDate?: string | null;
+  encryptedCvv?: string | null;
+  encryptedCardholderName?: string | null;
+  encryptedCardHolderName?: string | null;
+  documentName?: string | null;
+  documentType?: string | null;
+  encryptedFileUrl?: string | null;
+  encryptedNotes?: string | null;
+  category?: string | null;
+  encryptedContent?: string | null;
+  pinned?: boolean | null;
+  ownerName?: string | null;
+  ownerEmail?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+export type EmergencyVaultItemsResponse = {
+  requestId: number;
+  ownerName: string;
+  ownerEmail: string;
+  passwordsAllowed: boolean;
+  cardsAllowed: boolean;
+  documentsAllowed: boolean;
+  notesAllowed: boolean;
+  passwords: EmergencyVaultItemResponse[];
+  cards: EmergencyVaultItemResponse[];
+  documents: EmergencyVaultItemResponse[];
+  notes: EmergencyVaultItemResponse[];
 };
 
 
@@ -275,6 +399,23 @@ export type SharedFamilyItems = {
   cards: SharedCardItem[];
   documents: SharedDocumentItem[];
   notes: SharedNoteItem[];
+};
+
+export type FamilyMemberPasswordRisk = {
+  id: number;
+  itemType: 'FAMILY_MEMBER_PASSWORD_RISK';
+  title: string;
+  usernameValue?: string | null;
+  website?: string | null;
+  memberId: number;
+  memberName: string;
+  memberEmail: string;
+  strengthScore: number;
+  strengthLabel: 'WEAK' | 'MEDIUM' | 'STRONG' | string;
+  oldPassword: boolean;
+  reusedPassword: boolean;
+  reusedCount: number;
+  riskTypes: string[];
 };
 
 export type SharedVaultItem = SharedPasswordItem;
@@ -362,7 +503,12 @@ export type AppNotificationType =
   | 'EMERGENCY_ACCESS_APPROVED'
   | 'EMERGENCY_ACCESS_DENIED'
   | 'EMERGENCY_ACCESS_AVAILABLE'
+  | 'RECOVERY_KIT_CREATED'
+  | 'RECOVERY_KIT_USED'
+  | 'RECOVERY_KIT_REVOKED'
   | 'SECURITY_ALERT'
+  | 'PASSWORD_BREACHED'
+  | 'SECURITY_SCAN_ALERT'
   | 'NEW_DEVICE_LOGIN'
   | 'SESSION_REVOKED'
   | 'SYSTEM';
@@ -379,6 +525,46 @@ export type AppNotification = {
 
 export type NotificationUnreadCountResponse = {
   unreadCount: number;
+};
+
+export type SecurityScanAlertRequest = {
+  score: number;
+  totalIssues: number;
+  breachedCount: number;
+  weakCount: number;
+  reusedCount: number;
+  oldCount: number;
+};
+
+export type SecurityScanAlertResponse = {
+  message: string;
+};
+
+
+export type RecoveryKitStatusResponse = {
+  created: boolean;
+  recoveryId?: string | null;
+  createdAt?: string | null;
+  lastUsedAt?: string | null;
+};
+
+export type RecoveryKitResponse = {
+  recoveryId: string;
+  recoveryKey: string;
+  createdAt: string;
+  message: string;
+};
+
+export type RecoveryPasswordResetBody = {
+  recoveryId: string;
+  recoveryKey: string;
+  newPassword: string;
+};
+
+export type AccountResetEraseBody = {
+  email: string;
+  resetCode: string;
+  newPassword: string;
 };
 
 type CreateVaultItemBody = {
@@ -407,6 +593,72 @@ const MAX_CACHE_ENTRIES = 80;
 const cache = new Map<string, CacheEntry<any>>();
 let tokenCache: string | null | undefined = undefined;
 
+const GUARDIAN_DEVICE_ID_KEY = 'guardian:device-id';
+
+function createLocalDeviceId() {
+  // This ID is not a hardware ID. It is only a random app-installation ID.
+  // It stays on the device until the app is uninstalled or storage is cleared.
+  const randomPart = Math.random().toString(36).slice(2);
+  const timePart = Date.now().toString(36);
+  const extraPart = Math.random().toString(36).slice(2);
+  return `guardian-${timePart}-${randomPart}-${extraPart}`;
+}
+
+async function getGuardianDeviceId() {
+  try {
+    const existing = await SecureStore.getItemAsync(GUARDIAN_DEVICE_ID_KEY);
+
+    if (existing) return existing;
+
+    const created = createLocalDeviceId();
+    await SecureStore.setItemAsync(GUARDIAN_DEVICE_ID_KEY, created);
+    return created;
+  } catch {
+    const fallbackKey = 'guardianDeviceIdFallback';
+    const existing = await AsyncStorage.getItem(fallbackKey);
+
+    if (existing) return existing;
+
+    const created = createLocalDeviceId();
+    await AsyncStorage.setItem(fallbackKey, created);
+    return created;
+  }
+}
+
+function getReadableDeviceName() {
+  const parts = [
+    Device.manufacturer,
+    Device.modelName,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+
+  if (parts) return parts;
+
+  if (Platform.OS === 'android') return 'Android device';
+  if (Platform.OS === 'ios') return 'iOS device';
+
+  return 'Trusted device';
+}
+
+function getDeviceType() {
+  if (Platform.OS === 'android') return 'Android';
+  if (Platform.OS === 'ios') return 'iOS';
+  if (Platform.OS === 'web') return 'Web';
+  return Platform.OS || 'Unknown';
+}
+
+async function getGuardianDeviceHeaders() {
+  const deviceId = await getGuardianDeviceId();
+
+  return {
+    'X-Guardian-Device-Id': deviceId,
+    'X-Guardian-Device-Name': getReadableDeviceName(),
+    'X-Guardian-Device-Type': getDeviceType(),
+  };
+}
+
 async function getToken() {
   if (tokenCache !== undefined) return tokenCache;
   tokenCache = await AsyncStorage.getItem('token');
@@ -425,6 +677,9 @@ function clearCache(prefix?: string) {
 }
 
 function clearVaultCaches() {
+  markOfflineVaultStale().catch(() => undefined);
+  AsyncStorage.setItem('homeNeedsInitialSync', 'true').catch(() => undefined);
+  AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
   clearCache('GET:/api/vault');
   clearCache('GET:/vault/documents');
   clearCache('GET:/vault/cards');
@@ -433,6 +688,7 @@ function clearVaultCaches() {
   clearCache('GET:/vault/emergency/contacts');
   clearCache('GET:/vault/emergency/requests');
   clearCache('GET:/vault/emergency/audit');
+  clearCache('GET:/vault/emergency/requests/');
   clearCache('GET:/vault/api/subscriptions/me');
   clearCache('GET:/vault/notifications');
   clearCache('GET:/vault/sessions');
@@ -462,13 +718,92 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
   if (quotedStatusMatch?.[1]) message = quotedStatusMatch[1];
 
   const lower = message.toLowerCase();
+  const upper = message.toUpperCase();
   const route = path || '';
 
-  if (lower.includes('free plan allows only one active device') || lower.includes('only one active device')) {
-    return 'Free plan allows only one active device. Open The Guardian on your active device, go to Settings > Trusted Devices, and remove the old session before signing in here. Premium and Family users can sign in on unlimited devices.';
+  if (
+    lower.includes('device_limit_reached') ||
+    lower.includes('free plan allows one trusted device') ||
+    lower.includes('free plan allows only one active device') ||
+    lower.includes('only one active device')
+  ) {
+    return 'Your free plan allows one trusted device at a time. You can remove your previous device and continue signing in on this device.';
+  }
+
+  if (
+    upper.includes('PLAN_LIMIT_REACHED') ||
+    lower.includes('free plan limit reached') ||
+    lower.includes('password limit reached') ||
+    lower.includes('vault limit') ||
+    lower.includes('10 passwords')
+  ) {
+    return message && !lower.includes('plan_limit_reached')
+      ? message
+      : 'Your Free plan can save up to 10 passwords. Upgrade to Premium or Family for unlimited password storage.';
+  }
+
+  if (
+    lower.includes('free note limit') ||
+    lower.includes('note limit reached')
+  ) {
+    return 'Free accounts can save up to 5 secure notes. Upgrade to Premium or Family for unlimited secure notes.';
+  }
+
+  if (
+    lower.includes('document vault is only available') ||
+    lower.includes('document upload is only available') ||
+    (route.includes('/vault/documents') && lower.includes('premium'))
+  ) {
+    return 'Encrypted document storage is available on Premium and Family plans.';
+  }
+
+  if (
+    lower.includes('backup') &&
+    (lower.includes('premium') || lower.includes('family') || lower.includes('paid plan'))
+  ) {
+    return 'Encrypted cloud backup is available on Premium and Family plans.';
+  }
+
+  if (
+    lower.includes('not on the guardian') ||
+    lower.includes('no guardian account') ||
+    lower.includes('no account found with that email') ||
+    lower.includes('no account found')
+  ) {
+    return 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.';
+  }
+
+  if (
+    lower.includes('family sharing') ||
+    lower.includes('family plan') ||
+    lower.includes('shared vault')
+  ) {
+    return 'Family sharing is available on the Family plan.';
+  }
+
+  if (
+    lower.includes('emergency contact') &&
+    (lower.includes('limit') || lower.includes('upgrade') || lower.includes('premium') || lower.includes('family'))
+  ) {
+    return 'Your current plan has reached its emergency contact limit. Upgrade to add more trusted contacts.';
+  }
+
+  if (
+    lower.includes('advanced password generator') ||
+    lower.includes('password generator') && lower.includes('premium')
+  ) {
+    return 'Advanced password generator options are available on Premium and Family plans.';
   }
 
   if (!message || lower.includes('request failed with status')) {
+    if (route.includes('/vault/family/members') && status === 404) {
+      return 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.';
+    }
+
+    if (route.includes('/vault/family/members') && status === 403) {
+      return 'Only Family plan users can add members. Upgrade to Family or refresh your subscription status if you already upgraded.';
+    }
+
     if (status === 400) return 'Some details are missing or invalid. Please check the form and try again.';
     if (status === 401) {
       if (route.includes('/vault/auth/login')) return 'The email or password is incorrect.';
@@ -477,7 +812,7 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
     }
     if (status === 403) return 'You do not have permission to do this.';
     if (status === 404) return 'We could not find what you are looking for.';
-    if (status === 409) return 'This already exists. Please use different details.';
+    if (status === 409) return 'This request conflicts with your current account state. Please try again.';
     if (status === 413) return 'This file is too large. Please choose a smaller file.';
     if (status && status >= 500) return 'Something went wrong on our server. Please try again shortly.';
     return 'Something went wrong. Please try again.';
@@ -536,6 +871,14 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
     return 'Free accounts can save up to 5 secure notes. Upgrade to Premium or Family for unlimited secure notes.';
   }
 
+  if (lower.includes('account reset') || lower.includes('erase vault') || lower.includes('vault data erased')) {
+    return message;
+  }
+
+  if (lower.includes('breach monitoring') || lower.includes('security scan')) {
+    return 'Breach monitoring is available on Premium and Family plans.';
+  }
+
   if (lower.includes('subscription not found')) {
     return 'We could not load your subscription. Please sign in again.';
   }
@@ -548,8 +891,12 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
     return 'This user already belongs to another family group.';
   }
 
-  if (lower.includes('no account found')) {
-    return 'No account was found with that email address.';
+  if (
+    lower.includes('not on the guardian') ||
+    lower.includes('no guardian account') ||
+    lower.includes('no account found')
+  ) {
+    return 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.';
   }
 
   if (lower.includes('invalid') && lower.includes('code')) {
@@ -587,8 +934,11 @@ async function request<T>(
 ): Promise<T> {
   const token = await getToken();
 
+  const deviceHeaders = await getGuardianDeviceHeaders();
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    ...deviceHeaders,
     ...(options.headers as Record<string, string>),
   };
 
@@ -617,19 +967,31 @@ async function request<T>(
     if (
       errorName === 'aborterror' ||
       errorMessage.includes('aborted') ||
-      errorMessage.includes('abort')
+      errorMessage.includes('abort') ||
+      errorMessage.includes('canceled') ||
+      errorMessage.includes('cancelled')
     ) {
-      throw new Error(
+      throw new GuardianApiError(
         getFriendlyErrorMessage(
           undefined,
           path,
           `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`
-        )
+        ),
+        {
+          path,
+          rawMessage: `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+          code: 'REQUEST_TIMEOUT',
+        }
       );
     }
 
-    throw new Error(
-      getFriendlyErrorMessage(undefined, path, 'Network request failed')
+    throw new GuardianApiError(
+      getFriendlyErrorMessage(undefined, path, 'Network request failed'),
+      {
+        path,
+        rawMessage: 'Network request failed',
+        code: 'NETWORK_UNREACHABLE',
+      }
     );
   } finally {
     clearTimeout(timeoutId);
@@ -646,15 +1008,43 @@ async function request<T>(
 
   if (!response.ok) {
     const serverMessage = getServerMessage(data, text);
-    throw new Error(
-      getFriendlyErrorMessage(response.status, path, serverMessage)
+    const rawCode = String(data?.code || data?.errorCode || '').trim();
+
+    console.log('API RESPONSE ERROR', {
+      path,
+      status: response.status,
+      serverMessage,
+      data,
+    });
+
+    throw new GuardianApiError(
+      getFriendlyErrorMessage(response.status, path, serverMessage),
+      {
+        status: response.status,
+        path,
+        rawMessage: serverMessage,
+        code: rawCode || (
+          String(serverMessage || '').toUpperCase().includes('DEVICE_LIMIT_REACHED')
+            ? 'DEVICE_LIMIT_REACHED'
+            : String(serverMessage || '').toUpperCase().includes('PLAN_LIMIT_REACHED') ||
+              String(serverMessage || '').toLowerCase().includes('free plan limit reached') ||
+              String(serverMessage || '').toLowerCase().includes('password limit reached')
+                ? 'PLAN_LIMIT_REACHED'
+                : undefined
+        ),
+        data,
+      }
     );
   }
 
   return data as T;
 }
 
-async function cachedGet<T>(path: string, normalize?: (data: any) => T): Promise<T> {
+async function cachedGet<T>(
+  path: string,
+  normalize?: (data: any) => T,
+  timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
+): Promise<T> {
   const key = `GET:${path}`;
   const now = Date.now();
   const existing = cache.get(key) as CacheEntry<T> | undefined;
@@ -667,7 +1057,7 @@ async function cachedGet<T>(path: string, normalize?: (data: any) => T): Promise
     return existing.promise;
   }
 
-  const promise = request<any>(path).then((raw) => {
+  const promise = request<any>(path, {}, true, timeoutMs).then((raw) => {
     const data = normalize ? normalize(raw) : (raw as T);
     cache.set(key, { time: Date.now(), data });
     if (cache.size > MAX_CACHE_ENTRIES) {
@@ -690,6 +1080,160 @@ const normalizePasswords = (items: any[]): VaultItem[] =>
     itemType: item.itemType || 'PASSWORD',
   })) as VaultItem[];
 
+const normalizeSharedFamilyItems = (raw: any): SharedFamilyItems => ({
+  passwords: (raw?.passwords || []).map((item: any) => ({
+    ...item,
+    itemType: 'PASSWORD',
+    encryptedPassword: '',
+    encryptedData: '',
+    notes: '',
+  })) as SharedPasswordItem[],
+  cards: (raw?.cards || []).map((item: any) => ({
+    ...item,
+    itemType: 'CARD',
+    encryptedCardNumber: '',
+    encryptedExpiryDate: '',
+    encryptedCvv: '',
+    encryptedCardholderName: '',
+    encryptedCardHolderName: '',
+  })) as SharedCardItem[],
+  documents: (raw?.documents || []).map((item: any) => ({
+    ...item,
+    itemType: 'DOCUMENT',
+    encryptedFileUrl: '',
+    encryptedNotes: '',
+  })) as SharedDocumentItem[],
+  notes: (raw?.notes || []).map((item: any) => ({
+    ...item,
+    itemType: 'NOTE',
+    encryptedContent: '',
+  })) as SharedNoteItem[],
+});
+
+const normalizeSharedPasswordSummaries = (items: any[]): SharedPasswordItem[] =>
+  (items || []).map((item: any) => ({
+    ...item,
+    itemType: 'PASSWORD',
+    encryptedPassword: '',
+    encryptedData: '',
+    notes: '',
+  })) as SharedPasswordItem[];
+
+const normalizeSharedCardSummaries = (items: any[]): SharedCardItem[] =>
+  (items || []).map((item: any) => ({
+    ...item,
+    itemType: 'CARD',
+    encryptedCardNumber: '',
+    encryptedExpiryDate: '',
+    encryptedCvv: '',
+    encryptedCardholderName: '',
+    encryptedCardHolderName: '',
+  })) as SharedCardItem[];
+
+const normalizeSharedDocumentSummaries = (items: any[]): SharedDocumentItem[] =>
+  (items || []).map((item: any) => ({
+    ...item,
+    itemType: 'DOCUMENT',
+    encryptedFileUrl: '',
+    encryptedNotes: '',
+  })) as SharedDocumentItem[];
+
+const normalizeSharedNoteSummaries = (items: any[]): SharedNoteItem[] =>
+  (items || []).map((item: any) => ({
+    ...item,
+    itemType: 'NOTE',
+    encryptedContent: '',
+  })) as SharedNoteItem[];
+
+
+function sanitizeDownloadFileName(value?: string | null) {
+  const clean = String(value || 'document').trim() || 'document';
+  return clean.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function getHeaderValue(headers: any, name: string) {
+  if (!headers) return '';
+
+  const direct = headers[name] || headers[name.toLowerCase()] || headers[name.toUpperCase()];
+  if (direct) return String(direct);
+
+  if (typeof headers.get === 'function') {
+    return String(headers.get(name) || headers.get(name.toLowerCase()) || '');
+  }
+
+  return '';
+}
+
+function getFileNameFromContentDisposition(value?: string | null) {
+  const header = String(value || '');
+  const match = header.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+  const raw = match?.[1] || match?.[2] || '';
+
+  if (!raw) return '';
+
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function downloadAuthenticatedFile(
+  path: string,
+  fallbackFileName: string,
+  fallbackMimeType = 'application/octet-stream'
+): Promise<DownloadedDocumentFile> {
+  const token = await getToken();
+
+  if (!token) {
+    throw new Error('You are not logged in. Please log in again.');
+  }
+
+  const deviceHeaders = await getGuardianDeviceHeaders();
+  const safeFallbackName = sanitizeDownloadFileName(fallbackFileName);
+  const destination = `${FileSystem.cacheDirectory}${Date.now()}-${safeFallbackName}`;
+
+  const result = await FileSystem.downloadAsync(
+    `${API_BASE_URL}${path}`,
+    destination,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...deviceHeaders,
+      },
+    }
+  );
+
+  if (result.status < 200 || result.status >= 300) {
+    try {
+      await FileSystem.deleteAsync(result.uri, { idempotent: true });
+    } catch {
+      // Ignore cleanup errors.
+    }
+
+    throw new GuardianApiError(
+      getFriendlyErrorMessage(result.status, path, 'Document download failed'),
+      {
+        status: result.status,
+        path,
+        rawMessage: 'Document download failed',
+      }
+    );
+  }
+
+  const contentDisposition = getHeaderValue(result.headers, 'content-disposition');
+  const contentType = getHeaderValue(result.headers, 'content-type') || fallbackMimeType;
+  const fileNameFromHeader = getFileNameFromContentDisposition(contentDisposition);
+  const info = await FileSystem.getInfoAsync(result.uri).catch(() => null as any);
+
+  return {
+    uri: result.uri,
+    fileName: sanitizeDownloadFileName(fileNameFromHeader || fallbackFileName),
+    mimeType: contentType,
+    sizeBytes: info?.exists ? info.size : undefined,
+  };
+}
+
 async function parseUploadResult(result: FileSystem.FileSystemUploadResult) {
   let data: any = null;
 
@@ -708,6 +1252,24 @@ async function parseUploadResult(result: FileSystem.FileSystemUploadResult) {
   return data;
 }
 
+
+async function pingServer(timeoutMs = 2500): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    await fetch(API_BASE_URL, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export const api = {
   clearCache: () => clearCache(),
 
@@ -717,16 +1279,17 @@ export const api = {
       body: JSON.stringify({
         fullname: body.fullname.trim(),
         email: body.email.trim().toLowerCase(),
-        password: body.password.trim(),
+        password: body.password,
       }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
-  login: (body: { email: string; password: string }) =>
+  login: (body: { email: string; password: string; forceReplaceDevice?: boolean }) =>
     request<LoginResponse>('/vault/auth/login', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
-        password: body.password.trim(),
+        password: body.password,
+        forceReplaceDevice: body.forceReplaceDevice === true,
       }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
@@ -770,6 +1333,50 @@ export const api = {
       }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
+  getRecoveryKitStatus: () =>
+    cachedGet<RecoveryKitStatusResponse>('/vault/recovery-kit/status'),
+
+  generateRecoveryKit: async (body: { password: string }) => {
+    const result = await request<RecoveryKitResponse>('/vault/recovery-kit/generate', {
+      method: 'POST',
+      body: JSON.stringify({ password: body.password }),
+    }, true, AUTH_REQUEST_TIMEOUT_MS);
+    clearCache('GET:/vault/recovery-kit/status');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    return result;
+  },
+
+  revokeRecoveryKit: async () => {
+    const result = await request<{ message: string }>('/vault/recovery-kit', {
+      method: 'DELETE',
+    });
+    clearCache('GET:/vault/recovery-kit/status');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    return result;
+  },
+
+  recoverWithRecoveryKit: (body: RecoveryPasswordResetBody) =>
+    request<{ message: string }>('/vault/recovery-kit/reset-password', {
+      method: 'POST',
+      body: JSON.stringify({
+        recoveryId: body.recoveryId.trim().toUpperCase(),
+        recoveryKey: body.recoveryKey.trim(),
+        newPassword: body.newPassword,
+      }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS),
+
+  resetAccountAndEraseVault: (body: AccountResetEraseBody) =>
+    request<{ message: string }>('/vault/recovery-kit/reset-account', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: body.email.trim().toLowerCase(),
+        resetCode: body.resetCode.trim(),
+        newPassword: body.newPassword,
+      }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS),
+
   getSecuritySettings: () =>
     cachedGet<{ emailVerified: boolean; twoFactorEnabled: boolean }>('/vault/auth/me/security'),
 
@@ -784,6 +1391,17 @@ export const api = {
 
   getSubscription: () =>
     cachedGet<SubscriptionResponse>('/vault/api/subscriptions/me'),
+
+  /*
+   * Fresh subscription check used before plan-gated actions.
+   * This bypasses cached plan data so the app does not think a user is Family
+   * while the backend token/session says otherwise.
+   */
+  getSubscriptionFresh: async () => {
+    const result = await request<SubscriptionResponse>('/vault/api/subscriptions/me');
+    clearCache('GET:/vault/api/subscriptions/me');
+    return result;
+  },
 
   cancelSubscription: async () => {
     const result = await request<SubscriptionResponse>('/vault/api/subscriptions/cancel', {
@@ -850,13 +1468,13 @@ export const api = {
   },
 
   getVaultItems: () =>
-    cachedGet<VaultItem[]>('/api/vault', normalizePasswords),
+    cachedGet<VaultItem[]>('/api/vault', normalizePasswords, VAULT_LIST_TIMEOUT_MS),
 
   getVaultItem: (id: number | string) =>
     cachedGet<VaultItem>(`/api/vault/${id}`, (item) => ({
       ...item,
       itemType: item.itemType || 'PASSWORD',
-    }) as VaultItem),
+    }) as VaultItem, VAULT_LIST_TIMEOUT_MS),
 
   updateVaultItem: async (id: number | string, body: UpdateVaultItemBody) => {
     const result = await request<VaultItem>(`/api/vault/${id}`, {
@@ -873,6 +1491,149 @@ export const api = {
     });
     clearVaultCaches();
     return result;
+  },
+
+
+  createDocumentUploadTask: async (file: {
+    uri: string;
+    name: string;
+    type: string;
+    size?: number;
+    documentTitle: string;
+  }) => {
+    const token = await getToken();
+
+    if (!token) {
+      throw new GuardianApiError('You are not logged in. Please log in again.', {
+        path: '/vault/documents/upload',
+        code: 'UNAUTHENTICATED',
+      });
+    }
+
+    let xhr: XMLHttpRequest | null = null;
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const start = async () => new Promise<any>(async (resolve, reject) => {
+      try {
+        const deviceHeaders = await getGuardianDeviceHeaders();
+        const formData = new FormData();
+
+        /*
+         * Use XMLHttpRequest for document uploads instead of fetch.
+         * Expo/RN fetch can throw "Unsupported FormDataPart implementation"
+         * for Files-picked PDFs/DOCX and sometimes even images depending on
+         * the native runtime. XMLHttpRequest handles RN FormData file parts
+         * more consistently and still lets us abort the upload.
+         */
+        formData.append('file', {
+          uri: file.uri,
+          name: file.name || `document_${Date.now()}`,
+          type: file.type || 'application/octet-stream',
+        } as any);
+
+        formData.append('documentName', file.documentTitle || file.name || 'Document');
+        formData.append('documentType', file.type || 'application/octet-stream');
+        formData.append('sizeBytes', String(file.size || 0));
+
+        xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE_URL}/vault/documents/upload`);
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+        Object.entries(deviceHeaders).forEach(([key, value]) => {
+          xhr?.setRequestHeader(key, String(value));
+        });
+
+        timeoutId = setTimeout(() => {
+          cancelled = true;
+          xhr?.abort();
+        }, DOCUMENT_UPLOAD_TIMEOUT_MS);
+
+        xhr.onload = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+
+          const responseText = xhr?.responseText || '';
+          let data: any = null;
+
+          try {
+            data = responseText ? JSON.parse(responseText) : null;
+          } catch {
+            data = responseText;
+          }
+
+          const status = xhr?.status || 0;
+
+          if (status >= 200 && status < 300) {
+            clearVaultCaches();
+            resolve(data);
+            return;
+          }
+
+          const serverMessage = getServerMessage(data, responseText);
+          reject(new GuardianApiError(
+            getFriendlyErrorMessage(status, '/vault/documents/upload', serverMessage),
+            {
+              status,
+              path: '/vault/documents/upload',
+              rawMessage: serverMessage,
+              code: String(data?.code || data?.errorCode || '').trim() || undefined,
+              data,
+            }
+          ));
+        };
+
+        xhr.onerror = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+
+          if (cancelled) {
+            reject(new GuardianApiError('The upload was cancelled.', {
+              path: '/vault/documents/upload',
+              code: 'UPLOAD_CANCELLED',
+            }));
+            return;
+          }
+
+          reject(new GuardianApiError(
+            'The upload was interrupted. Please check your connection and try again.',
+            {
+              path: '/vault/documents/upload',
+              code: 'UPLOAD_FAILED',
+            }
+          ));
+        };
+
+        xhr.onabort = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          reject(new GuardianApiError('The upload was cancelled.', {
+            path: '/vault/documents/upload',
+            code: 'UPLOAD_CANCELLED',
+          }));
+        };
+
+        xhr.ontimeout = () => {
+          if (timeoutId) clearTimeout(timeoutId);
+          reject(new GuardianApiError(
+            'The upload took too long and timed out. Try again on a stronger connection or choose a smaller file.',
+            {
+              path: '/vault/documents/upload',
+              code: 'UPLOAD_TIMEOUT',
+            }
+          ));
+        };
+
+        xhr.send(formData);
+      } catch (error) {
+        if (timeoutId) clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
+
+    const cancel = () => {
+      cancelled = true;
+      xhr?.abort();
+    };
+
+    return { start, cancel };
   },
 
   createDocumentMultipart: async (file: {
@@ -958,10 +1719,26 @@ export const api = {
   },
 
   getDocuments: () =>
-    cachedGet<any[]>('/vault/documents'),
+    cachedGet<any[]>('/vault/documents', undefined, VAULT_LIST_TIMEOUT_MS),
 
   getDocument: (id: number | string) =>
-    cachedGet<any>(`/vault/documents/${id}`),
+    request<any>(
+      `/vault/documents/${id}`,
+      {},
+      true,
+      VAULT_LIST_TIMEOUT_MS
+    ),
+
+  downloadDocumentToCache: (
+    id: number | string,
+    fileName = 'document',
+    mimeType = 'application/octet-stream'
+  ) =>
+    downloadAuthenticatedFile(
+      `/vault/documents/${id}/download`,
+      fileName,
+      mimeType
+    ),
 
   updateDocument: async (id: number | string, body: any) => {
     const result = await request(`/vault/documents/${id}`, {
@@ -996,10 +1773,10 @@ export const api = {
   },
 
   getCards: () =>
-    cachedGet<CreditCardResponse[]>('/vault/cards'),
+    cachedGet<CreditCardResponse[]>('/vault/cards', undefined, VAULT_LIST_TIMEOUT_MS),
 
   getCard: (id: number | string) =>
-    cachedGet<CreditCardResponse>(`/vault/cards/${id}`),
+    cachedGet<CreditCardResponse>(`/vault/cards/${id}`, undefined, VAULT_LIST_TIMEOUT_MS),
 
   updateCard: async (id: number | string, body: any) => {
     const result = await request<CreditCardResponse>(`/vault/cards/${id}`, {
@@ -1034,10 +1811,10 @@ export const api = {
   },
 
   getSecureNotes: () =>
-    cachedGet<SecureNoteResponse[]>('/vault/notes'),
+    cachedGet<SecureNoteResponse[]>('/vault/notes', undefined, VAULT_LIST_TIMEOUT_MS),
 
   getSecureNote: (id: number | string) =>
-    cachedGet<SecureNoteResponse>(`/vault/notes/${id}`),
+    cachedGet<SecureNoteResponse>(`/vault/notes/${id}`, undefined, VAULT_LIST_TIMEOUT_MS),
 
   updateSecureNote: async (id: number | string, body: Partial<SecureNoteBody>) => {
     const result = await request<SecureNoteResponse>(`/vault/notes/${id}`, {
@@ -1153,8 +1930,22 @@ export const api = {
     cachedGet<EmergencyAuditLogResponse[]>('/vault/emergency/audit'),
 
 
+  getEmergencyVaultItems: (requestId: number | string) =>
+    cachedGet<EmergencyVaultItemsResponse>(`/vault/emergency/requests/${requestId}/vault`),
+
+  getEmergencyVaultItem: (requestId: number | string, itemType: string, itemId: number | string) =>
+    cachedGet<EmergencyVaultItemResponse>(`/vault/emergency/requests/${requestId}/vault/${String(itemType).toUpperCase()}/${itemId}`),
+
+
   getFamilyOverview: () =>
-    cachedGet<FamilyOverview>('/vault/family'),
+    cachedGet<FamilyOverview>('/vault/family', undefined, VAULT_LIST_TIMEOUT_MS),
+
+
+
+  lookupFamilyMemberAccount: (email: string) =>
+    request<{ code: string; exists?: boolean; userId?: number; fullName?: string; email?: string }>(
+      `/vault/family/members/lookup?email=${encodeURIComponent(email.trim().toLowerCase())}`
+    ),
 
   addFamilyMember: async (
     email: string,
@@ -1172,6 +1963,8 @@ export const api = {
     });
     clearCache('GET:/vault/family');
     clearCache('GET:/vault/family/shared-items');
+    clearCache('GET:/vault/family/member-password-risks');
+    AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
     return result;
   },
 
@@ -1181,14 +1974,19 @@ export const api = {
     });
     clearCache('GET:/vault/family');
     clearCache('GET:/vault/family/shared-items');
+    clearCache('GET:/vault/family/member-password-risks');
+    AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
     return result;
   },
 
   getSharedFamilyItems: () =>
-    cachedGet<SharedFamilyItems>('/vault/family/shared-items'),
+    cachedGet<SharedFamilyItems>('/vault/family/shared-items', normalizeSharedFamilyItems, VAULT_LIST_TIMEOUT_MS),
+
+  getFamilyMemberPasswordRisks: () =>
+    cachedGet<FamilyMemberPasswordRisk[]>('/vault/family/member-password-risks', undefined, VAULT_LIST_TIMEOUT_MS),
 
   getSharedPasswordItems: () =>
-    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizePasswords as any),
+    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS),
 
   getSharedPasswordItem: (id: number | string) =>
     cachedGet<SharedPasswordItem>(`/vault/family/shared-passwords/${id}`, (item) => ({
@@ -1197,7 +1995,7 @@ export const api = {
     }) as SharedPasswordItem),
 
   getSharedCardItems: () =>
-    cachedGet<SharedCardItem[]>('/vault/family/shared-cards'),
+    cachedGet<SharedCardItem[]>('/vault/family/shared-cards', normalizeSharedCardSummaries, VAULT_LIST_TIMEOUT_MS),
 
   getSharedCardItem: (id: number | string) =>
     cachedGet<SharedCardItem>(`/vault/family/shared-cards/${id}`, (item) => ({
@@ -1206,7 +2004,7 @@ export const api = {
     }) as SharedCardItem),
 
   getSharedDocumentItems: () =>
-    cachedGet<SharedDocumentItem[]>('/vault/family/shared-documents'),
+    cachedGet<SharedDocumentItem[]>('/vault/family/shared-documents', normalizeSharedDocumentSummaries, VAULT_LIST_TIMEOUT_MS),
 
   getSharedDocumentItem: (id: number | string) =>
     cachedGet<SharedDocumentItem>(`/vault/family/shared-documents/${id}`, (item) => ({
@@ -1214,13 +2012,19 @@ export const api = {
       itemType: 'DOCUMENT',
     }) as SharedDocumentItem),
 
-  getSharedNoteItems: () =>
-    cachedGet<SharedNoteItem[]>('/vault/family/shared-notes', (items) =>
-      items.map((item: any) => ({
-        ...item,
-        itemType: 'NOTE',
-      })) as SharedNoteItem[]
+  downloadSharedDocumentToCache: (
+    id: number | string,
+    fileName = 'shared-document',
+    mimeType = 'application/octet-stream'
+  ) =>
+    downloadAuthenticatedFile(
+      `/vault/family/shared-documents/${id}/download`,
+      fileName,
+      mimeType
     ),
+
+  getSharedNoteItems: () =>
+    cachedGet<SharedNoteItem[]>('/vault/family/shared-notes', normalizeSharedNoteSummaries, VAULT_LIST_TIMEOUT_MS),
 
   getSharedNoteItem: (id: number | string) =>
     cachedGet<SharedNoteItem>(`/vault/family/shared-notes/${id}`, (item) => ({
@@ -1230,13 +2034,24 @@ export const api = {
 
   // Backward-compatible names from the first family version.
   getSharedVaultItems: () =>
-    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizePasswords as any),
+    cachedGet<SharedPasswordItem[]>('/vault/family/shared-passwords', normalizeSharedPasswordSummaries, VAULT_LIST_TIMEOUT_MS),
 
   getSharedVaultItem: (id: number | string) =>
     cachedGet<SharedPasswordItem>(`/vault/family/shared-passwords/${id}`, (item) => ({
       ...item,
       itemType: 'PASSWORD',
     }) as SharedPasswordItem),
+
+
+  reportSecurityScanAlert: async (body: SecurityScanAlertRequest) => {
+    const result = await request<SecurityScanAlertResponse>('/vault/security-alerts/scan', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    return result;
+  },
 
   getNotifications: () =>
     cachedGet<AppNotification[]>('/vault/notifications'),
@@ -1273,6 +2088,28 @@ export const api = {
     clearCache('GET:/vault/notifications/unread-count');
     return result;
   },
+
+
+  submitBugReport: async (body: BugReportRequestBody) => {
+    const result = await request<BugReportResponse>('/vault/support/bug-reports', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: body.title.trim(),
+        category: body.category.trim(),
+        severity: body.severity.trim(),
+        description: body.description.trim(),
+        stepsToReproduce: body.stepsToReproduce?.trim() || '',
+        includeDiagnostics: body.includeDiagnostics === true,
+        deviceInfo: body.deviceInfo?.trim() || '',
+        appVersion: body.appVersion?.trim() || '',
+      }),
+    });
+    clearCache('GET:/vault/support/bug-reports/my');
+    return result;
+  },
+
+  getMyBugReports: () =>
+    cachedGet<BugReportResponse[]>('/vault/support/bug-reports/my'),
 
 
   getDeviceSessions: () =>

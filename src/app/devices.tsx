@@ -44,6 +44,22 @@ const getDeviceIcon = (type?: string) => {
   return 'phone-portrait-outline';
 };
 
+
+const resetToSignedOut = () => {
+  /*
+   * Remove stale protected screens from the native stack after session revokes.
+   * This prevents Android back/gesture from returning to Home with placeholder
+   * "User" data after the token has already been removed.
+   */
+  try {
+    (router as any).dismissAll?.();
+  } catch {
+    // Older Expo Router builds may not support dismissAll.
+  }
+
+  router.replace('/login');
+};
+
 export default function DevicesScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -124,7 +140,7 @@ export default function DevicesScreen() {
 
               if (isCurrent) {
                 await logout();
-                router.replace('/signin');
+                resetToSignedOut();
                 return;
               }
 
@@ -189,7 +205,7 @@ export default function DevicesScreen() {
               setLoggingOutAll(true);
               await api.logoutAllDevices();
               await logout();
-              router.replace('/signin');
+              resetToSignedOut();
             } catch (error: any) {
               Alert.alert('Could not log out everywhere', error.message || 'Please try again.');
             } finally {

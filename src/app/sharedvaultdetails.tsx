@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   ScrollView,
   StatusBar,
@@ -8,29 +9,32 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   Calendar,
   Copy,
+  Download,
   CreditCard,
   Eye,
   EyeOff,
   FileText,
   Globe,
-  Hash,
   KeyRound,
   NotebookText,
   ShieldCheck,
   StickyNote,
   UserRound,
 } from 'lucide-react-native';
-import * as Clipboard from 'expo-clipboard';
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { decryptJson } from '../utils/vaultcrypto';
+import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 type SharedItemType = 'PASSWORD' | 'CARD' | 'DOCUMENT' | 'NOTE';
 
@@ -98,6 +102,62 @@ const cleanSharedValue = (value?: string | null) => {
   return cleaned;
 };
 
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+
+  if (parts.length < 2) return '';
+
+  return String(parts.pop() || '').trim().toLowerCase();
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+
+  if (
+    mime.includes('wordprocessingml') ||
+    mime === 'application/msword' ||
+    extension === 'docx' ||
+    extension === 'doc'
+  ) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+
+  if (
+    mime.includes('spreadsheetml') ||
+    mime === 'application/vnd.ms-excel' ||
+    extension === 'xlsx' ||
+    extension === 'xls'
+  ) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+
+  if (
+    mime.includes('presentationml') ||
+    mime === 'application/vnd.ms-powerpoint' ||
+    extension === 'pptx' ||
+    extension === 'ppt'
+  ) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+
+  if (extension) return extension.toUpperCase();
+
+  return 'Document';
+};
+
+
 const decryptSharedNoteContent = (value?: string | null) => {
   const cleaned = cleanSharedValue(value);
 
@@ -121,9 +181,12 @@ export default function SharedVaultDetailsScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
+  useSensitiveScreenProtection(true);
+
   const [item, setItem] = useState<DisplayItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSecret, setShowSecret] = useState(false);
+  const [downloadingDocument, setDownloadingDocument] = useState(false);
 
   const loadItem = useCallback(async () => {
     if (!id) return;
@@ -235,8 +298,8 @@ export default function SharedVaultDetailsScreen() {
       return;
     }
 
-    await Clipboard.setStringAsync(cleaned);
-    Alert.alert('Copied', `${label} copied to clipboard.`);
+    await setSecureClipboard(cleaned);
+    Alert.alert('Copied', getSecureClipboardMessage(label));
   };
 
   const hideValue = (value?: string) => {
@@ -245,6 +308,61 @@ export default function SharedVaultDetailsScreen() {
     if (!cleaned) return 'Nothing saved';
 
     return '•'.repeat(Math.min(cleaned.length, 18));
+  };
+
+  const downloadSharedDocument = async () => {
+    if (!item || item.itemType !== 'DOCUMENT' || downloadingDocument) return;
+
+    try {
+      setDownloadingDocument(true);
+
+      const safeName = cleanSharedValue(item.documentName || item.title) || 'shared-document';
+      const mimeType = cleanSharedValue(item.documentType) || 'application/octet-stream';
+
+      const downloaded = await api.downloadSharedDocumentToCache(
+        item.id,
+        safeName,
+        mimeType
+      );
+
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+
+      if (permissions.granted) {
+        const base64Content = await FileSystem.readAsStringAsync(downloaded.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        const uri = await FileSystem.StorageAccessFramework.createFileAsync(
+          permissions.directoryUri,
+          downloaded.fileName || safeName,
+          downloaded.mimeType || mimeType
+        );
+
+        await FileSystem.writeAsStringAsync(uri, base64Content, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
+        Alert.alert('Document saved', 'The shared document was saved to your selected folder.');
+        return;
+      }
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(downloaded.uri, {
+          mimeType: downloaded.mimeType || mimeType,
+          dialogTitle: downloaded.fileName || safeName,
+        });
+        return;
+      }
+
+      Alert.alert('Saved temporarily', downloaded.uri);
+    } catch (error: any) {
+      Alert.alert(
+        'Download failed',
+        error?.message || 'This shared document could not be downloaded.'
+      );
+    } finally {
+      setDownloadingDocument(false);
+    }
   };
 
   const renderSharedSkeleton = () => (
@@ -341,6 +459,8 @@ export default function SharedVaultDetailsScreen() {
           <SharedDocumentDetails
             item={item}
             copyValue={copyValue}
+            downloadSharedDocument={downloadSharedDocument}
+            downloadingDocument={downloadingDocument}
             styles={styles}
             C={C}
           />
@@ -532,16 +652,21 @@ function SharedCardDetails({
 function SharedDocumentDetails({
   item,
   copyValue,
+  downloadSharedDocument,
+  downloadingDocument,
   styles,
   C,
 }: {
   item: DisplayItem;
   copyValue: (label: string, value?: string) => Promise<void>;
+  downloadSharedDocument: () => Promise<void>;
+  downloadingDocument: boolean;
   styles: any;
   C: any;
 }) {
-  const documentType = cleanSharedValue(item.documentType);
-  const fileValue = cleanSharedValue(item.encryptedFileUrl);
+  const rawDocumentType = cleanSharedValue(item.documentType);
+  const documentName = cleanSharedValue(item.documentName || item.title);
+  const documentType = getFriendlyDocumentType(rawDocumentType, documentName);
   const notes = cleanSharedValue(item.encryptedNotes || item.notes);
 
   return (
@@ -557,15 +682,20 @@ function SharedDocumentDetails({
 
       <View style={styles.divider} />
 
-      <InfoRow
-        icon={<Hash size={19} color={C.primary} />}
-        label="File / document value"
-        value={fileValue || 'No file value saved'}
-        onCopy={() => copyValue('File / document value', fileValue)}
-        styles={styles}
-        C={C}
-        multiline
-      />
+      <TouchableOpacity
+        style={[styles.documentDownloadButton, downloadingDocument && styles.disabledButton]}
+        onPress={downloadSharedDocument}
+        disabled={downloadingDocument}
+      >
+        {downloadingDocument ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Download size={19} color="#fff" />
+        )}
+        <Text style={styles.documentDownloadText}>
+          {downloadingDocument ? 'Preparing document...' : 'Download / Share Document'}
+        </Text>
+      </TouchableOpacity>
 
       <View style={styles.divider} />
 
@@ -822,6 +952,29 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       backgroundColor: C.backgroundSelected,
       marginLeft: 8,
+    },
+
+    documentDownloadButton: {
+      marginHorizontal: 14,
+      marginVertical: 14,
+      paddingVertical: 14,
+      paddingHorizontal: 16,
+      borderRadius: 16,
+      backgroundColor: C.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+    },
+
+    documentDownloadText: {
+      color: '#fff',
+      fontSize: 15,
+      fontWeight: '800',
+    },
+
+    disabledButton: {
+      opacity: 0.72,
     },
 
     readOnlyBox: {

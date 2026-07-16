@@ -29,6 +29,7 @@ import {
 
 import { useAppTheme } from './ThemeContext';
 import { useBlurTarget } from './BlurTargetContext';
+import { hapticForAlert, hapticLight } from '../utils/haptics';
 
 type AlertType = 'success' | 'error' | 'warning' | 'info';
 
@@ -85,6 +86,13 @@ const friendlyMessage = (title?: string, message?: string) => {
     return 'Your session has expired. Please sign in again.';
   }
 
+  if (
+    raw.includes('/vault/family/members') &&
+    (raw.includes('status 403') || raw.includes('forbidden'))
+  ) {
+    return 'Only Family plan users can add members. Upgrade to Family or refresh your subscription status if you already upgraded.';
+  }
+
   if (raw.includes('status 403') || raw.includes('forbidden')) {
     if (raw.includes('document') || raw.includes('upload')) {
       return 'Document upload is only available on the Premium and Family plans.';
@@ -99,6 +107,14 @@ const friendlyMessage = (title?: string, message?: string) => {
     }
 
     return 'You do not have permission to do this.';
+  }
+
+  if (
+    raw.includes('not on the guardian') ||
+    raw.includes('no guardian account') ||
+    raw.includes('no account found')
+  ) {
+    return 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.';
   }
 
   if (raw.includes('status 404') || raw.includes('not found')) {
@@ -167,7 +183,7 @@ const convertButtons = (buttons?: AlertButton[]): AppAlertButton[] => {
 };
 
 export function AppAlertProvider({ children }: { children: React.ReactNode }) {
-  const { isDark, colors: C } = useAppTheme();
+  const { isDark, isOled, colors: C } = useAppTheme();
   const blurTarget = useBlurTarget();
 
   const [visible, setVisible] = useState(false);
@@ -180,7 +196,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
   const scaleAnim = useRef(new Animated.Value(0.96)).current;
   const translateYAnim = useRef(new Animated.Value(12)).current;
 
-  const styles = makeStyles(C, isDark);
+  const styles = makeStyles(C, isDark, isOled);
 
   const iconColor =
     currentAlert?.type === 'success'
@@ -259,48 +275,50 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
     });
   }, [fadeAnim, scaleAnim, translateYAnim]);
 
-  const showAlert = useCallback(
-    (options: ShowAlertOptions) => {
-      if (Platform.OS === 'ios') {
-        Alert.alert(
-          options.title,
-          options.message,
-          options.buttons?.map((button) => ({
-            text: button.text,
-            style: button.style,
-            onPress: button.onPress,
-          })),
-          { cancelable: options.cancelable }
-        );
-        return;
-      }
+const showAlert = useCallback(
+  (options: ShowAlertOptions) => {
+    const cleanedMessage = friendlyMessage(options.title, options.message);
+    const type = options.type || getAlertType(options.title, cleanedMessage);
 
-      closingRef.current = false;
+    hapticForAlert(type);
 
-      const cleanedMessage = friendlyMessage(options.title, options.message);
-      const type = options.type || getAlertType(options.title, cleanedMessage);
+    if (Platform.OS === 'ios') {
+      Alert.alert(
+        options.title,
+        cleanedMessage,
+        options.buttons?.map((button) => ({
+          text: button.text,
+          style: button.style,
+          onPress: button.onPress,
+        })),
+        { cancelable: options.cancelable }
+      );
+      return;
+    }
 
-      setCurrentAlert({
-        ...options,
-        message: cleanedMessage,
-        type,
-        buttons:
-          options.buttons && options.buttons.length > 0
-            ? options.buttons
-            : [{ text: 'OK', style: 'default' }],
-      });
+    closingRef.current = false;
 
-      setVisible(true);
+    setCurrentAlert({
+      ...options,
+      message: cleanedMessage,
+      type,
+      buttons:
+        options.buttons && options.buttons.length > 0
+          ? options.buttons
+          : [{ text: 'OK', style: 'default' }],
+    });
 
-      requestAnimationFrame(() => {
-        if (!mountedRef.current) return;
-        showAnimation();
-      });
-    },
-    [showAnimation]
-  );
+    setVisible(true);
 
-  useEffect(() => {
+    requestAnimationFrame(() => {
+      if (!mountedRef.current) return;
+      showAnimation();
+    });
+  },
+  [showAnimation]
+);
+
+useEffect(() => {
     mountedRef.current = true;
 
     if (!nativeAlert) {
@@ -337,6 +355,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
   }, [fadeAnim, scaleAnim, translateYAnim, showAlert]);
 
   const handleButtonPress = (button: AppAlertButton) => {
+    hapticLight();
     hideAlert();
 
     setTimeout(() => {
@@ -385,7 +404,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
                   : undefined
               }
               blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
-              intensity={Platform.OS === 'android' ? 13 : 22}
+              intensity={Platform.OS === 'android' ? 22 : 32}
               tint={isDark ? 'dark' : 'light'}
               style={StyleSheet.absoluteFill}
             />
@@ -499,7 +518,7 @@ export function useAppAlert() {
 
 const color = (C: any, key: string, fallback: string) => C?.[key] || fallback;
 
-const makeStyles = (C: any, isDark: boolean) =>
+const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
@@ -510,12 +529,12 @@ const makeStyles = (C: any, isDark: boolean) =>
 
     fallbackBlur: {
       ...StyleSheet.absoluteFill,
-      backgroundColor: isDark ? 'rgba(2,6,23,0.72)' : 'rgba(15,23,42,0.24)',
+      backgroundColor: isOled ? 'rgba(0,0,0,0.82)' : isDark ? 'rgba(2,6,23,0.72)' : 'rgba(15,23,42,0.24)',
     },
 
     backdrop: {
       ...StyleSheet.absoluteFill,
-      backgroundColor: isDark ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.18)',
+      backgroundColor: isOled ? 'rgba(0,0,0,0.48)' : isDark ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.18)',
     },
 
     alertCard: {
@@ -523,13 +542,15 @@ const makeStyles = (C: any, isDark: boolean) =>
       maxWidth: 390,
       borderRadius: 28,
       padding: 20,
-      backgroundColor: isDark
+      backgroundColor: isOled
+        ? 'rgba(0,0,0,0.96)'
+        : isDark
         ? 'rgba(15,23,42,0.96)'
         : 'rgba(255,255,255,0.96)',
       borderWidth: 1,
-      borderColor: color(C, 'border', isDark ? '#243044' : '#E2E8F0'),
+      borderColor: color(C, 'border', isOled ? '#18231F' : isDark ? '#243044' : '#E2E8F0'),
       shadowColor: '#000',
-      shadowOpacity: 0.22,
+      shadowOpacity: isOled ? 0.55 : 0.22,
       shadowRadius: 26,
       shadowOffset: {
         width: 0,
@@ -562,7 +583,7 @@ const makeStyles = (C: any, isDark: boolean) =>
       backgroundColor: color(
         C,
         'backgroundSelected',
-        isDark ? '#1E293B' : '#F1F5F9'
+        isOled ? '#050A08' : isDark ? '#1E293B' : '#F1F5F9'
       ),
     },
 
@@ -611,7 +632,7 @@ const makeStyles = (C: any, isDark: boolean) =>
       backgroundColor: color(
         C,
         'backgroundSelected',
-        isDark ? '#1E293B' : '#F1F5F9'
+        isOled ? '#050A08' : isDark ? '#1E293B' : '#F1F5F9'
       ),
     },
 

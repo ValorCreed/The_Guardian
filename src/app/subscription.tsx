@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Check, Clock3, XCircle } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
@@ -82,6 +82,60 @@ const formatDate = (date?: string | null) => {
   });
 };
 
+const getEntryContext = (from?: string | string[]) => {
+  const source = Array.isArray(from) ? from[0] : from;
+
+  switch (source) {
+    case 'adddocument':
+      return {
+        title: 'Document vault upgrade',
+        message: 'Premium and Family unlock encrypted document storage. Use back to return to Add Document.',
+      };
+    case 'addnote':
+      return {
+        title: 'Secure notes upgrade',
+        message: 'Premium and Family remove the Free secure-note limit. Use back to return to Add Note.',
+      };
+    case 'backup':
+      return {
+        title: 'Encrypted backup upgrade',
+        message: 'Premium and Family unlock encrypted cloud backups. Use back to return to Backup.',
+      };
+    case 'emergencyaccess':
+      return {
+        title: 'Emergency access upgrade',
+        message: 'Paid plans unlock more emergency contacts and advanced emergency sharing controls. Use back to return to Emergency Access.',
+      };
+    case 'family':
+      return {
+        title: 'Family upgrade recommendation',
+        message: 'The Family plan unlocks shared vaults, family controls, and more emergency contacts.',
+      };
+    case 'home':
+      return {
+        title: 'Upgrade your protection',
+        message: 'Premium and Family add stronger protection across your vault. Use back to return Home.',
+      };
+    case 'passwordgenerator':
+      return {
+        title: 'Password generator upgrade',
+        message: 'Premium and Family unlock advanced password generation options. Use back to return to Password Generator.',
+      };
+    case 'securityhealth':
+      return {
+        title: 'Security Health upgrade',
+        message: 'Premium and Family unlock advanced breach monitoring and deeper security reports. Use back to return to Security Health.',
+      };
+    case 'settings':
+      return {
+        title: 'Manage your plan',
+        message: 'Review your current plan and upgrade options.',
+      };
+    default:
+      return null;
+  }
+};
+
 const FreePlanCard = ({
   styles,
   colors,
@@ -93,7 +147,7 @@ const FreePlanCard = ({
     </View>
 
     <View style={styles.featureList}>
-      <FeatureRow label="50 passwords" styles={styles} colors={colors} />
+      <FeatureRow label="10 passwords" styles={styles} colors={colors} />
       <FeatureRow label="Basic vault" styles={styles} colors={colors} />
       <FeatureRow label="5 secure notes" styles={styles} colors={colors} />
       <FeatureRow label="1 emergency contact" styles={styles} colors={colors} />
@@ -292,6 +346,8 @@ function AnimatedSkeleton({
 export default function PlansScreen() {
   const { colors, isDark } = useAppTheme();
   const styles = makeStyles(colors);
+  const params = useLocalSearchParams<{ from?: string }>();
+  const entryContext = getEntryContext(params.from);
 
   const [currentPlan, setCurrentPlan] = useState<PlanType>('FREE');
   const [active, setActive] = useState(false);
@@ -300,6 +356,7 @@ export default function PlansScreen() {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [upgradingPlan, setUpgradingPlan] = useState<'PREMIUM' | 'FAMILY' | null>(
     null
@@ -314,6 +371,7 @@ export default function PlansScreen() {
       }
 
       const response: any = await api.getSubscription();
+      setLoadError(null);
 
       const plan =
         response?.plan ||
@@ -326,13 +384,9 @@ export default function PlansScreen() {
       setActive(Boolean(response?.active));
       setStartedAt(response?.startedAt || null);
       setExpiresAt(response?.expiresAt || null);
-    } catch (error) {
+    } catch (error: any) {
       console.log('SUBSCRIPTION LOAD ERROR:', error);
-
-      setCurrentPlan('FREE');
-      setActive(false);
-      setStartedAt(null);
-      setExpiresAt(null);
+      setLoadError(error?.message || 'We could not refresh your subscription right now.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -486,6 +540,20 @@ export default function PlansScreen() {
             <Text style={styles.title}>Plans</Text>
           </View>
         </View>
+
+        {entryContext && (
+          <View style={styles.entryContextCard}>
+            <Text style={styles.entryContextTitle}>{entryContext.title}</Text>
+            <Text style={styles.entryContextText}>{entryContext.message}</Text>
+          </View>
+        )}
+
+        {loadError && (
+          <View style={styles.warningCard}>
+            <Text style={styles.warningTitle}>Could not refresh plan</Text>
+            <Text style={styles.warningText}>{loadError}</Text>
+          </View>
+        )}
 
         {currentPlan !== 'FREE' && (
           <View style={styles.currentPlanCard}>
@@ -654,6 +722,50 @@ const makeStyles = (C: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       marginBottom: 20,
+    },
+
+    entryContextCard: {
+      backgroundColor: C.backgroundSelected,
+      borderColor: C.primary,
+      borderWidth: 1,
+      borderRadius: 20,
+      padding: 14,
+      marginBottom: 18,
+    },
+
+    entryContextTitle: {
+      color: C.text,
+      fontSize: 15,
+      fontWeight: '900',
+      marginBottom: 4,
+    },
+
+    entryContextText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+    },
+
+    warningCard: {
+      backgroundColor: C.alertWarningBg,
+      borderColor: C.warning,
+      borderWidth: 1,
+      borderRadius: 20,
+      padding: 14,
+      marginBottom: 18,
+    },
+
+    warningTitle: {
+      color: C.text,
+      fontSize: 15,
+      fontWeight: '900',
+      marginBottom: 4,
+    },
+
+    warningText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
     },
 
     eyebrow: {

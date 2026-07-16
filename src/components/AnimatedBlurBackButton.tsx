@@ -14,6 +14,7 @@ import { ChevronLeft } from 'lucide-react-native';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
+import { hapticLight } from '../utils/haptics';
 
 type AnimatedBlurBackButtonProps = {
   onPress?: () => void;
@@ -114,6 +115,8 @@ export default function AnimatedBlurBackButton({
   };
 
   const handlePress = () => {
+    hapticLight();
+
     if (onPress) {
       onPress();
       return;
@@ -145,7 +148,7 @@ export default function AnimatedBlurBackButton({
         <BlurView
           blurTarget={blurTarget?.targetRef}
           blurMethod={androidBlurMethod}
-          intensity={Platform.OS === 'android' ? 15 : 18}
+          intensity={Platform.OS === 'android' ? 24 : 30}
           blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
           tint={isDark ? 'dark' : 'light'}
           style={[

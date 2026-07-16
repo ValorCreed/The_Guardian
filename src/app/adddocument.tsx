@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,13 +11,16 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useAppTheme } from '../context/ThemeContext';
+import { hapticLight, hapticMedium, hapticWarning, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api } from '../services/api';
-import { File } from 'expo-file-system';
 
 type SelectedFile = {
   name: string;
@@ -37,6 +40,9 @@ const UploadDocumentScreen = () => {
   const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
   const [documentTitle, setDocumentTitle] = useState('');
   const [saving, setSaving] = useState(false);
+  const activeUploadCancelRef = useRef<null | (() => Promise<void> | void)>(null);
+  const uploadCancelledRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const [checkingPlan, setCheckingPlan] = useState(true);
   const [plan, setPlan] = useState<Plan>('FREE');
@@ -62,6 +68,17 @@ const UploadDocumentScreen = () => {
     checkPlan();
   }, []);
 
+  useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+      uploadCancelledRef.current = true;
+      void activeUploadCancelRef.current?.();
+      activeUploadCancelRef.current = null;
+    };
+  }, []);
+
   const formatSize = (bytes?: number) => {
     if (!bytes) return '';
     if (bytes < 1024) return `${bytes} B`;
@@ -75,7 +92,7 @@ const UploadDocumentScreen = () => {
       'Document upload is only available on the Premium and Family plans.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => router.push('/subscription') },
+        { text: 'Upgrade', onPress: () => router.push('/subscription?from=adddocument') },
       ]
     );
   };
@@ -169,6 +186,35 @@ const UploadDocumentScreen = () => {
     return 'application/octet-stream';
   };
 
+  const sanitizeFileName = (name: string) => {
+    const safeName = String(name || `document_${Date.now()}`)
+      .replace(/[^a-zA-Z0-9._-]/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 120);
+
+    return safeName || `document_${Date.now()}`;
+  };
+
+  const preparePickedFileUri = async (uri: string, name: string) => {
+    /*
+     * Some Android file-provider/cache URIs are accepted by the picker but
+     * fail during upload. Copying the picked file into our own Expo cache
+     * gives XMLHttpRequest a stable file:// path for PDFs, DOCX, XLSX, etc.
+     * If copying fails, we fall back to the picker URI and the friendly error
+     * message will guide the user.
+     */
+    try {
+      const uploadDir = `${FileSystem.cacheDirectory || ''}guardian_uploads/`;
+      await FileSystem.makeDirectoryAsync(uploadDir, { intermediates: true });
+
+      const destination = `${uploadDir}${Date.now()}_${sanitizeFileName(name)}`;
+      await FileSystem.copyAsync({ from: uri, to: destination });
+      return destination;
+    } catch {
+      return uri;
+    }
+  };
+
   const handleFiles = async () => {
     if (!canUploadDocuments) {
       showUpgradeAlert();
@@ -176,38 +222,89 @@ const UploadDocumentScreen = () => {
     }
 
     try {
-      const result: any = await File.pickFileAsync({
-        mimeTypes: ['*/*'],
+      /*
+       * Use expo-document-picker for the Files option.
+       * File.pickFileAsync can return provider-backed file objects that upload
+       * inconsistently on Android. copyToCacheDirectory gives us a stable local
+       * file:// URI that FileSystem upload tasks can reliably send.
+       */
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        multiple: false,
+        copyToCacheDirectory: true,
       });
 
-      if (result?.canceled) return;
+      if (result.canceled || !result.assets?.length) return;
 
-      const pickedFile = result?.result || result;
+      const asset = result.assets[0];
+      const fileName = asset.name || asset.uri?.split('/').pop() || `document_${Date.now()}`;
+      const fileType = asset.mimeType || getMimeFromFileName(fileName);
+      const fileSize = asset.size || 0;
 
-      const fileName =
-        pickedFile?.name ||
-        pickedFile?.uri?.split('/').pop() ||
-        `document_${Date.now()}`;
+      if (!asset.uri) {
+        Alert.alert('File error', 'Could not read this file. Please choose another file.');
+        return;
+      }
 
-      const fileType =
-        pickedFile?.mimeType ||
-        pickedFile?.type ||
-        getMimeFromFileName(fileName);
-
-      const fileSize = pickedFile?.size || pickedFile?.info?.size || 0;
+      const uploadUri = await preparePickedFileUri(asset.uri, fileName);
 
       setSelectedFile({
         name: fileName,
-        uri: pickedFile.uri,
+        uri: uploadUri,
         type: fileType,
         size: fileSize,
-        pickedFile,
       });
 
       setDocumentTitle(fileName.replace(/\.[^/.]+$/, ''));
     } catch (error: any) {
-      Alert.alert('File error', error.message || 'Could not pick this file.');
+      Alert.alert('File error', error?.message || 'Could not pick this file.');
     }
+  };
+
+
+
+  const cancelActiveUpload = async () => {
+    if (!saving) return;
+
+    uploadCancelledRef.current = true;
+    hapticWarning();
+
+    try {
+      await activeUploadCancelRef.current?.();
+    } finally {
+      activeUploadCancelRef.current = null;
+      if (mountedRef.current) {
+        setSaving(false);
+      }
+    }
+  };
+
+  const getUploadErrorMessage = (error: any) => {
+    const code = String(error?.code || '').toUpperCase();
+    const message = String(error?.message || error || '').trim();
+    const lower = message.toLowerCase();
+
+    if (code === 'UPLOAD_CANCELLED' || lower.includes('cancel')) {
+      return 'The upload was cancelled.';
+    }
+
+    if (lower.includes('timed out') || lower.includes('timeout') || lower.includes('read timed out')) {
+      return 'The upload took too long and timed out. Try again on a stronger connection or choose a smaller file.';
+    }
+
+    if (lower.includes("isn't readable") || lower.includes('is not readable') || lower.includes('not readable')) {
+      return 'The selected file could not be read from your device. Please choose it again from Files, or move it to Downloads and try again.';
+    }
+
+    if (lower.includes('unsupported formdatapart') || lower.includes('formdatapart')) {
+      return 'This file could not be prepared for upload on this device. Please choose it again from Files or move it to Downloads and try again.';
+    }
+
+    if (lower.includes('network') || lower.includes('connection') || lower.includes('failed')) {
+      return 'The upload was interrupted. Please check your connection and try again.';
+    }
+
+    return message || 'Could not save document.';
   };
 
   const handleSave = async () => {
@@ -219,37 +316,48 @@ const UploadDocumentScreen = () => {
     if (!selectedFile || saving) return;
 
     if (!documentTitle.trim()) {
+      hapticWarning();
       Alert.alert('Missing title', 'Please enter a document title.');
       return;
     }
 
     try {
+      uploadCancelledRef.current = false;
       setSaving(true);
 
-      if (selectedFile.pickedFile) {
-        await api.createDocumentFromPickedFile(selectedFile.pickedFile, {
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.size,
-          documentTitle: documentTitle.trim() || selectedFile.name,
-        });
-      } else {
-        await api.createDocumentMultipart({
-          uri: selectedFile.uri,
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.size,
-          documentTitle: documentTitle.trim() || selectedFile.name,
-        });
-      }
+      const uploadTask = await api.createDocumentUploadTask({
+        uri: selectedFile.uri,
+        name: selectedFile.name,
+        type: selectedFile.type,
+        size: selectedFile.size,
+        documentTitle: documentTitle.trim() || selectedFile.name,
+      });
+
+      activeUploadCancelRef.current = uploadTask.cancel;
+      await uploadTask.start();
+      activeUploadCancelRef.current = null;
+
+      if (!mountedRef.current || uploadCancelledRef.current) return;
+
+      api.clearCache();
+      await AsyncStorage.setItem('homeNeedsInitialSync', 'true');
+      hapticSuccess();
 
       Alert.alert('Saved', 'Document saved to your vault.', [
-        { text: 'OK', onPress: () => router.back() },
+        { text: 'OK', onPress: () => router.replace('/vault?tab=Documents') },
       ]);
     } catch (error: any) {
-      Alert.alert('Save failed', error.message || 'Could not save document.');
+      if (!mountedRef.current || uploadCancelledRef.current || String(error?.code || '').toUpperCase() === 'UPLOAD_CANCELLED') {
+        return;
+      }
+
+      hapticWarning();
+      Alert.alert('Upload failed', getUploadErrorMessage(error));
     } finally {
-      setSaving(false);
+      activeUploadCancelRef.current = null;
+      if (mountedRef.current) {
+        setSaving(false);
+      }
     }
   };
 
@@ -324,7 +432,7 @@ const UploadDocumentScreen = () => {
           <TouchableOpacity
             style={styles.upgradeBtn}
             activeOpacity={0.85}
-            onPress={() => router.push('/subscription')}
+            onPress={() => { hapticWarning(); router.push('/subscription?from=adddocument'); }}
           >
             <Ionicons name="sparkles-outline" size={20} color="#fff" />
             <Text style={styles.upgradeBtnText}>Upgrade plan</Text>
@@ -333,7 +441,7 @@ const UploadDocumentScreen = () => {
           <TouchableOpacity
             style={styles.notNowBtn}
             activeOpacity={0.75}
-            onPress={() => router.back()}
+            onPress={() => { hapticLight(); router.back(); }}
           >
             <Text style={styles.notNowText}>Not now</Text>
           </TouchableOpacity>
@@ -355,7 +463,7 @@ const UploadDocumentScreen = () => {
         <View style={styles.options}>
           <TouchableOpacity
             style={styles.optionCard}
-            onPress={handleCamera}
+            onPress={() => { hapticLight(); handleCamera(); }}
             disabled={saving}
           >
             <View style={styles.iconCircle}>
@@ -372,7 +480,7 @@ const UploadDocumentScreen = () => {
 
           <TouchableOpacity
             style={styles.optionCard}
-            onPress={handleGallery}
+            onPress={() => { hapticLight(); handleGallery(); }}
             disabled={saving}
           >
             <View style={styles.iconCircle}>
@@ -389,7 +497,7 @@ const UploadDocumentScreen = () => {
 
           <TouchableOpacity
             style={styles.optionCard}
-            onPress={handleFiles}
+            onPress={() => { hapticLight(); handleFiles(); }}
             disabled={saving}
           >
             <View style={styles.iconCircle}>
@@ -462,7 +570,7 @@ const UploadDocumentScreen = () => {
           <View style={styles.noticeBox}>
             <Ionicons name="shield-checkmark-outline" size={18} color={C.primary} />
             <Text style={styles.noticeText}>
-              Documents are uploaded securely to your backend and stored for later download.
+              Documents are uploaded securely to our servers and stored for later download.
             </Text>
           </View>
         </View>
@@ -470,10 +578,21 @@ const UploadDocumentScreen = () => {
         <View style={{ height: 120 }} />
       </ScrollView>
 
+      {saving && (
+        <TouchableOpacity
+          style={styles.cancelUploadBtn}
+          onPress={cancelActiveUpload}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="close-circle-outline" size={18} color={C.danger} />
+          <Text style={styles.cancelUploadText}>Cancel upload</Text>
+        </TouchableOpacity>
+      )}
+
       {selectedFile && (
         <TouchableOpacity
           style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-          onPress={handleSave}
+          onPress={() => { hapticMedium(); handleSave(); }}
           disabled={saving}
         >
           {saving ? (
@@ -497,353 +616,82 @@ type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
 
 const makeStyles = (C: ThemeColors) =>
   StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: C.background,
-    },
-
-
-    skeletonBlock: {
-      backgroundColor: C.backgroundSelected,
-      borderRadius: 999,
-    },
-
-    skeletonScroll: {
-      paddingBottom: 140,
-    },
-
-    skeletonTitle: {
-      width: 190,
-      height: 28,
-      marginHorizontal: 20,
-      marginTop: 96,
-      marginBottom: 8,
-    },
-
-    skeletonPlanText: {
-      width: 118,
-      height: 12,
-      marginHorizontal: 20,
-      marginBottom: 20,
-    },
-
-    skeletonOptionIcon: {
-      width: 52,
-      height: 52,
-      borderRadius: 18,
-    },
-
-    skeletonOptionTitle: {
-      width: '58%',
-      height: 15,
-      marginBottom: 8,
-    },
-
-    skeletonOptionSub: {
-      width: '42%',
-      height: 11,
-    },
-
-    skeletonChevron: {
-      width: 22,
-      height: 22,
-      borderRadius: 8,
-    },
-
-    skeletonNoticeIcon: {
-      width: 22,
-      height: 22,
-      borderRadius: 8,
-    },
-
-    skeletonNoticeLine: {
-      width: '92%',
-      height: 12,
-      marginBottom: 8,
-    },
-
-    skeletonNoticeShort: {
-      width: '55%',
-      height: 12,
-    },
-
-    centered: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: 24,
-    },
-
-    loadingText: {
-      marginTop: 10,
-      color: C.textSecondary,
-      fontSize: 14,
-    },
-
-    header: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 20,
-      paddingTop: 94,
-      paddingBottom: 20,
-      gap: 12,
-    },
-
-    lockedHeader: {
-      paddingHorizontal: 20,
-      paddingTop: 94,
-    },
-
-    backBtn: {
-      width: 36,
-      height: 36,
-      backgroundColor: C.backgroundSelected,
-      borderRadius: 18,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-
-    title: {
-      fontSize: 22,
-      fontWeight: 'bold',
-      color: C.text,
-    },
-
-    planText: {
-      marginTop: 3,
-      fontSize: 12,
-      color: C.primary,
-      fontWeight: '700',
-    },
-
-    options: {
-      paddingHorizontal: 20,
-      gap: 12,
-    },
-
+    container: { flex: 1, backgroundColor: C.background },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonScroll: { paddingBottom: 150 },
+    skeletonTitle: { width: 190, height: 28, marginHorizontal: 20, marginTop: 96, marginBottom: 8 },
+    skeletonPlanText: { width: 118, height: 12, marginHorizontal: 20, marginBottom: 20 },
+    skeletonOptionIcon: { width: 54, height: 54, borderRadius: 20 },
+    skeletonOptionTitle: { width: '58%', height: 15, marginBottom: 8 },
+    skeletonOptionSub: { width: '42%', height: 11 },
+    skeletonChevron: { width: 22, height: 22, borderRadius: 8 },
+    skeletonNoticeIcon: { width: 22, height: 22, borderRadius: 8 },
+    skeletonNoticeLine: { width: '92%', height: 12, marginBottom: 8 },
+    skeletonNoticeShort: { width: '55%', height: 12 },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
+    loadingText: { marginTop: 10, color: C.textSecondary, fontSize: 14 },
+    header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 92, paddingBottom: 20, gap: 12 },
+    lockedHeader: { paddingHorizontal: 20, paddingTop: 94 },
+    backBtn: { width: 38, height: 38, backgroundColor: C.backgroundSelected, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+    title: { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.4 },
+    planText: { marginTop: 4, fontSize: 12, color: C.primary, fontWeight: '900' },
+    options: { paddingHorizontal: 20, gap: 14 },
     optionCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 16,
+      borderRadius: 22,
       padding: 18,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.045,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
     },
-
-    iconCircle: {
-      width: 52,
-      height: 52,
-      borderRadius: 26,
-      backgroundColor: C.actionCard,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-
-    optionText: {
-      flex: 1,
-    },
-
-    optionTitle: {
-      fontSize: 16,
-      fontWeight: '600',
-      color: C.text,
-      marginBottom: 3,
-    },
-
-    optionSub: {
-      fontSize: 13,
-      color: C.textSecondary,
-    },
-
+    iconCircle: { width: 54, height: 54, borderRadius: 20, backgroundColor: C.actionCard || C.backgroundSelected, justifyContent: 'center', alignItems: 'center' },
+    optionText: { flex: 1 },
+    optionTitle: { fontSize: 16, fontWeight: '900', color: C.text, marginBottom: 4 },
+    optionSub: { fontSize: 13, color: C.textSecondary, fontWeight: '600' },
     previewCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 16,
+      borderRadius: 24,
       padding: 16,
       borderWidth: 1,
       borderColor: C.primary,
-      gap: 10,
-    },
-
-    previewHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    previewName: {
-      fontSize: 14,
-      fontWeight: '700',
-      color: C.text,
-    },
-
-    previewSize: {
-      fontSize: 12,
-      color: C.textSecondary,
-      marginTop: 2,
-    },
-
-    imagePreview: {
-      width: '100%',
-      height: 190,
-      borderRadius: 12,
-      marginTop: 8,
-    },
-
-    statusRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      borderTopWidth: 1,
-      borderTopColor: C.border,
-      paddingTop: 10,
-    },
-
-    statusText: {
-      color: C.primary,
-      fontSize: 12,
-      fontWeight: '600',
-      flex: 1,
-    },
-
-    noticeBox: {
-      backgroundColor: C.actionCard,
-      borderRadius: 14,
-      padding: 16,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-      marginTop: 8,
-    },
-
-    noticeText: {
-      flex: 1,
-      fontSize: 13,
-      color: C.primary,
-      lineHeight: 20,
-    },
-
-    saveBtn: {
-      position: 'absolute',
-      left: 20,
-      right: 20,
-      bottom: 20,
-      backgroundColor: C.backgroundbutton,
-      paddingVertical: 18,
-      borderRadius: 50,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    saveBtnDisabled: {
-      backgroundColor: C.tabInactive,
-    },
-
-    saveBtnText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: 'bold',
-    },
-
-    label: {
-      fontSize: 13,
-      color: C.text,
-      fontWeight: '700',
-      marginBottom: 6,
-    },
-
-    input: {
-      backgroundColor: C.background,
-      borderRadius: 14,
-      paddingHorizontal: 14,
-      paddingVertical: 12,
-      color: C.text,
-      borderWidth: 1,
-      borderColor: C.border,
-      marginBottom: 8,
-    },
-
-    lockedContent: {
-      flex: 1,
-      justifyContent: 'center',
-      paddingHorizontal: 24,
-      paddingTop: 86,
-      paddingBottom: 40,
-    },
-
-    premiumIcon: {
-      width: 86,
-      height: 86,
-      borderRadius: 28,
-      backgroundColor: C.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 22,
-    },
-
-    lockedTitle: {
-      fontSize: 30,
-      fontWeight: '900',
-      color: C.text,
-      marginBottom: 10,
-    },
-
-    lockedSubtitle: {
-      fontSize: 15,
-      color: C.textSecondary,
-      lineHeight: 23,
-      marginBottom: 20,
-    },
-
-    featureBox: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 20,
-      padding: 16,
-      borderWidth: 1,
-      borderColor: C.border,
-      marginBottom: 24,
       gap: 12,
+      shadowColor: C.primary,
+      shadowOpacity: 0.09,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
     },
-
-    featureRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    featureText: {
-      flex: 1,
-      color: C.text,
-      fontSize: 14,
-      fontWeight: '600',
-    },
-
-    upgradeBtn: {
-      backgroundColor: C.backgroundbutton,
-      borderRadius: 50,
-      paddingVertical: 17,
-      flexDirection: 'row',
-      justifyContent: 'center',
-      alignItems: 'center',
-      gap: 10,
-    },
-
-    upgradeBtnText: {
-      color: '#fff',
-      fontSize: 16,
-      fontWeight: '800',
-    },
-
-    notNowBtn: {
-      marginTop: 14,
-      alignItems: 'center',
-      paddingVertical: 12,
-    },
-
-    notNowText: {
-      color: C.textSecondary,
-      fontSize: 15,
-      fontWeight: '700',
-    },
+    previewHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+    previewName: { fontSize: 14, fontWeight: '900', color: C.text },
+    previewSize: { fontSize: 12, color: C.textSecondary, marginTop: 3, fontWeight: '600' },
+    imagePreview: { width: '100%', height: 190, borderRadius: 16, marginTop: 8 },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
+    statusText: { color: C.primary, fontSize: 12, fontWeight: '800', flex: 1, lineHeight: 18 },
+    noticeBox: { backgroundColor: C.actionCard || C.backgroundSelected, borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, borderWidth: 1, borderColor: C.border },
+    noticeText: { flex: 1, fontSize: 13, color: C.primary, lineHeight: 20, fontWeight: '700' },
+    saveBtn: { position: 'absolute', left: 20, right: 20, bottom: 20, backgroundColor: C.backgroundbutton, paddingVertical: 18, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, shadowColor: C.primary, shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+    saveBtnDisabled: { backgroundColor: C.tabInactive },
+    saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+    cancelUploadBtn: { position: 'absolute', left: 20, right: 20, bottom: 92, backgroundColor: C.alertDangerBg || C.backgroundSelected, paddingVertical: 14, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.danger },
+    cancelUploadText: { color: C.danger, fontSize: 14, fontWeight: '900' },
+    label: { fontSize: 13, color: C.text, fontWeight: '900', marginBottom: 7 },
+    input: { backgroundColor: C.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
+    lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingTop: 86, paddingBottom: 40 },
+    premiumIcon: { width: 88, height: 88, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+    lockedTitle: { fontSize: 31, fontWeight: '900', color: C.text, marginBottom: 10, letterSpacing: -0.5 },
+    lockedSubtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 20, fontWeight: '600' },
+    featureBox: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 17, borderWidth: 1, borderColor: C.border, marginBottom: 24, gap: 13 },
+    featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+    featureText: { flex: 1, color: C.text, fontSize: 14, fontWeight: '800' },
+    upgradeBtn: { backgroundColor: C.backgroundbutton, borderRadius: 50, paddingVertical: 17, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 },
+    upgradeBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+    notNowBtn: { marginTop: 14, alignItems: 'center', paddingVertical: 12 },
+    notNowText: { color: C.textSecondary, fontSize: 15, fontWeight: '800' },
   });

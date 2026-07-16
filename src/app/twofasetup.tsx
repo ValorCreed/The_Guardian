@@ -16,7 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 
 import { api } from '../services/api';
+import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 type SecuritySettings = {
   emailVerified: boolean;
@@ -26,6 +28,8 @@ type SecuritySettings = {
 export default function TwoFactorSetupScreen() {
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
+
+  useSensitiveScreenProtection(true);
 
   const [settings, setSettings] = useState<SecuritySettings>({
     emailVerified: false,
@@ -195,7 +199,10 @@ export default function TwoFactorSetupScreen() {
             ) : (
               <Switch
                 value={settings.twoFactorEnabled}
-                onValueChange={toggleTwoFactor}
+                onValueChange={(nextValue) => {
+                  nextValue ? hapticToggleOn() : hapticToggleOff();
+                  toggleTwoFactor(nextValue);
+                }}
                 trackColor={{ false: C.border, true: C.primary }}
                 thumbColor="#fff"
                 ios_backgroundColor={C.border}

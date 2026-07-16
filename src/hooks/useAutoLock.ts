@@ -5,8 +5,22 @@ import { router, usePathname } from 'expo-router';
 
 import { logout } from '../services/api';
 
-const DEFAULT_TIMEOUT = 60000;
+export const AUTO_LOCK_ON_APP_CLOSE = -1;
+export const AUTO_LOCK_MODE_ON_APP_CLOSE = 'app_close';
+export const AUTO_LOCK_MODE_TIMEOUT = 'timeout';
+
+export type AutoLockMode =
+  | typeof AUTO_LOCK_MODE_ON_APP_CLOSE
+  | typeof AUTO_LOCK_MODE_TIMEOUT;
+
+export type AutoLockSettings = {
+  mode: AutoLockMode;
+  timeout: number;
+};
+
+const DEFAULT_TIMEOUT = 30000;
 const LAST_BACKGROUND_AT_KEY = 'lastBackgroundAt';
+const AUTO_LOCK_TIMEOUT_KEY = 'autoLockTimeout';
 
 const AUTH_SCREENS = [
   '/',
@@ -26,9 +40,17 @@ const shouldUseAutoLock = (pathname: string) => {
   );
 };
 
-export const getAutoLockTimeout = async () => {
-  const savedTimeout = await AsyncStorage.getItem('autoLockTimeout');
-  const timeout = savedTimeout ? Number(savedTimeout) : DEFAULT_TIMEOUT;
+const parseStoredTimeout = (savedTimeout: string | null) => {
+  if (!savedTimeout) return DEFAULT_TIMEOUT;
+
+  if (
+    savedTimeout === AUTO_LOCK_MODE_ON_APP_CLOSE ||
+    savedTimeout === String(AUTO_LOCK_ON_APP_CLOSE)
+  ) {
+    return AUTO_LOCK_ON_APP_CLOSE;
+  }
+
+  const timeout = Number(savedTimeout);
 
   if (!Number.isFinite(timeout) || timeout <= 0) {
     return DEFAULT_TIMEOUT;
@@ -37,14 +59,73 @@ export const getAutoLockTimeout = async () => {
   return timeout;
 };
 
+export const getAutoLockTimeout = async () => {
+  const savedTimeout = await AsyncStorage.getItem(AUTO_LOCK_TIMEOUT_KEY);
+  return parseStoredTimeout(savedTimeout);
+};
+
 export const setAutoLockTimeout = async (timeout: number) => {
-  await AsyncStorage.setItem('autoLockTimeout', String(timeout));
+  const value =
+    timeout === AUTO_LOCK_ON_APP_CLOSE
+      ? String(AUTO_LOCK_ON_APP_CLOSE)
+      : String(timeout);
+
+  await AsyncStorage.setItem(AUTO_LOCK_TIMEOUT_KEY, value);
+};
+
+export const getAutoLockSettings = async (): Promise<AutoLockSettings> => {
+  const timeout = await getAutoLockTimeout();
+
+  if (timeout === AUTO_LOCK_ON_APP_CLOSE) {
+    return {
+      mode: AUTO_LOCK_MODE_ON_APP_CLOSE,
+      timeout: AUTO_LOCK_ON_APP_CLOSE,
+    };
+  }
+
+  return {
+    mode: AUTO_LOCK_MODE_TIMEOUT,
+    timeout,
+  };
+};
+
+export const setAutoLockSettings = async (settings: AutoLockSettings) => {
+  if (settings.mode === AUTO_LOCK_MODE_ON_APP_CLOSE) {
+    await setAutoLockTimeout(AUTO_LOCK_ON_APP_CLOSE);
+    return;
+  }
+
+  const safeTimeout =
+    Number.isFinite(settings.timeout) && settings.timeout > 0
+      ? settings.timeout
+      : DEFAULT_TIMEOUT;
+
+  await setAutoLockTimeout(safeTimeout);
 };
 
 export const formatAutoLockTimeout = (timeout: number) => {
+  if (timeout === AUTO_LOCK_ON_APP_CLOSE) return 'When app closes';
   if (timeout < 60000) return `${Math.round(timeout / 1000)} seconds`;
-  if (timeout < 3600000) return `${Math.round(timeout / 60000)} minute${timeout === 60000 ? '' : 's'}`;
+  if (timeout < 3600000) {
+    return `${Math.round(timeout / 60000)} minute${timeout === 60000 ? '' : 's'}`;
+  }
+
   return `${Math.round(timeout / 3600000)} hour${timeout === 3600000 ? '' : 's'}`;
+};
+
+export const formatAutoLockSetting = (
+  modeOrTimeout: AutoLockMode | number,
+  timeout?: number
+) => {
+  if (typeof modeOrTimeout === 'number') {
+    return formatAutoLockTimeout(modeOrTimeout);
+  }
+
+  if (modeOrTimeout === AUTO_LOCK_MODE_ON_APP_CLOSE) {
+    return 'when the app closes';
+  }
+
+  return `after ${formatAutoLockTimeout(timeout || DEFAULT_TIMEOUT)}`;
 };
 
 export const useAutoLock = () => {
@@ -95,7 +176,7 @@ export const useAutoLock = () => {
 
     await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
 
-    if (timeAway >= timeout) {
+    if (timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout) {
       await lockVault();
     }
   }, [lockVault, pathname]);

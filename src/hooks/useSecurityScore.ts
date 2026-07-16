@@ -2,8 +2,16 @@ import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 
-import { api, BackupStatusResponse, SubscriptionResponse } from '../services/api';
+import {
+  api,
+  BackupStatusResponse,
+  FamilyMemberPasswordRisk,
+  RecoveryKitStatusResponse,
+  SharedPasswordItem,
+  SubscriptionResponse,
+} from '../services/api';
 import { decryptPassword } from '../utils/vaultcrypto';
+import { checkPwnedPassword } from '../utils/pwnedPasswords';
 
 type VaultPasswordItem = {
   id: number | string;
@@ -15,6 +23,9 @@ type VaultPasswordItem = {
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
+  ownerName?: string;
+  ownerEmail?: string;
+  shared?: boolean;
 };
 
 export type SecurityIssueType =
@@ -26,7 +37,18 @@ export type SecurityIssueType =
   | 'MISSING_USERNAME'
   | 'EMAIL_UNVERIFIED'
   | 'TWO_FACTOR_OFF'
-  | 'BACKUP_NEEDED';
+  | 'BACKUP_NEEDED'
+  | 'RECOVERY_KIT_MISSING'
+  | 'BREACHED_PASSWORD'
+  | 'SHARED_WEAK'
+  | 'SHARED_MEDIUM'
+  | 'SHARED_REUSED'
+  | 'SHARED_OLD'
+  | 'SHARED_BREACHED_PASSWORD'
+  | 'FAMILY_MEMBER_WEAK'
+  | 'FAMILY_MEMBER_MEDIUM'
+  | 'FAMILY_MEMBER_REUSED'
+  | 'FAMILY_MEMBER_OLD';
 
 export type SecurityIssue = {
   id: number | string;
@@ -38,17 +60,27 @@ export type SecurityIssue = {
   actionRoute?: string;
   itemId?: number | string;
   premiumOnly?: boolean;
+  breachCount?: number;
+  source?: 'OWN' | 'SHARED_FAMILY' | 'ACCOUNT';
+  ownerName?: string;
+  ownerEmail?: string;
 };
 
 export type SecurityReport = {
   score: number;
   totalPasswords: number;
+  totalSharedPasswords: number;
+  totalFamilyMemberPasswords: number;
   weakCount: number;
   mediumCount: number;
   strongCount: number;
   reusedCount: number;
   oldCount: number;
   missingInfoCount: number;
+  breachedCount: number;
+  breachCheckFailed: number;
+  recoveryKitCreated?: boolean;
+  lastBreachScanAt?: string;
   issues: SecurityIssue[];
   freeIssues: SecurityIssue[];
   premiumIssues: SecurityIssue[];
@@ -57,43 +89,64 @@ export type SecurityReport = {
   emailVerified?: boolean;
   twoFactorEnabled?: boolean;
   backupStatus?: BackupStatusResponse | null;
+  recoveryKitStatus?: RecoveryKitStatusResponse | null;
 };
 
 const emptyReport: SecurityReport = {
   score: 0,
   totalPasswords: 0,
+  totalSharedPasswords: 0,
+  totalFamilyMemberPasswords: 0,
   weakCount: 0,
   mediumCount: 0,
   strongCount: 0,
   reusedCount: 0,
   oldCount: 0,
   missingInfoCount: 0,
+  breachedCount: 0,
+  breachCheckFailed: 0,
+  recoveryKitCreated: false,
   issues: [],
   freeIssues: [],
   premiumIssues: [],
   isPremiumOrFamily: false,
   plan: 'FREE',
   backupStatus: null,
+  recoveryKitStatus: null,
 };
 
 const OLD_PASSWORD_DAYS = 180;
+const SHARED_PASSWORD_DETAIL_LIMIT = 25;
 
 const cleanValue = (value?: string | null) => {
   if (!value) return '';
 
   let cleaned = String(value).trim();
 
+  for (let index = 0; index < 2; index += 1) {
+    if (!cleaned.includes('%')) break;
+
+    try {
+      const decoded = decodeURIComponent(cleaned);
+      if (decoded === cleaned) break;
+      cleaned = decoded.trim();
+    } catch {
+      break;
+    }
+  }
+
   try {
-    cleaned = decodeURIComponent(cleaned);
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed === 'string') cleaned = parsed.trim();
   } catch {
-    // Keep original if it cannot be decoded.
+    // Not JSON. Keep current cleaned text.
   }
 
   if (
     (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
     (cleaned.startsWith("'") && cleaned.endsWith("'"))
   ) {
-    cleaned = cleaned.slice(1, -1);
+    cleaned = cleaned.slice(1, -1).trim();
   }
 
   return cleaned;
@@ -130,6 +183,7 @@ const getStrengthScore = (password: string) => {
   const common = ['password', 'qwerty', 'admin', 'welcome', 'guardian', '123456'];
   if (common.some((word) => password.toLowerCase().includes(word))) score -= 25;
   if (/(.)\1{2,}/.test(password)) score -= 10;
+  if (/^(123|234|345|456|567|678|789|890)/.test(password)) score -= 10;
 
   return Math.max(0, Math.min(score, 100));
 };
@@ -172,159 +226,13 @@ function makeIssue(input: Omit<SecurityIssue, 'initial'> & { initial?: string })
   };
 }
 
-function calculateSecurityReport(
-  passwords: VaultPasswordItem[],
-  subscription?: SubscriptionResponse,
+function addAccountIssues(
+  issues: SecurityIssue[],
   settings?: { emailVerified: boolean; twoFactorEnabled: boolean },
-  backupStatus?: BackupStatusResponse | null
-): SecurityReport {
-  const validPasswords = passwords.filter((item) => item && item.id !== undefined && item.id !== null);
-  const plan = subscription?.plan || 'FREE';
-  const isPremiumOrFamily = plan === 'PREMIUM' || plan === 'FAMILY';
-
-  if (validPasswords.length === 0) {
-    return {
-      ...emptyReport,
-      plan,
-      isPremiumOrFamily,
-      emailVerified: settings?.emailVerified,
-      twoFactorEnabled: settings?.twoFactorEnabled,
-      backupStatus: backupStatus || null,
-    };
-  }
-
-  let weakCount = 0;
-  let mediumCount = 0;
-  let strongCount = 0;
-  let reusedCount = 0;
-  let oldCount = 0;
-  let missingInfoCount = 0;
-  let totalStrength = 0;
-
-  const issues: SecurityIssue[] = [];
-  const passwordMap = new Map<string, VaultPasswordItem[]>();
-
-  validPasswords.forEach((item) => {
-    const password = getPasswordValue(item);
-    const title = cleanValue(item.title) || cleanValue(item.website) || 'Untitled password';
-    const username = cleanValue(item.usernameValue);
-    const website = cleanValue(item.website);
-    const strengthScore = getStrengthScore(password);
-    const strengthLabel = getStrengthLabel(strengthScore);
-    const changedAt = item.updatedAt || item.createdAt;
-    const ageDays = daysBetweenNowAnd(changedAt);
-
-    totalStrength += strengthScore;
-
-    if (password) {
-      // Reuse detection is based on exact decrypted password equality.
-      // Do not lowercase this value because passwords are case-sensitive.
-      const key = password;
-      const group = passwordMap.get(key) || [];
-      group.push(item);
-      passwordMap.set(key, group);
-    }
-
-    if (strengthLabel === 'WEAK') {
-      weakCount += 1;
-      issues.push(
-        makeIssue({
-          id: `weak-${item.id}`,
-          itemId: item.id,
-          type: 'WEAK',
-          severity: 'danger',
-          title,
-          subtitle: getSubtitle(password, strengthScore),
-          actionRoute: '/vaultdetails',
-        })
-      );
-    } else if (strengthLabel === 'MEDIUM') {
-      mediumCount += 1;
-      issues.push(
-        makeIssue({
-          id: `medium-${item.id}`,
-          itemId: item.id,
-          type: 'MEDIUM',
-          severity: 'warning',
-          title,
-          subtitle: getSubtitle(password, strengthScore),
-          actionRoute: '/vaultdetails',
-        })
-      );
-    } else {
-      strongCount += 1;
-    }
-
-    if (!website) {
-      missingInfoCount += 1;
-      issues.push(
-        makeIssue({
-          id: `missing-website-${item.id}`,
-          itemId: item.id,
-          type: 'MISSING_WEBSITE',
-          severity: 'info',
-          title,
-          subtitle: 'Add the website or app name so autofill and search work better.',
-          actionRoute: '/vaultdetails',
-        })
-      );
-    }
-
-    if (!username) {
-      missingInfoCount += 1;
-      issues.push(
-        makeIssue({
-          id: `missing-username-${item.id}`,
-          itemId: item.id,
-          type: 'MISSING_USERNAME',
-          severity: 'info',
-          title,
-          subtitle: 'Add the username or email for this login.',
-          actionRoute: '/vaultdetails',
-        })
-      );
-    }
-
-    if (ageDays >= OLD_PASSWORD_DAYS) {
-      oldCount += 1;
-      issues.push(
-        makeIssue({
-          id: `old-${item.id}`,
-          itemId: item.id,
-          type: 'OLD',
-          severity: 'warning',
-          title,
-          subtitle: `This password has not been changed in about ${ageDays} days.`,
-          actionRoute: '/vaultdetails',
-          premiumOnly: true,
-        })
-      );
-    }
-  });
-
-  passwordMap.forEach((group) => {
-    if (group.length <= 1) return;
-
-    reusedCount += group.length;
-
-    group.forEach((item) => {
-      const title = cleanValue(item.title) || cleanValue(item.website) || 'Untitled password';
-
-      issues.push(
-        makeIssue({
-          id: `reused-${item.id}`,
-          itemId: item.id,
-          type: 'REUSED',
-          severity: 'danger',
-          title,
-          subtitle: `This password is reused on ${group.length} saved logins. Use a unique password.`,
-          actionRoute: '/vaultdetails',
-          premiumOnly: true,
-        })
-      );
-    });
-  });
-
+  recoveryKitStatus?: RecoveryKitStatusResponse | null,
+  backupStatus?: BackupStatusResponse | null,
+  plan: string = 'FREE'
+) {
   if (settings && !settings.emailVerified) {
     issues.unshift(
       makeIssue({
@@ -332,8 +240,9 @@ function calculateSecurityReport(
         type: 'EMAIL_UNVERIFIED',
         severity: 'warning',
         title: 'Email is not verified',
-        subtitle: 'Verify your email to improve account recovery and security.',
+        subtitle: 'Verify your email to improve account recovery and prevent lockouts.',
         actionRoute: '/userinfo',
+        source: 'ACCOUNT',
         initial: 'E',
       })
     );
@@ -346,9 +255,25 @@ function calculateSecurityReport(
         type: 'TWO_FACTOR_OFF',
         severity: 'warning',
         title: 'Two-factor authentication is off',
-        subtitle: 'Turn on 2FA to add another layer of protection to your vault.',
-        actionRoute: '/security',
+        subtitle: 'Turn on 2FA so stolen passwords alone cannot unlock your vault.',
+        actionRoute: '/twofasetup',
+        source: 'ACCOUNT',
         initial: '2',
+      })
+    );
+  }
+
+  if (recoveryKitStatus && !recoveryKitStatus.created) {
+    issues.unshift(
+      makeIssue({
+        id: 'recovery-kit-missing',
+        type: 'RECOVERY_KIT_MISSING',
+        severity: 'danger',
+        title: 'Recovery kit has not been generated',
+        subtitle: 'If you forget your password or lose access, you may permanently lose your vault. Generate your recovery kit now.',
+        actionRoute: '/recoverykit',
+        source: 'ACCOUNT',
+        initial: 'R',
       })
     );
   }
@@ -362,37 +287,433 @@ function calculateSecurityReport(
         title: 'Create a fresh encrypted backup',
         subtitle: `You currently have ${backupStatus.totalItemCount} vault items. Keep a recent encrypted backup.`,
         actionRoute: '/backup',
+        source: 'ACCOUNT',
         initial: 'B',
       })
     );
   }
+}
 
-  const baseScore = Math.round(totalStrength / validPasswords.length);
-  const penalty = Math.min(35, reusedCount * 4 + oldCount * 2 + missingInfoCount * 1);
-  const score = Math.max(0, Math.min(100, baseScore - penalty));
+async function loadSharedPasswordsForSecurity(
+  subscription?: SubscriptionResponse
+): Promise<VaultPasswordItem[]> {
+  const plan = subscription?.plan || 'FREE';
+  const isPremiumOrFamily = plan === 'PREMIUM' || plan === 'FAMILY';
+
+  if (!isPremiumOrFamily) return [];
+
+  try {
+    const summaries = await api.getSharedPasswordItems?.();
+    const limitedSummaries = (summaries || []).slice(0, SHARED_PASSWORD_DETAIL_LIMIT);
+
+    const details = await Promise.allSettled(
+      limitedSummaries.map((item: SharedPasswordItem) => api.getSharedPasswordItem(item.id))
+    );
+
+    return details
+      .filter((result): result is PromiseFulfilledResult<SharedPasswordItem> => result.status === 'fulfilled')
+      .map((result) => ({
+        ...result.value,
+        shared: true,
+        ownerName: result.value.ownerName,
+        ownerEmail: result.value.ownerEmail,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+
+async function loadFamilyMemberPasswordRisksForSecurity(
+  subscription?: SubscriptionResponse
+): Promise<FamilyMemberPasswordRisk[]> {
+  if (subscription?.plan !== 'FAMILY') return [];
+
+  try {
+    return (await api.getFamilyMemberPasswordRisks?.()) || [];
+  } catch (error: any) {
+    const status = error?.status;
+    if (status !== 401) {
+      console.log('FAMILY MEMBER PASSWORD RISK SCAN FAILED:', error?.message || error);
+    }
+    return [];
+  }
+}
+
+function addFamilyMemberPasswordRiskIssues(
+  issues: SecurityIssue[],
+  risks: FamilyMemberPasswordRisk[]
+) {
+  let weak = 0;
+  let medium = 0;
+  let reused = 0;
+  let old = 0;
+  let strengthTotal = 0;
+
+  (risks || []).forEach((risk) => {
+    const memberName = cleanValue(risk.memberName) || cleanValue(risk.memberEmail) || 'Family member';
+    const itemTitle = cleanValue(risk.title) || cleanValue(risk.website) || 'Saved password';
+    const riskTypes = Array.isArray(risk.riskTypes) ? risk.riskTypes : [];
+    const strengthScore = Number(risk.strengthScore || 0);
+    const strengthLabel = String(risk.strengthLabel || '').toUpperCase();
+
+    strengthTotal += strengthScore;
+
+    if (strengthLabel === 'WEAK' || riskTypes.includes('WEAK')) {
+      weak += 1;
+      issues.push(
+        makeIssue({
+          id: `family-member-weak-${risk.memberId}-${risk.id}`,
+          itemId: risk.id,
+          type: 'FAMILY_MEMBER_WEAK',
+          severity: 'danger',
+          title: `${memberName} has a weak password`,
+          subtitle: `${itemTitle} is weak. Ask this family member to update it with a stronger, unique password.`,
+          actionRoute: '/family',
+          premiumOnly: true,
+          source: 'SHARED_FAMILY',
+          ownerName: memberName,
+          ownerEmail: risk.memberEmail,
+          initial: memberName.slice(0, 1).toUpperCase() || 'F',
+        })
+      );
+    } else if (strengthLabel === 'MEDIUM' || riskTypes.includes('MEDIUM')) {
+      medium += 1;
+      issues.push(
+        makeIssue({
+          id: `family-member-medium-${risk.memberId}-${risk.id}`,
+          itemId: risk.id,
+          type: 'FAMILY_MEMBER_MEDIUM',
+          severity: 'warning',
+          title: `${memberName} has a password that needs strengthening`,
+          subtitle: `${itemTitle} is only medium strength. Recommend a longer password with numbers and symbols.`,
+          actionRoute: '/family',
+          premiumOnly: true,
+          source: 'SHARED_FAMILY',
+          ownerName: memberName,
+          ownerEmail: risk.memberEmail,
+          initial: memberName.slice(0, 1).toUpperCase() || 'F',
+        })
+      );
+    }
+
+    if (risk.reusedPassword || riskTypes.includes('REUSED')) {
+      reused += 1;
+      issues.push(
+        makeIssue({
+          id: `family-member-reused-${risk.memberId}-${risk.id}`,
+          itemId: risk.id,
+          type: 'FAMILY_MEMBER_REUSED',
+          severity: 'danger',
+          title: `${memberName} has a reused password`,
+          subtitle: `${itemTitle} appears reused across ${risk.reusedCount || 2} family-member login items.`,
+          actionRoute: '/family',
+          premiumOnly: true,
+          source: 'SHARED_FAMILY',
+          ownerName: memberName,
+          ownerEmail: risk.memberEmail,
+          initial: memberName.slice(0, 1).toUpperCase() || 'F',
+        })
+      );
+    }
+
+    if (risk.oldPassword || riskTypes.includes('OLD')) {
+      old += 1;
+      issues.push(
+        makeIssue({
+          id: `family-member-old-${risk.memberId}-${risk.id}`,
+          itemId: risk.id,
+          type: 'FAMILY_MEMBER_OLD',
+          severity: 'warning',
+          title: `${memberName} has an old password`,
+          subtitle: `${itemTitle} has not been updated for a long time. Recommend changing it.`,
+          actionRoute: '/family',
+          premiumOnly: true,
+          source: 'SHARED_FAMILY',
+          ownerName: memberName,
+          ownerEmail: risk.memberEmail,
+          initial: memberName.slice(0, 1).toUpperCase() || 'F',
+        })
+      );
+    }
+  });
+
+  return {
+    weak,
+    medium,
+    reused,
+    old,
+    strengthTotal,
+    count: (risks || []).length,
+  };
+}
+
+async function calculateSecurityReport(
+  passwords: VaultPasswordItem[],
+  subscription?: SubscriptionResponse,
+  settings?: { emailVerified: boolean; twoFactorEnabled: boolean },
+  backupStatus?: BackupStatusResponse | null,
+  recoveryKitStatus?: RecoveryKitStatusResponse | null,
+  sharedPasswords: VaultPasswordItem[] = [],
+  familyMemberPasswordRisks: FamilyMemberPasswordRisk[] = []
+): Promise<SecurityReport> {
+  const ownPasswords = passwords.filter((item) => item && item.id !== undefined && item.id !== null);
+  const familyPasswords = sharedPasswords.filter((item) => item && item.id !== undefined && item.id !== null);
+  const allPasswordItems = [...ownPasswords, ...familyPasswords];
+  const plan = subscription?.plan || 'FREE';
+  const isPremiumOrFamily = plan === 'PREMIUM' || plan === 'FAMILY';
+
+  let weakCount = 0;
+  let mediumCount = 0;
+  let strongCount = 0;
+  let reusedCount = 0;
+  let oldCount = 0;
+  let missingInfoCount = 0;
+  let breachedCount = 0;
+  let breachCheckFailed = 0;
+  let totalStrength = 0;
+
+  const issues: SecurityIssue[] = [];
+  const passwordMap = new Map<string, VaultPasswordItem[]>();
+
+  for (const item of allPasswordItems) {
+    const password = getPasswordValue(item);
+    const isShared = Boolean(item.shared);
+    const title = cleanValue(item.title) || cleanValue(item.website) || (isShared ? 'Shared password' : 'Untitled password');
+    const username = cleanValue(item.usernameValue);
+    const website = cleanValue(item.website);
+    const strengthScore = password ? getStrengthScore(password) : 0;
+    const strengthLabel = getStrengthLabel(strengthScore);
+    const changedAt = item.updatedAt || item.createdAt;
+    const ageDays = daysBetweenNowAnd(changedAt);
+    const issuePrefix = isShared ? 'shared-' : '';
+    const sharedSubtitlePrefix = isShared
+      ? `Shared by ${cleanValue(item.ownerName) || cleanValue(item.ownerEmail) || 'a family member'}. `
+      : '';
+
+    totalStrength += strengthScore;
+
+    if (password) {
+      const key = password;
+      const group = passwordMap.get(key) || [];
+      group.push(item);
+      passwordMap.set(key, group);
+    }
+
+    if (strengthLabel === 'WEAK') {
+      weakCount += 1;
+      issues.push(
+        makeIssue({
+          id: `${issuePrefix}weak-${item.id}`,
+          itemId: item.id,
+          type: isShared ? 'SHARED_WEAK' : 'WEAK',
+          severity: 'danger',
+          title: isShared ? `Shared password is weak: ${title}` : title,
+          subtitle: `${sharedSubtitlePrefix}${getSubtitle(password, strengthScore)}`,
+          actionRoute: isShared ? '/sharedvaultdetails' : '/vaultdetails',
+          premiumOnly: isShared,
+          source: isShared ? 'SHARED_FAMILY' : 'OWN',
+          ownerName: item.ownerName,
+          ownerEmail: item.ownerEmail,
+        })
+      );
+    } else if (strengthLabel === 'MEDIUM') {
+      mediumCount += 1;
+      issues.push(
+        makeIssue({
+          id: `${issuePrefix}medium-${item.id}`,
+          itemId: item.id,
+          type: isShared ? 'SHARED_MEDIUM' : 'MEDIUM',
+          severity: 'warning',
+          title: isShared ? `Shared password needs strengthening: ${title}` : title,
+          subtitle: `${sharedSubtitlePrefix}${getSubtitle(password, strengthScore)}`,
+          actionRoute: isShared ? '/sharedvaultdetails' : '/vaultdetails',
+          premiumOnly: isShared,
+          source: isShared ? 'SHARED_FAMILY' : 'OWN',
+          ownerName: item.ownerName,
+          ownerEmail: item.ownerEmail,
+        })
+      );
+    } else {
+      strongCount += 1;
+    }
+
+    if (!isShared && !website) {
+      missingInfoCount += 1;
+      issues.push(
+        makeIssue({
+          id: `missing-website-${item.id}`,
+          itemId: item.id,
+          type: 'MISSING_WEBSITE',
+          severity: 'info',
+          title,
+          subtitle: 'Add the website or app name so search and future autofill work better.',
+          actionRoute: '/vaultdetails',
+          source: 'OWN',
+        })
+      );
+    }
+
+    if (!isShared && !username) {
+      missingInfoCount += 1;
+      issues.push(
+        makeIssue({
+          id: `missing-username-${item.id}`,
+          itemId: item.id,
+          type: 'MISSING_USERNAME',
+          severity: 'info',
+          title,
+          subtitle: 'Add the username or email for this login.',
+          actionRoute: '/vaultdetails',
+          source: 'OWN',
+        })
+      );
+    }
+
+    if (ageDays >= OLD_PASSWORD_DAYS) {
+      oldCount += 1;
+      issues.push(
+        makeIssue({
+          id: `${issuePrefix}old-${item.id}`,
+          itemId: item.id,
+          type: isShared ? 'SHARED_OLD' : 'OLD',
+          severity: 'warning',
+          title: isShared ? `Shared password may be old: ${title}` : title,
+          subtitle: `${sharedSubtitlePrefix}This password has not been changed in about ${ageDays} days.`,
+          actionRoute: isShared ? '/sharedvaultdetails' : '/vaultdetails',
+          premiumOnly: true,
+          source: isShared ? 'SHARED_FAMILY' : 'OWN',
+          ownerName: item.ownerName,
+          ownerEmail: item.ownerEmail,
+        })
+      );
+    }
+
+    if (isPremiumOrFamily && password) {
+      try {
+        const breachResult = await checkPwnedPassword(password);
+
+        if (breachResult.breached && breachResult.count > 0) {
+          breachedCount += 1;
+          issues.push(
+            makeIssue({
+              id: `${issuePrefix}breached-${item.id}`,
+              itemId: item.id,
+              type: isShared ? 'SHARED_BREACHED_PASSWORD' : 'BREACHED_PASSWORD',
+              severity: 'danger',
+              title: isShared ? `Shared password appears breached: ${title}` : title,
+              subtitle: `${sharedSubtitlePrefix}This password appears in public breach data ${breachResult.count.toLocaleString()} time${breachResult.count === 1 ? '' : 's'}. Change it immediately.`,
+              actionRoute: isShared ? '/sharedvaultdetails' : '/vaultdetails',
+              premiumOnly: true,
+              breachCount: breachResult.count,
+              source: isShared ? 'SHARED_FAMILY' : 'OWN',
+              ownerName: item.ownerName,
+              ownerEmail: item.ownerEmail,
+            })
+          );
+        }
+      } catch {
+        breachCheckFailed += 1;
+      }
+    }
+  }
+
+  passwordMap.forEach((group) => {
+    if (group.length <= 1) return;
+
+    reusedCount += group.length;
+
+    group.forEach((item) => {
+      const isShared = Boolean(item.shared);
+      const title = cleanValue(item.title) || cleanValue(item.website) || (isShared ? 'Shared password' : 'Untitled password');
+      const sharedSubtitlePrefix = isShared
+        ? `Shared by ${cleanValue(item.ownerName) || cleanValue(item.ownerEmail) || 'a family member'}. `
+        : '';
+
+      issues.push(
+        makeIssue({
+          id: `${isShared ? 'shared-' : ''}reused-${item.id}`,
+          itemId: item.id,
+          type: isShared ? 'SHARED_REUSED' : 'REUSED',
+          severity: 'danger',
+          title: isShared ? `Shared password is reused: ${title}` : title,
+          subtitle: `${sharedSubtitlePrefix}This password is reused on ${group.length} saved/shared login${group.length === 1 ? '' : 's'}. Use a unique password.`,
+          actionRoute: isShared ? '/sharedvaultdetails' : '/vaultdetails',
+          premiumOnly: true,
+          source: isShared ? 'SHARED_FAMILY' : 'OWN',
+          ownerName: item.ownerName,
+          ownerEmail: item.ownerEmail,
+        })
+      );
+    });
+  });
+
+  const familyMemberRiskCounts = addFamilyMemberPasswordRiskIssues(issues, familyMemberPasswordRisks);
+  weakCount += familyMemberRiskCounts.weak;
+  mediumCount += familyMemberRiskCounts.medium;
+  reusedCount += familyMemberRiskCounts.reused;
+  oldCount += familyMemberRiskCounts.old;
+
+  addAccountIssues(issues, settings, recoveryKitStatus, backupStatus, plan);
+
+  const accountPenalty =
+    (settings && !settings.emailVerified ? 8 : 0) +
+    (settings && !settings.twoFactorEnabled ? 10 : 0) +
+    (recoveryKitStatus && !recoveryKitStatus.created ? 18 : 0) +
+    (backupStatus && backupStatus.totalItemCount > 0 && plan !== 'FREE' ? 4 : 0);
+
+  const vaultPenalty =
+    breachedCount * 18 +
+    weakCount * 10 +
+    reusedCount * 7 +
+    mediumCount * 3 +
+    oldCount * 3 +
+    missingInfoCount * 1;
+
+  const scoredPasswordCount = allPasswordItems.length + familyMemberRiskCounts.count;
+  const scoredStrengthTotal = totalStrength + familyMemberRiskCounts.strengthTotal;
+
+  const basePasswordScore = scoredPasswordCount > 0
+    ? Math.round(scoredStrengthTotal / scoredPasswordCount)
+    : 86;
+
+  const noVaultPenalty = scoredPasswordCount === 0 ? 8 : 0;
+  const penalty = Math.min(90, accountPenalty + vaultPenalty + noVaultPenalty);
+  const score = Math.max(0, Math.min(100, basePasswordScore - penalty));
+
+  const sortedIssues = issues.sort((a, b) => {
+    const severityRank = { danger: 0, warning: 1, info: 2 } as const;
+    return severityRank[a.severity] - severityRank[b.severity];
+  });
 
   return {
     score,
-    totalPasswords: validPasswords.length,
+    totalPasswords: ownPasswords.length,
+    totalSharedPasswords: familyPasswords.length,
+    totalFamilyMemberPasswords: familyMemberRiskCounts.count,
     weakCount,
     mediumCount,
     strongCount,
     reusedCount,
     oldCount,
     missingInfoCount,
-    issues,
-    freeIssues: issues.filter((issue) => !issue.premiumOnly).slice(0, 5),
-    premiumIssues: issues.filter((issue) => issue.premiumOnly),
+    breachedCount,
+    breachCheckFailed,
+    recoveryKitCreated: Boolean(recoveryKitStatus?.created),
+    lastBreachScanAt: isPremiumOrFamily ? new Date().toISOString() : undefined,
+    issues: sortedIssues,
+    freeIssues: sortedIssues.filter((issue) => !issue.premiumOnly).slice(0, 6),
+    premiumIssues: sortedIssues.filter((issue) => issue.premiumOnly),
     isPremiumOrFamily,
     plan,
     emailVerified: settings?.emailVerified,
     twoFactorEnabled: settings?.twoFactorEnabled,
     backupStatus: backupStatus || null,
+    recoveryKitStatus: recoveryKitStatus || null,
   };
 }
 
-
-const SECURITY_REPORT_CACHE_PREFIX = 'theguardian.security.report.v3';
+const SECURITY_REPORT_CACHE_PREFIX = 'theguardian.security.report.v4';
 const SECURITY_SCORE_INITIAL_SYNC_KEY = 'securityScoreNeedsInitialSync';
 
 let memoryReport: SecurityReport | null = null;
@@ -445,25 +766,82 @@ async function loadReportFromServer(force = false) {
     return inFlight;
   }
 
-  inFlight = Promise.all([
-    api.getVaultItems(),
-    api.getSubscription().catch(() => ({ plan: 'FREE' as const })),
-    api.getSecuritySettings().catch(() => undefined),
-    api.getBackupStatus().catch(() => null),
-  ])
-    .then(([passwords, subscription, settings, backupStatus]) =>
-      calculateSecurityReport(
-        passwords as VaultPasswordItem[],
-        subscription as SubscriptionResponse,
-        settings,
-        backupStatus as BackupStatusResponse | null
-      )
-    )
-    .finally(() => {
-      inFlight = null;
-    });
+  inFlight = (async () => {
+    const [passwords, subscription, settings, backupStatus, recoveryKitStatus] = await Promise.all([
+      api.getVaultItems(),
+      api.getSubscription().catch(() => ({ plan: 'FREE' as const })),
+      api.getSecuritySettings().catch(() => undefined),
+      api.getBackupStatus().catch(() => null),
+      api.getRecoveryKitStatus().catch(() => ({ created: false })),
+    ]);
+
+    const sharedPasswords = await loadSharedPasswordsForSecurity(subscription as SubscriptionResponse);
+    const familyMemberPasswordRisks = await loadFamilyMemberPasswordRisksForSecurity(subscription as SubscriptionResponse);
+
+    return calculateSecurityReport(
+      passwords as VaultPasswordItem[],
+      subscription as SubscriptionResponse,
+      settings,
+      backupStatus as BackupStatusResponse | null,
+      recoveryKitStatus as RecoveryKitStatusResponse | null,
+      sharedPasswords,
+      familyMemberPasswordRisks
+    );
+  })().finally(() => {
+    inFlight = null;
+  });
 
   return inFlight;
+}
+
+const SECURITY_ALERT_CACHE_PREFIX = 'theguardian.security.alert.v2';
+const SECURITY_ALERT_MIN_INTERVAL_MS = 1000 * 60 * 60 * 12;
+
+async function maybeReportSecurityAlert(email: string, report: SecurityReport) {
+  if (!report.isPremiumOrFamily) return;
+
+  const riskyCount = report.breachedCount + report.weakCount + report.reusedCount;
+
+  if (riskyCount <= 0) return;
+
+  const cacheKey = `${SECURITY_ALERT_CACHE_PREFIX}:${email || 'anonymous'}`;
+  const signature = [
+    report.score,
+    report.breachedCount,
+    report.weakCount,
+    report.reusedCount,
+    report.oldCount,
+  ].join('|');
+
+  try {
+    const raw = await AsyncStorage.getItem(cacheKey);
+    const previous = raw ? JSON.parse(raw) : null;
+    const previousTime = previous?.sentAt ? new Date(previous.sentAt).getTime() : 0;
+    const ageMs = Date.now() - previousTime;
+
+    if (previous?.signature === signature && ageMs < SECURITY_ALERT_MIN_INTERVAL_MS) {
+      return;
+    }
+
+    await api.reportSecurityScanAlert?.({
+      score: report.score,
+      totalIssues: report.issues.length,
+      breachedCount: report.breachedCount,
+      weakCount: report.weakCount,
+      reusedCount: report.reusedCount,
+      oldCount: report.oldCount,
+    });
+
+    await AsyncStorage.setItem(
+      cacheKey,
+      JSON.stringify({
+        signature,
+        sentAt: new Date().toISOString(),
+      })
+    );
+  } catch {
+    // Security alert notifications should never block the score screen.
+  }
 }
 
 export const useSecurityScore = () => {
@@ -504,6 +882,7 @@ export const useSecurityScore = () => {
       initialSyncDoneForEmail = email;
 
       await saveCachedReport(email, calculated);
+      await maybeReportSecurityAlert(email, calculated);
       await AsyncStorage.removeItem(SECURITY_SCORE_INITIAL_SYNC_KEY);
 
       setReport(calculated);

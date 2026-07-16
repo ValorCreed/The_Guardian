@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,12 +12,20 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { useAppTheme } from '../context/ThemeContext';
+import { hapticLight, hapticMedium, hapticWarning, hapticDelete, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, VaultItem } from '../services/api';
+import OfflineBanner from '../components/OfflineBanner';
+import {
+  findOfflineCard,
+  findOfflineDocument,
+  findOfflinePassword,
+  isOfflineReadableError,
+  loadOfflineVaultSnapshot,
+} from '../services/offlineVault';
 import {
   decryptJson,
   decryptPassword,
@@ -26,6 +33,10 @@ import {
   maskCardNumber,
   maskPassword,
 } from '../utils/vaultcrypto';
+import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
+import CardBrandLogo from '../components/CardBrandLogo';
+import { detectCardBrand } from '../utils/cardBrand';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 type CardPayload = {
   cardholderName: string;
@@ -49,20 +60,101 @@ const defaultCard: CardPayload = {
   bankName: '',
 };
 
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+
+  if (parts.length < 2) return '';
+
+  return String(parts.pop() || '').trim().toLowerCase();
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+
+  if (
+    mime.includes('wordprocessingml') ||
+    mime === 'application/msword' ||
+    extension === 'docx' ||
+    extension === 'doc'
+  ) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+
+  if (
+    mime.includes('spreadsheetml') ||
+    mime === 'application/vnd.ms-excel' ||
+    extension === 'xlsx' ||
+    extension === 'xls'
+  ) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+
+  if (
+    mime.includes('presentationml') ||
+    mime === 'application/vnd.ms-powerpoint' ||
+    extension === 'pptx' ||
+    extension === 'ppt'
+  ) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+
+  if (extension) return extension.toUpperCase();
+
+  return 'Document';
+};
+
+
 const VaultDetailsScreen = () => {
   const router = useRouter();
-  const { id, type } = useLocalSearchParams<{
+  const { id, type, returnTab } = useLocalSearchParams<{
   id: string;
   type?: 'PASSWORD' | 'CARD' | 'DOCUMENT' | 'NOTE';
+  returnTab?: 'Passwords' | 'Documents' | 'Cards' | 'Notes';
 }>();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  const getReturnTab = () => {
+    if (returnTab === 'Documents' || returnTab === 'Cards' || returnTab === 'Notes' || returnTab === 'Passwords') {
+      return returnTab;
+    }
+
+    if (type === 'DOCUMENT') return 'Documents';
+    if (type === 'CARD') return 'Cards';
+    if (type === 'NOTE') return 'Notes';
+    return 'Passwords';
+  };
+
+  const goBackToVaultSection = () => {
+    router.replace({
+      pathname: '/vault',
+      params: { tab: getReturnTab() },
+    });
+  };
+
+  useSensitiveScreenProtection(true);
 
   const [item, setItem] = useState<VaultItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSecret, setShowSecret] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
 
   const [editWebsite, setEditWebsite] = useState('');
   const [editUsername, setEditUsername] = useState('');
@@ -83,52 +175,59 @@ const VaultDetailsScreen = () => {
 };
 
   ///Loaing items from the vault such as the cards or passwords or docs
+const buildCardVaultItem = (card: any): VaultItem => {
+  const cardholder = card.encryptedCardholderName || card.encryptedCardHolderName;
+
+  return {
+    id: card.id,
+    itemType: 'CARD',
+    title: card.cardName || 'Saved Card',
+    usernameValue: decryptStoredText(cardholder),
+    encryptedData: encodeURIComponent(
+      JSON.stringify({
+        cardholderName: decryptStoredText(cardholder),
+        cardNumber: decryptStoredText(card.encryptedCardNumber),
+        expiry: decryptStoredText(card.encryptedExpiryDate),
+        cvv: decryptStoredText(card.encryptedCvv),
+        bankName: card.cardName || 'Saved Card',
+      })
+    ),
+  };
+};
+
+const buildDocumentVaultItem = (doc: any): VaultItem => ({
+  id: doc.id,
+  itemType: 'DOCUMENT',
+  title: doc.documentName,
+  fileName: doc.documentName,
+  mimeType: doc.documentType,
+  encryptedData: doc.encryptedFileUrl,
+  notes: doc.encryptedNotes,
+  sizeBytes: (() => {
+    try {
+      return JSON.parse(doc.encryptedNotes || '{}').sizeBytes || 0;
+    } catch {
+      return 0;
+    }
+  })(),
+});
+
 const loadItem = async () => {
   if (!id) return;
 
   try {
     setLoading(true);
+    setOfflineMode(false);
+    setOfflineSavedAt(null);
 
     let data: VaultItem;
 
     if (type === 'CARD') {
       const card = await api.getCard(id);
-      const cardholder = card.encryptedCardholderName || card.encryptedCardHolderName;
-
-      data = {
-        id: card.id,
-        itemType: 'CARD',
-        title: card.cardName || 'Saved Card',
-        usernameValue: decryptStoredText(cardholder),
-        encryptedData: encodeURIComponent(
-          JSON.stringify({
-            cardholderName: decryptStoredText(cardholder),
-            cardNumber: decryptStoredText(card.encryptedCardNumber),
-            expiry: decryptStoredText(card.encryptedExpiryDate),
-            cvv: decryptStoredText(card.encryptedCvv),
-            bankName: card.cardName || 'Saved Card',
-          })
-        ),
-      };
+      data = buildCardVaultItem(card);
     } else if (type === 'DOCUMENT') {
       const doc = await api.getDocument(id);
-
-      data = {
-        id: doc.id,
-        itemType: 'DOCUMENT',
-        title: doc.documentName,
-        fileName: doc.documentName,
-        mimeType: doc.documentType,
-        encryptedData: doc.encryptedFileUrl,
-        notes: doc.encryptedNotes,
-          sizeBytes: (() => {
-              try {
-                return JSON.parse(doc.encryptedNotes || '{}').sizeBytes || 0;
-              } catch {
-                return 0;
-              }
-})(),
-      };
+      data = buildDocumentVaultItem(doc);
     } else {
       data = await api.getVaultItem(id);
     }
@@ -142,23 +241,64 @@ const loadItem = async () => {
       setEditNotes(data.notes || '');
     }
   } catch (error: any) {
+    if (isOfflineReadableError(error)) {
+      const snapshot = await loadOfflineVaultSnapshot();
+      let offlineData: VaultItem | null = null;
+
+      if (type === 'CARD') {
+        const card = await findOfflineCard(id);
+        offlineData = card ? buildCardVaultItem(card) : null;
+      } else if (type === 'DOCUMENT') {
+        const doc = await findOfflineDocument(id);
+        offlineData = doc ? buildDocumentVaultItem(doc) : null;
+      } else {
+        offlineData = await findOfflinePassword(id) as VaultItem | null;
+      }
+
+      if (offlineData) {
+        setItem(offlineData);
+        setOfflineMode(true);
+        setOfflineSavedAt(snapshot?.savedAt || null);
+
+        if (offlineData.itemType === 'PASSWORD') {
+          setEditWebsite(offlineData.website || offlineData.title || '');
+          setEditUsername(offlineData.usernameValue || '');
+          setEditPassword(offlineData.encryptedPassword ? decryptPassword(offlineData.encryptedPassword) : '');
+          setEditNotes(offlineData.notes || '');
+        }
+        return;
+      }
+    }
+
     Alert.alert('Error', error.message || 'Could not load item.');
   } finally {
     setLoading(false);
   }
 };
 
-  useEffect(() => {
+    useEffect(() => {
     loadItem();
   }, [id]);
 
   const copyValue = async (label: string, value?: string) => {
     if (!value) return;
-    await Clipboard.setStringAsync(value);
-    Alert.alert('Copied', `${label} copied.`);
+    await setSecureClipboard(value);
+    Alert.alert('Copied', getSecureClipboardMessage(label));
+  };
+
+  const showOfflineWriteWarning = () => {
+    Alert.alert(
+      'Offline mode',
+      'This item is being shown from your saved offline vault. Editing and deleting will work again when the server is reachable.'
+    );
   };
 
   const savePasswordChanges = async () => {
+    if (offlineMode) {
+      showOfflineWriteWarning();
+      return;
+    }
+
     if (!item || saving) return;
 
     if (!editWebsite.trim() || !editUsername.trim() || !editPassword.trim()) {
@@ -175,9 +315,22 @@ const loadItem = async () => {
         encryptedPassword: encryptPassword(editPassword.trim()),
         notes: editNotes.trim(),
       });
-      setItem(updated);
+
+      const safeUpdatedItem: VaultItem = {
+        ...item,
+        ...(updated || {}),
+        itemType: 'PASSWORD',
+        title: editWebsite.trim(),
+        website: editWebsite.trim(),
+        usernameValue: editUsername.trim(),
+        encryptedPassword: encryptPassword(editPassword.trim()),
+        notes: editNotes.trim(),
+      };
+
+      setItem(safeUpdatedItem);
       setEditingPassword(false);
       setShowSecret(false);
+      hapticSuccess();
       Alert.alert('Updated', 'Password updated successfully.');
     } catch (error: any) {
       Alert.alert('Update failed', error.message || 'Could not update password.');
@@ -188,6 +341,13 @@ const loadItem = async () => {
 
   //Delete the current item from the vault
   const deleteCurrentItem = async () => {
+  if (deleting) return;
+
+  if (offlineMode) {
+    showOfflineWriteWarning();
+    return;
+  }
+
   if (!item) return;
 
   Alert.alert(
@@ -200,6 +360,8 @@ const loadItem = async () => {
         style: 'destructive',
         onPress: async () => {
           try {
+            setDeleting(true);
+
             if (item.itemType === 'CARD') {
               await api.deleteCard(item.id);
             } else if (item.itemType === 'DOCUMENT') {
@@ -208,11 +370,15 @@ const loadItem = async () => {
               await api.deleteVaultItem(item.id);
             }
 
+            hapticSuccess();
             Alert.alert('Deleted', 'Item deleted successfully.', [
-              { text: 'OK', onPress: () => router.back() },
+              { text: 'OK', onPress: goBackToVaultSection },
             ]);
           } catch (error: any) {
+            hapticWarning();
             Alert.alert('Delete failed', error.message || 'Could not delete item.');
+          } finally {
+            setDeleting(false);
           }
         },
       },
@@ -220,68 +386,90 @@ const loadItem = async () => {
   );
 };
 
-  const getBase64Document = () => {
-    if (!item?.encryptedData) return '';
+  const downloadDocument = async () => {
+    if (!item || item.itemType !== 'DOCUMENT' || downloading) return;
 
-    // New backend multipart upload stores raw Base64 directly in encryptedFileUrl.
-    // Older JSON-based documents stored { fileName, mimeType, base64Content }.
-    const maybeJson = decryptJson<DocumentPayload | null>(item.encryptedData, null);
-    if (maybeJson?.base64Content) {
-      return maybeJson.base64Content;
+    if (offlineMode) {
+      showOfflineWriteWarning();
+      return;
     }
 
-    return item.encryptedData;
-  };
-
-  const downloadDocument = async () => {
-    if (!item?.encryptedData) return;
-
     try {
-      const base64Content = getBase64Document();
-
-      if (!base64Content) {
-        Alert.alert('Download failed', 'Document data is missing.');
-        return;
-      }
+      setDownloading(true);
 
       const safeName = (item.fileName || item.title || 'document').replace(/[^a-zA-Z0-9._-]/g, '_');
       const mimeType = item.mimeType || 'application/octet-stream';
 
+      const downloaded = await api.downloadDocumentToCache(item.id, safeName, mimeType);
+
       const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
 
       if (permissions.granted) {
+        const base64Content = await FileSystem.readAsStringAsync(downloaded.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+
         const uri = await FileSystem.StorageAccessFramework.createFileAsync(
           permissions.directoryUri,
-          safeName,
-          mimeType
+          downloaded.fileName || safeName,
+          downloaded.mimeType || mimeType
         );
 
         await FileSystem.writeAsStringAsync(uri, base64Content, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
+        hapticSuccess();
         Alert.alert('Downloaded', 'Document saved to the folder you selected.');
         return;
       }
 
-      const path = `${FileSystem.documentDirectory}${safeName}`;
-
-      await FileSystem.writeAsStringAsync(path, base64Content, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(path, {
-          mimeType,
+        await Sharing.shareAsync(downloaded.uri, {
+          mimeType: downloaded.mimeType || mimeType,
           dialogTitle: 'Share document',
         });
+        hapticSuccess();
       } else {
-        Alert.alert('Saved', `Document saved here: ${path}`);
+        Alert.alert('Saved temporarily', downloaded.uri);
       }
     } catch (error: any) {
-      Alert.alert('Download failed', error.message || 'Could not download document.');
+      const message = String(error?.message || '').toLowerCase();
+      hapticWarning();
+      Alert.alert(
+        'Download failed',
+        message.includes('timed out') || message.includes('timeout')
+          ? 'The download took too long. Please try again on a stronger connection.'
+          : error.message || 'Could not download document.'
+      );
+    } finally {
+      setDownloading(false);
     }
   };
+
+
+  const renderDeleteButton = (label: string) => (
+    <TouchableOpacity
+      style={[
+        styles.secondaryBtn,
+        styles.deleteBtn,
+        { borderColor: '#e53935' },
+        deleting && styles.mainBtnDisabled,
+      ]}
+      onPress={offlineMode ? () => { hapticWarning(); showOfflineWriteWarning(); } : () => { hapticDelete(); deleteCurrentItem(); }}
+      disabled={deleting}
+      activeOpacity={0.85}
+    >
+      {deleting ? (
+        <ActivityIndicator size="small" color="#e53935" />
+      ) : (
+        <Ionicons name="trash-outline" size={18} color="#e53935" />
+      )}
+      <Text style={[styles.secondaryBtnText, { color: '#e53935' }]}>
+        {deleting ? 'Deleting...' : label}
+      </Text>
+    </TouchableOpacity>
+  );
 
   const renderDetailsSkeleton = () => (
     <SafeAreaView style={styles.container}>
@@ -324,7 +512,7 @@ const loadItem = async () => {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingBox}>
           <Text style={styles.loadingText}>Item not found.</Text>
-          <TouchableOpacity style={styles.mainBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.mainBtn} onPress={goBackToVaultSection}>
             <Text style={styles.mainBtnText}>Go Back</Text>
           </TouchableOpacity>
         </View>
@@ -334,21 +522,11 @@ const loadItem = async () => {
 
   const plainPassword = item.encryptedPassword ? decryptPassword(item.encryptedPassword) : '';
   const card = item.itemType === 'CARD' ? decryptJson<CardPayload>(item.encryptedData || '', defaultCard) : defaultCard;
+  const cardBrand = detectCardBrand(card.bankName || item.title || '', card.cardNumber);
   
-  const legacyDoc =
-    item.itemType === 'DOCUMENT'
-      ? decryptJson<DocumentPayload | null>(item.encryptedData || '', null)
-      : null;
-
-  const documentBase64 =
-    item.itemType === 'DOCUMENT'
-      ? legacyDoc?.base64Content || item.encryptedData || ''
-      : '';
-
-  const isImageDoc =
+  const isImageDocument =
     item.itemType === 'DOCUMENT' &&
-    (item.mimeType || legacyDoc?.mimeType || '').startsWith('image/') &&
-    !!documentBase64;
+    String(item.mimeType || '').startsWith('image/');
 
   return (
     <SafeAreaView style={styles.container}>
@@ -357,6 +535,15 @@ const loadItem = async () => {
           <Text style={styles.headerTitle}>Vault Details</Text>
           <View style={{ width: 36 }} />
         </View>
+
+        {offlineMode && (
+          <OfflineBanner
+            colors={C}
+            savedAt={offlineSavedAt}
+            message="This item is available from your offline vault. Editing and deleting are disabled until the server is reachable."
+            onRetry={loadItem}
+          />
+        )}
 
         {item.itemType === 'PASSWORD' && (
           <View style={styles.content}>
@@ -408,20 +595,12 @@ const loadItem = async () => {
                   {!!item.notes && <InfoRow label="Notes" value={item.notes} onCopy={() => copyValue('Notes', item.notes)} styles={styles} C={C} />}
                 </View>
 
-                <TouchableOpacity style={styles.mainBtn} onPress={() => setEditingPassword(true)}>
+                <TouchableOpacity style={styles.mainBtn} onPress={offlineMode ? showOfflineWriteWarning : () => setEditingPassword(true)}>
                   <Ionicons name="create-outline" size={18} color="#fff" />
-                  <Text style={styles.mainBtnText}>Edit Password / Notes</Text>
+                  <Text style={styles.mainBtnText}>{offlineMode ? 'Read-only offline mode' : 'Edit Password / Notes'}</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                    style={[styles.secondaryBtn, { borderColor: '#e53935' }]}
-                    onPress={deleteCurrentItem}
->
-                    <Ionicons name="trash-outline" size={18} color="#e53935" />
-                    <Text style={[styles.secondaryBtnText, { color: '#e53935' }]}>
-                      Delete Password
-                    </Text>
-                </TouchableOpacity>
+                {renderDeleteButton('Delete Password')}
               </>
             )}
           </View>
@@ -431,7 +610,7 @@ const loadItem = async () => {
   <View style={styles.content}>
     <View style={styles.cardPreview}>
       <View style={styles.previewTop}>
-        <View style={styles.chip} />
+        <CardBrandLogo brand={cardBrand} />
         <Text style={styles.bankPreview}>{card.bankName || item.title || 'Saved Card'}</Text>
       </View>
 
@@ -462,18 +641,12 @@ const loadItem = async () => {
       <InfoRow label="CVV" value={showSecret ? card.cvv : '•••'} onCopy={() => copyValue('CVV', card.cvv)} styles={styles} C={C} />
     </View>
 
-    <TouchableOpacity style={styles.mainBtn} onPress={() => setShowSecret((v) => !v)}>
+    <TouchableOpacity style={styles.mainBtn} onPress={() => { hapticMedium(); setShowSecret((v) => !v); }}>
       <Ionicons name={showSecret ? 'eye-off-outline' : 'eye-outline'} size={18} color="#fff" />
       <Text style={styles.mainBtnText}>{showSecret ? 'Hide Card Info' : 'Reveal Card Info'}</Text>
     </TouchableOpacity>
 
-    <TouchableOpacity
-      style={[styles.secondaryBtn, { borderColor: '#e53935' }]}
-      onPress={deleteCurrentItem}
-    >
-      <Ionicons name="trash-outline" size={18} color="#e53935" />
-      <Text style={[styles.secondaryBtnText, { color: '#e53935' }]}>Delete Card</Text>
-    </TouchableOpacity>
+    {renderDeleteButton('Delete Card')}
   </View>
 )}
 
@@ -488,32 +661,40 @@ const loadItem = async () => {
     </View>
 
     <Text style={styles.title}>{item.fileName || item.title}</Text>
-    <Text style={styles.subtitle}>{item.mimeType || 'Document'}</Text>
+    <Text style={styles.subtitle}>{getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}</Text>
 
-    {isImageDoc && (
-      <Image
-        source={{ uri: `data:${item.mimeType || legacyDoc?.mimeType || 'image/jpeg'};base64,${documentBase64}` }}
-        style={styles.imagePreview}
-        resizeMode="cover"
-      />
+    {isImageDocument && (
+      <View style={styles.documentPreviewPlaceholder}>
+        <Ionicons name="image-outline" size={24} color={C.primary} />
+        <Text style={styles.documentPreviewTitle}>Encrypted image document</Text>
+        <Text style={styles.documentPreviewText}>Use Download / Share to decrypt and open this file securely.</Text>
+      </View>
     )}
 
     <View style={styles.infoCard}>
       <InfoRow label="File name" value={item.fileName || item.title} onCopy={() => copyValue('File name', item.fileName || item.title)} styles={styles} C={C} />
       <View style={styles.divider} />
-      <InfoRow label="Type" value={item.mimeType || 'Unknown'} onCopy={() => copyValue('File type', item.mimeType)} styles={styles} C={C} />
+      <InfoRow label="Type" value={getFriendlyDocumentType(item.mimeType, item.fileName || item.title)} onCopy={() => copyValue('File type', getFriendlyDocumentType(item.mimeType, item.fileName || item.title))} styles={styles} C={C} />
       <View style={styles.divider} />
       <InfoRow label="Size" value={formatSize(item.sizeBytes)} onCopy={() => copyValue('Size', formatSize(item.sizeBytes))} styles={styles} C={C} />
     </View>
 
-    <TouchableOpacity style={styles.mainBtn} onPress={downloadDocument}>
-      <Ionicons name="download-outline" size={18} color="#fff" />
-      <Text style={styles.mainBtnText}>Download / Share Document</Text>
+    <TouchableOpacity
+      style={[styles.mainBtn, downloading && styles.mainBtnDisabled]}
+      onPress={() => { hapticMedium(); downloadDocument(); }}
+      disabled={downloading}
+    >
+      {downloading ? (
+        <ActivityIndicator size="small" color="#fff" />
+      ) : (
+        <Ionicons name="download-outline" size={18} color="#fff" />
+      )}
+      <Text style={styles.mainBtnText}>{downloading ? 'Preparing document...' : 'Download / Share Document'}</Text>
     </TouchableOpacity>
 
     <TouchableOpacity
       style={[styles.secondaryBtn, { borderColor: '#e53935' }]}
-      onPress={deleteCurrentItem}
+      onPress={offlineMode ? () => { hapticWarning(); showOfflineWriteWarning(); } : () => { hapticDelete(); deleteCurrentItem(); }}
     >
       
       <Ionicons name="trash-outline" size={18} color="#e53935" />
@@ -525,6 +706,16 @@ const loadItem = async () => {
 
         <View style={{ height: 50 }} />
       </ScrollView>
+
+      {deleting && (
+        <View style={styles.deleteOverlay} pointerEvents="auto">
+          <View style={styles.deleteOverlayCard}>
+            <ActivityIndicator size="large" color={C.primary} />
+            <Text style={styles.deleteOverlayTitle}>Deleting item...</Text>
+            <Text style={styles.deleteOverlayText}>Please wait while The Guardian securely removes this vault item.</Text>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -548,7 +739,7 @@ const InfoRow = ({
         <Ionicons name={rightIcon} size={19} color={C.primary} />
       </TouchableOpacity>
     )}
-    <TouchableOpacity style={styles.iconBtn} onPress={onCopy}>
+    <TouchableOpacity style={styles.iconBtn} onPress={() => { hapticLight(); onCopy(); }}>
       <Ionicons name="copy-outline" size={19} color={C.primary} />
     </TouchableOpacity>
   </View>
@@ -658,9 +849,42 @@ const makeStyles = (C: ThemeColors) => {
     divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
     iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center' },
     mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 },
+    mainBtnDisabled: { opacity: 0.65 },
     mainBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
     secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10 },
     secondaryBtnText: { color: C.text, fontWeight: '800', fontSize: 15 },
+    deleteBtn: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
+    deleteOverlay: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: 'rgba(0,0,0,0.38)',
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingHorizontal: 28,
+      zIndex: 99,
+    },
+    deleteOverlayCard: {
+      width: '100%',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 26,
+      padding: 24,
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    deleteOverlayTitle: {
+      color: C.text,
+      fontSize: 18,
+      fontWeight: '900',
+      marginTop: 14,
+      textAlign: 'center',
+    },
+    deleteOverlayText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      marginTop: 6,
+      textAlign: 'center',
+    },
     label: { width: '100%', fontSize: 14, color: C.text, fontWeight: '700', marginBottom: 8 },
     input: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 50, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
     notesInput: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16, minHeight: 90, textAlignVertical: 'top' },
@@ -672,7 +896,9 @@ const makeStyles = (C: ThemeColors) => {
     previewBottom: { flexDirection: 'row', justifyContent: 'space-between' },
     previewLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 9, marginBottom: 4, letterSpacing: 1 },
     cardNamePreview: { color: '#fff', fontWeight: '800', fontSize: 14 },
-    imagePreview: { width: '100%', height: 230, borderRadius: 18, marginBottom: 20, backgroundColor: C.backgroundElement },
+    documentPreviewPlaceholder: { width: '100%', borderRadius: 18, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, padding: 16, alignItems: 'center', marginBottom: 18 },
+    documentPreviewTitle: { color: C.text, fontWeight: '900', fontSize: 14, marginTop: 8 },
+    documentPreviewText: { color: C.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 4, lineHeight: 17 },
   });
   return styles;
 };

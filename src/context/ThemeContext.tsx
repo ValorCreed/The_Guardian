@@ -11,11 +11,12 @@ import { usePathname } from 'expo-router';
 
 import { Colors } from '../constants/theme';
 
-type ThemeMode = 'light' | 'dark';
+export type ThemeMode = 'light' | 'dark' | 'oled';
 
 type ThemeContextType = {
   mode: ThemeMode;
   isDark: boolean;
+  isOled: boolean;
   colors: any;
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
@@ -37,6 +38,10 @@ function shouldForceLight(pathname: string) {
   return FORCE_LIGHT_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`)
   );
+}
+
+function isThemeMode(value: string | null): value is ThemeMode {
+  return value === 'light' || value === 'dark' || value === 'oled';
 }
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
@@ -64,7 +69,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
         getUserThemeKey(emailToUse)
       );
 
-      if (userTheme === 'light' || userTheme === 'dark') {
+      if (isThemeMode(userTheme)) {
         setMode(userTheme);
         await AsyncStorage.setItem(GLOBAL_THEME_KEY, userTheme);
         return;
@@ -73,7 +78,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
 
     const globalTheme = await AsyncStorage.getItem(GLOBAL_THEME_KEY);
 
-    if (globalTheme === 'light' || globalTheme === 'dark') {
+    if (isThemeMode(globalTheme)) {
       setMode(globalTheme);
       return;
     }
@@ -119,17 +124,19 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   }, [mode, setThemeMode]);
 
   const effectiveMode: ThemeMode = forceLight ? 'light' : mode;
-  const isDark = effectiveMode === 'dark';
+  const isDark = effectiveMode === 'dark' || effectiveMode === 'oled';
+  const isOled = effectiveMode === 'oled';
 
   const colors = useMemo(() => {
-    return isDark ? Colors.dark : Colors.light;
-  }, [isDark]);
+    return Colors[effectiveMode];
+  }, [effectiveMode]);
 
   return (
     <ThemeContext.Provider
       value={{
         mode: effectiveMode,
         isDark,
+        isOled,
         colors,
         toggleTheme,
         setThemeMode,

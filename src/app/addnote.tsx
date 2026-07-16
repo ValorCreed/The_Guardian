@@ -19,8 +19,11 @@ import { useRouter } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { encryptJson } from '../utils/vaultcrypto';
+import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
+
+const FREE_SECURE_NOTE_LIMIT = 5;
 
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
@@ -39,14 +42,16 @@ export default function AddNoteScreen() {
   const [checking, setChecking] = useState(true);
 
   const isPaid = plan === 'PREMIUM' || plan === 'FAMILY';
-  const freeLimitReached = !isPaid && noteCount >= 5;
+  const freeLimitReached = !isPaid && noteCount >= FREE_SECURE_NOTE_LIMIT;
 
   useEffect(() => {
     const loadLimits = async () => {
       try {
         setChecking(true);
         const [subscription, notes] = await Promise.all([
-          api.getSubscription().catch(() => ({ plan: 'FREE' as const })),
+          api
+            .getSubscriptionFresh()
+            .catch(() => api.getSubscription().catch(() => ({ plan: 'FREE' as const }))),
           api.getSecureNotes().catch(() => []),
         ]);
         setPlan((subscription.plan || 'FREE') as Plan);
@@ -62,10 +67,10 @@ export default function AddNoteScreen() {
   const showUpgradeAlert = () => {
     Alert.alert(
       'Secure note limit reached',
-      'Free accounts can save up to 5 secure notes. Upgrade to Premium or Family for unlimited secure notes.',
+      `Free accounts can save up to ${FREE_SECURE_NOTE_LIMIT} secure notes. Upgrade to Premium or Family for unlimited secure notes.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Upgrade', onPress: () => router.push('/subscription') },
+        { text: 'Upgrade', onPress: () => router.push('/subscription?from=addnote') },
       ]
     );
   };
@@ -102,7 +107,14 @@ export default function AddNoteScreen() {
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
-      Alert.alert('Save failed', error.message || 'Could not save secure note.');
+      const message = String(error?.message || 'Could not save secure note.');
+
+      if (message.toUpperCase().includes('PLAN_LIMIT_REACHED') || message.toLowerCase().includes('limit')) {
+        showUpgradeAlert();
+        return;
+      }
+
+      Alert.alert('Save failed', message);
     } finally {
       setSaving(false);
     }
@@ -129,10 +141,10 @@ export default function AddNoteScreen() {
 
           <Text style={styles.lockedTitle}>Free note limit reached</Text>
           <Text style={styles.lockedSubtitle}>
-            You have used {noteCount}/5 secure notes on the Free plan. Upgrade to Premium or Family for unlimited secure notes, categories, and pinned notes.
+            You have used {noteCount}/{FREE_SECURE_NOTE_LIMIT} secure notes on the Free plan. Upgrade to Premium or Family for unlimited secure notes, categories, and pinned notes.
           </Text>
 
-          <TouchableOpacity style={styles.saveBtn} onPress={() => router.push('/subscription')}>
+          <TouchableOpacity style={styles.saveBtn} onPress={() => router.push('/subscription?from=addnote')}>
             <Ionicons name="sparkles-outline" size={20} color="#fff" />
             <Text style={styles.saveBtnText}>Upgrade plan</Text>
           </TouchableOpacity>
@@ -154,8 +166,8 @@ export default function AddNoteScreen() {
               <Ionicons name="reader-outline" size={26} color={C.primary} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Add Secure Note</Text>
-              <Text style={styles.subTitle}>{isPaid ? 'Unlimited notes' : `${noteCount}/5 notes used on Free plan`}</Text>
+              <Text style={styles.title}>Add SecureNote</Text>
+              <Text style={styles.subTitle}>{isPaid ? 'Unlimited notes' : `${noteCount}/${FREE_SECURE_NOTE_LIMIT} notes used on Free plan`}</Text>
             </View>
           </View>
 
@@ -175,7 +187,7 @@ export default function AddNoteScreen() {
                 <TouchableOpacity
                   key={item}
                   style={[styles.categoryChip, category === item && styles.categoryChipActive]}
-                  onPress={() => setCategory(item)}
+                  onPress={() => { hapticSelection(); setCategory(item); }}
                   activeOpacity={0.75}
                 >
                   <Text style={[styles.categoryText, category === item && styles.categoryTextActive]}>{item}</Text>
@@ -190,7 +202,10 @@ export default function AddNoteScreen() {
               </View>
               <Switch
                 value={pinned}
-                onValueChange={setPinned}
+                onValueChange={(nextValue) => {
+                  nextValue ? hapticToggleOn() : hapticToggleOff();
+                  setPinned(nextValue);
+                }}
                 trackColor={{ false: C.border, true: C.primary }}
                 thumbColor="#fff"
                 ios_backgroundColor={C.border}

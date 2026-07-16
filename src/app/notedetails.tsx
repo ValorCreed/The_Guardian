@@ -15,20 +15,31 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Clipboard from 'expo-clipboard';
-
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, SecureNoteResponse } from '../services/api';
+import OfflineBanner from '../components/OfflineBanner';
+import { findOfflineNote, isOfflineReadableError, loadOfflineVaultSnapshot } from '../services/offlineVault';
 import { decryptJson, encryptJson } from '../utils/vaultcrypto';
+import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
 export default function NoteDetailsScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, returnTab } = useLocalSearchParams<{ id: string; returnTab?: 'Notes' | 'Passwords' | 'Documents' | 'Cards' }>();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  const goBackToVaultNotes = () => {
+    router.replace({
+      pathname: '/vault',
+      params: { tab: returnTab || 'Notes' },
+    });
+  };
+
+  useSensitiveScreenProtection(true);
 
   const [note, setNote] = useState<SecureNoteResponse | null>(null);
   const [content, setContent] = useState('');
@@ -39,6 +50,8 @@ export default function NoteDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
 
   const decryptNoteContent = (value?: string) => {
     if (!value) return '';
@@ -47,21 +60,42 @@ export default function NoteDetailsScreen() {
     return String(value);
   };
 
+  const applyNote = (data: SecureNoteResponse, fromOffline = false, savedAt?: string | null) => {
+    const plainContent = decryptNoteContent(data.encryptedContent);
+
+    setNote(data);
+    setContent(plainContent);
+    setEditTitle(data.title || 'Secure Note');
+    setEditCategory(data.category || 'General');
+    setEditContent(plainContent);
+    setEditPinned(Boolean(data.pinned));
+    setOfflineMode(fromOffline);
+    setOfflineSavedAt(savedAt || null);
+  };
+
   const loadNote = async () => {
     if (!id) return;
 
     try {
       setLoading(true);
-      const data = await api.getSecureNote(id);
-      const plainContent = decryptNoteContent(data.encryptedContent);
+      setOfflineMode(false);
+      setOfflineSavedAt(null);
 
-      setNote(data);
-      setContent(plainContent);
-      setEditTitle(data.title || 'Secure Note');
-      setEditCategory(data.category || 'General');
-      setEditContent(plainContent);
-      setEditPinned(Boolean(data.pinned));
+      const data = await api.getSecureNote(id);
+      applyNote(data, false, null);
     } catch (error: any) {
+      if (isOfflineReadableError(error)) {
+        const [snapshot, offlineNote] = await Promise.all([
+          loadOfflineVaultSnapshot(),
+          findOfflineNote(id),
+        ]);
+
+        if (offlineNote) {
+          applyNote(offlineNote, true, snapshot?.savedAt || null);
+          return;
+        }
+      }
+
       Alert.alert('Error', error.message || 'Could not load secure note.');
     } finally {
       setLoading(false);
@@ -72,13 +106,25 @@ export default function NoteDetailsScreen() {
     loadNote();
   }, [id]);
 
+  const showOfflineWriteWarning = () => {
+    Alert.alert(
+      'Offline mode',
+      'This note is being shown from your saved offline vault. Editing and deleting will work again when the server is reachable.'
+    );
+  };
+
   const copyContent = async () => {
     if (!content) return;
-    await Clipboard.setStringAsync(content);
-    Alert.alert('Copied', 'Secure note copied.');
+    await setSecureClipboard(content);
+    Alert.alert('Copied', getSecureClipboardMessage('Secure note'));
   };
 
   const saveChanges = async () => {
+    if (offlineMode) {
+      showOfflineWriteWarning();
+      return;
+    }
+
     if (!note || saving) return;
 
     if (!editTitle.trim()) {
@@ -112,6 +158,11 @@ export default function NoteDetailsScreen() {
   };
 
   const deleteNote = () => {
+    if (offlineMode) {
+      showOfflineWriteWarning();
+      return;
+    }
+
     if (!note) return;
 
     Alert.alert(
@@ -126,7 +177,7 @@ export default function NoteDetailsScreen() {
             try {
               await api.deleteSecureNote(note.id);
               Alert.alert('Deleted', 'Secure note deleted.', [
-                { text: 'OK', onPress: () => router.back() },
+                { text: 'OK', onPress: goBackToVaultNotes },
               ]);
             } catch (error: any) {
               Alert.alert('Delete failed', error.message || 'Could not delete secure note.');
@@ -173,7 +224,7 @@ export default function NoteDetailsScreen() {
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingBox}>
           <Text style={styles.loadingText}>Secure note not found.</Text>
-          <TouchableOpacity style={styles.mainBtn} onPress={() => router.back()}>
+          <TouchableOpacity style={styles.mainBtn} onPress={goBackToVaultNotes}>
             <Text style={styles.mainBtnText}>Go back</Text>
           </TouchableOpacity>
         </View>
@@ -193,6 +244,15 @@ export default function NoteDetailsScreen() {
             <Text style={styles.title}>{note.title}</Text>
             <Text style={styles.subtitle}>{note.category || 'General'} · encrypted secure note</Text>
           </View>
+
+          {offlineMode && (
+            <OfflineBanner
+              colors={C}
+              savedAt={offlineSavedAt}
+              message="This note is available from your offline vault. Editing and deleting are disabled until the server is reachable."
+              onRetry={loadNote}
+            />
+          )}
 
           {editing ? (
             <View style={styles.form}>
@@ -245,9 +305,9 @@ export default function NoteDetailsScreen() {
                 <Text style={styles.noteText}>{content}</Text>
               </View>
 
-              <TouchableOpacity style={styles.mainBtn} onPress={() => setEditing(true)}>
+              <TouchableOpacity style={styles.mainBtn} onPress={offlineMode ? showOfflineWriteWarning : () => setEditing(true)}>
                 <Ionicons name="create-outline" size={18} color="#fff" />
-                <Text style={styles.mainBtnText}>Edit Note</Text>
+                <Text style={styles.mainBtnText}>{offlineMode ? 'Read-only offline mode' : 'Edit Note'}</Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.secondaryBtn} onPress={copyContent}>
@@ -255,7 +315,7 @@ export default function NoteDetailsScreen() {
                 <Text style={styles.secondaryBtnText}>Copy Note</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.secondaryBtn, { borderColor: C.danger }]} onPress={deleteNote}>
+              <TouchableOpacity style={[styles.secondaryBtn, { borderColor: C.danger }]} onPress={offlineMode ? showOfflineWriteWarning : deleteNote}>
                 <Ionicons name="trash-outline" size={18} color={C.danger} />
                 <Text style={[styles.secondaryBtnText, { color: C.danger }]}>Delete Note</Text>
               </TouchableOpacity>

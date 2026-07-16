@@ -1,14 +1,11 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
-  ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -16,144 +13,84 @@ import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
-import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import GuardianLogoTile from '../components/GuardianLogoTitle';
 
 export default function ForgotPasswordScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
-  const [email, setEmail] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async () => {
-    const cleanEmail = email.trim().toLowerCase();
-
-    if (!cleanEmail) {
-      Alert.alert('Email required', 'Please enter your email address.');
-      return;
-    }
-
-    try {
-      setLoading(true);
-
-      await api.forgotPassword({ email: cleanEmail });
-
-      Alert.alert(
-        'Reset code sent',
-        'If this email belongs to a verified account, a password reset code has been sent.',
-        [
-          {
-            text: 'Enter code',
-            onPress: () => {
-              router.push({
-                pathname: '/resetpassword',
-                params: {
-                  email: cleanEmail,
-                },
-              });
-            },
-          },
-        ]
-      );
-    } catch (error: any) {
-      Alert.alert(
-        'Could not send reset code',
-        error.message || 'Please check your email and try again.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={C.background}
-      />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.heroIcon}>
-            <Ionicons name="lock-open-outline" size={36} color="#FFFFFF" />
-          </View>
+          <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.logoBox} />
 
-          <Text style={styles.title}>Forgot password?</Text>
+          <Text style={styles.title}>Recover your account</Text>
 
           <Text style={styles.subtitle}>
-            Enter your email address and we’ll send you a code to reset your
-            password.
+            Choose how you want to regain access. Your Recovery Kit is the safe way to reset your password without erasing your vault.
           </Text>
 
-          <View style={styles.infoCard}>
-            <View style={styles.infoIcon}>
-              <Ionicons
-                name="shield-checkmark-outline"
-                size={20}
-                color={C.primary}
-              />
+          <TouchableOpacity
+            style={styles.primaryCard}
+            activeOpacity={0.85}
+            onPress={() => router.push({ pathname: '/accountrecovery', params: { mode: 'kit' } })}
+          >
+            <View style={styles.cardIcon}>
+              <Ionicons name="key-outline" size={24} color="#FFFFFF" />
             </View>
 
-            <View style={{ flex: 1 }}>
-              <Text style={styles.infoTitle}>Secure reset</Text>
-              <Text style={styles.infoText}>
-                For your safety, password reset only works for verified email
-                accounts.
+            <View style={styles.cardTextWrap}>
+              <Text style={styles.cardTitle}>Use Recovery Kit</Text>
+              <Text style={styles.cardText}>
+                Enter your Recovery ID and Recovery Key. No email is needed because the Recovery ID identifies the account.
               </Text>
             </View>
-          </View>
+
+            <Ionicons name="chevron-forward" size={20} color={C.tabInactive} />
+          </TouchableOpacity>
 
           <View style={styles.warningBox}>
-            <Ionicons name="warning-outline" size={20} color={C.warning} />
-
+            <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} />
             <Text style={styles.warningText}>
-              The Guardian cannot reveal your old password. You can only create
-              a new one after confirming your reset code.
+              Email-only password reset is disabled for vault safety. Email can only be used for Reset & Erase when no Recovery Kit is available.
             </Text>
           </View>
 
-          <Text style={styles.label}>Email address</Text>
-
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor={C.tabInactive}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoCorrect={false}
-            editable={!loading}
-          />
-
           <TouchableOpacity
-            style={[styles.submitButton, loading && styles.disabledButton]}
+            style={styles.dangerCard}
             activeOpacity={0.85}
-            onPress={handleSubmit}
-            disabled={loading}
+            onPress={() => router.push({ pathname: '/accountrecovery', params: { mode: 'erase' } })}
           >
-            {loading ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={styles.submitButtonText}>Send reset code</Text>
-            )}
+            <View style={styles.dangerIcon}>
+              <Ionicons name="trash-outline" size={24} color="#FFFFFF" />
+            </View>
+
+            <View style={styles.cardTextWrap}>
+              <Text style={styles.cardTitle}>No Recovery Kit?</Text>
+              <Text style={styles.cardText}>
+                Reset the account with an email code, but permanently erase old passwords, cards, documents, and notes.
+              </Text>
+            </View>
+
+            <Ionicons name="chevron-forward" size={20} color={C.tabInactive} />
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            activeOpacity={0.75}
-            onPress={() => router.back()}
-            disabled={loading}
-          >
-            <Text style={styles.secondaryButtonText}>Back to sign in</Text>
+          <TouchableOpacity style={styles.backButton} activeOpacity={0.75} onPress={() => router.replace('/signin')}>
+            <Text style={styles.backButtonText}>Back to sign in</Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -163,153 +100,86 @@ export default function ForgotPasswordScreen() {
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
-    safeArea: {
-      flex: 1,
-      backgroundColor: C.background,
-    },
-
-    flex: {
-      flex: 1,
-    },
-
+    safeArea: { flex: 1, backgroundColor: C.background },
+    flex: { flex: 1 },
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 118,
-      paddingBottom: 44,
+      paddingTop: 108,
+      paddingBottom: 160,
     },
-
-    heroIcon: {
-      width: 82,
-      height: 82,
-      borderRadius: 28,
-      backgroundColor: C.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 24,
-      shadowColor: '#000',
-      shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: 0.18,
-      shadowRadius: 20,
-      elevation: 6,
-    },
-
+    logoBox: { marginBottom: 20 },
     title: {
-      fontSize: 34,
+      fontSize: 32,
       fontWeight: '900',
       color: C.text,
       marginBottom: 10,
-      letterSpacing: -0.5,
+      letterSpacing: -0.4,
     },
-
     subtitle: {
-      fontSize: 15,
+      fontSize: 14,
       color: C.textSecondary,
-      lineHeight: 23,
+      lineHeight: 21,
       marginBottom: 22,
     },
-
-    infoCard: {
+    primaryCard: {
       flexDirection: 'row',
       alignItems: 'center',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 16,
+      gap: 12,
+      marginBottom: 14,
+    },
+    dangerCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 16,
+      gap: 12,
+      marginBottom: 16,
+    },
+    cardIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 18,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    dangerIcon: {
+      width: 48,
+      height: 48,
+      borderRadius: 18,
+      backgroundColor: C.danger,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cardTextWrap: { flex: 1 },
+    cardTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginBottom: 3 },
+    cardText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+    warningBox: {
+      flexDirection: 'row',
+      gap: 12,
       backgroundColor: C.backgroundElement,
       borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
-      padding: 16,
+      padding: 15,
       marginBottom: 14,
     },
-
-    infoIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: C.backgroundSelected,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: 14,
-    },
-
-    infoTitle: {
-      fontSize: 15,
-      fontWeight: '800',
-      color: C.text,
-      marginBottom: 3,
-    },
-
-    infoText: {
-      fontSize: 13,
-      color: C.textSecondary,
-      lineHeight: 19,
-    },
-
-    warningBox: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      backgroundColor: C.securityScoreBg,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: C.warning,
-      padding: 14,
-      gap: 10,
-      marginBottom: 26,
-    },
-
     warningText: {
       flex: 1,
+      color: C.textSecondary,
       fontSize: 13,
-      color: C.warning,
       lineHeight: 20,
-      fontWeight: '600',
+      fontWeight: '700',
     },
-
-    label: {
-      fontSize: 14,
-      color: C.text,
-      fontWeight: '800',
-      marginBottom: 8,
-      marginLeft: 4,
-    },
-
-    input: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 24,
-      paddingHorizontal: 18,
-      paddingVertical: 16,
-      fontSize: 15,
-      color: C.text,
-      borderWidth: 1,
-      borderColor: C.border,
-      marginBottom: 18,
-    },
-
-    submitButton: {
-      backgroundColor: C.backgroundbutton,
-      borderRadius: 999,
-      minHeight: 58,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginTop: 4,
-    },
-
-    disabledButton: {
-      opacity: 0.65,
-    },
-
-    submitButtonText: {
-      color: '#FFFFFF',
-      fontSize: 16,
-      fontWeight: '900',
-    },
-
-    secondaryButton: {
-      alignItems: 'center',
-      paddingVertical: 18,
-    },
-
-    secondaryButtonText: {
-      color: C.primary,
-      fontSize: 15,
-      fontWeight: '800',
-    },
+    backButton: { alignItems: 'center', paddingVertical: 14 },
+    backButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '800' },
   });

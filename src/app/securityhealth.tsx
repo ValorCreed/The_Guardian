@@ -18,10 +18,12 @@ import { useAppTheme } from '../context/ThemeContext';
 import { SecurityIssue, useSecurityScore } from '../hooks/useSecurityScore';
 
 function issueIcon(type: SecurityIssue['type']) {
-  if (type === 'WEAK') return 'warning-outline';
-  if (type === 'MEDIUM') return 'alert-circle-outline';
-  if (type === 'REUSED') return 'copy-outline';
-  if (type === 'OLD') return 'time-outline';
+  if (type === 'RECOVERY_KIT_MISSING') return 'alert-circle-outline';
+  if (type === 'WEAK' || type === 'SHARED_WEAK') return 'warning-outline';
+  if (type === 'MEDIUM' || type === 'SHARED_MEDIUM') return 'alert-circle-outline';
+  if (type === 'BREACHED_PASSWORD' || type === 'SHARED_BREACHED_PASSWORD') return 'skull-outline';
+  if (type === 'REUSED' || type === 'SHARED_REUSED') return 'copy-outline';
+  if (type === 'OLD' || type === 'SHARED_OLD') return 'time-outline';
   if (type === 'MISSING_USERNAME' || type === 'MISSING_WEBSITE') return 'create-outline';
   if (type === 'TWO_FACTOR_OFF') return 'keypad-outline';
   if (type === 'EMAIL_UNVERIFIED') return 'mail-unread-outline';
@@ -56,9 +58,21 @@ export default function SecurityHealthScreen() {
         'Upgrade to Premium or Family to view reused password and old password details.',
         [
           { text: 'Not now', style: 'cancel' },
-          { text: 'View plans', onPress: () => router.push('/subscription') },
+          { text: 'View plans', onPress: () => router.push('/subscription?from=securityhealth') },
         ]
       );
+      return;
+    }
+
+    if (issue.source === 'SHARED_FAMILY' && issue.itemId) {
+      router.push({
+        pathname: '/sharedvaultdetails',
+        params: {
+          id: String(issue.itemId),
+          type: 'PASSWORD',
+          source: 'securityhealth',
+        },
+      });
       return;
     }
 
@@ -80,7 +94,12 @@ export default function SecurityHealthScreen() {
     }
 
     if (issue.type === 'EMAIL_UNVERIFIED') {
-      router.push('/verifyemail');
+      router.push('/userinfo');
+      return;
+    }
+
+    if (issue.type === 'RECOVERY_KIT_MISSING') {
+      router.push('/recoverykit');
       return;
     }
 
@@ -106,7 +125,7 @@ export default function SecurityHealthScreen() {
       >
         <Text style={styles.eyebrow}>Full vault scan</Text>
         <Text style={styles.title}>Security Health Center</Text>
-        <Text style={styles.subtitle}>Find weak passwords, reused credentials, missing login details, old passwords, 2FA risks, and backup reminders.</Text>
+        <Text style={styles.subtitle}>Find weak, breached, reused, old, missing, recovery, and family-shared password risks that reduce your security score.</Text>
 
         <View style={styles.scoreCard}>
           <View style={styles.scoreCircle}>
@@ -116,23 +135,24 @@ export default function SecurityHealthScreen() {
 
           <View style={{ flex: 1 }}>
             <Text style={styles.scoreTitle}>{report.score >= 80 ? 'Strong protection' : report.score >= 50 ? 'Some risks found' : 'Needs attention'}</Text>
-            <Text style={styles.scoreSub}>{report.totalPasswords} passwords scanned · {report.issues.length} recommendations</Text>
+            <Text style={styles.scoreSub}>{report.totalPasswords} owned · {report.totalSharedPasswords} family · {report.issues.length} recommendations</Text>
             <Text style={styles.planText}>{report.plan} scan</Text>
           </View>
         </View>
 
-        <View style={styles.metricsRow}>
+        <View style={styles.metricsGrid}>
+          <Metric label="Breached" value={report.breachedCount || 0} C={C} icon="skull-outline" locked={!report.isPremiumOrFamily} />
           <Metric label="Weak" value={report.weakCount} C={C} icon="warning-outline" />
           <Metric label="Reused" value={report.reusedCount} C={C} icon="copy-outline" locked={!report.isPremiumOrFamily} />
           <Metric label="Old" value={report.oldCount} C={C} icon="time-outline" locked={!report.isPremiumOrFamily} />
         </View>
 
         {!report.isPremiumOrFamily && (
-          <TouchableOpacity style={styles.upgradeCard} activeOpacity={0.86} onPress={() => router.push('/subscription')}>
+          <TouchableOpacity style={styles.upgradeCard} activeOpacity={0.86} onPress={() => router.push('/subscription?from=securityhealth')}>
             <Ionicons name="lock-closed-outline" size={22} color={C.warning} />
             <View style={{ flex: 1 }}>
               <Text style={styles.upgradeTitle}>Unlock advanced scan</Text>
-              <Text style={styles.upgradeText}>Premium shows reused passwords, old passwords, deeper issue details, and full fix list.</Text>
+              <Text style={styles.upgradeText}>Premium shows breached passwords, reused passwords, old passwords, deeper issue details, and the full fix list.</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={C.warning} />
           </TouchableOpacity>
@@ -180,7 +200,14 @@ export default function SecurityHealthScreen() {
         {lockedCount > 0 && (
           <View style={styles.lockedCard}>
             <Ionicons name="lock-closed-outline" size={20} color={C.warning} />
-            <Text style={styles.lockedText}>{lockedCount} advanced issue{lockedCount === 1 ? '' : 's'} hidden on Free plan.</Text>
+            <Text style={styles.lockedText}>{lockedCount} advanced issue{lockedCount === 1 ? '' : 's'} hidden on Free plan, including breach monitoring.</Text>
+          </View>
+        )}
+
+        {report.isPremiumOrFamily && report.breachCheckFailed > 0 && (
+          <View style={styles.lockedCard}>
+            <Ionicons name="wifi-outline" size={20} color={C.warning} />
+            <Text style={styles.lockedText}>Some breach checks could not complete. Pull down to scan again when your connection is stable.</Text>
           </View>
         )}
 
@@ -197,7 +224,7 @@ export default function SecurityHealthScreen() {
 
 function Metric({ label, value, icon, C, locked = false }: { label: string; value: number; icon: string; C: any; locked?: boolean }) {
   return (
-    <View style={{ flex: 1, backgroundColor: C.backgroundElement, borderRadius: 18, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
+    <View style={{ width: '48%', backgroundColor: C.backgroundElement, borderRadius: 18, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: C.border }}>
       <Ionicons name={(locked ? 'lock-closed-outline' : icon) as any} size={22} color={locked ? C.warning : C.primary} />
       <Text style={{ color: C.text, fontSize: 21, fontWeight: '900', marginTop: 6 }}>{locked ? '—' : value}</Text>
       <Text style={{ color: C.textSecondary, fontSize: 12, fontWeight: '700' }}>{label}</Text>
@@ -219,7 +246,7 @@ const makeStyles = (C: any) =>
     scoreTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
     scoreSub: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
     planText: { color: C.primary, fontSize: 12, fontWeight: '900', marginTop: 6 },
-    metricsRow: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    metricsGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
     upgradeCard: { backgroundColor: C.securityScoreBg, borderWidth: 1, borderColor: C.warning, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 18 },
     upgradeTitle: { color: C.warning, fontWeight: '900', fontSize: 14 },
     upgradeText: { color: C.warning, fontSize: 12, lineHeight: 17, marginTop: 2 },

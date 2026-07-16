@@ -1,6 +1,7 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  ActivityIndicator,
   Alert,
   Dimensions,
   KeyboardAvoidingView,
@@ -18,14 +19,66 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
-import { api, SecureNoteResponse, VaultItem } from '../services/api';
+import { API_BASE_URL, api, SecureNoteResponse, VaultItem } from '../services/api';
+import OfflineBanner from '../components/OfflineBanner';
+import {
+  createOfflineVaultSnapshot,
+  getCurrentUserEmail,
+  getOfflineVaultMemorySnapshot,
+  isOfflineReadableError,
+  isOfflineVaultStale,
+  loadOfflineVaultSnapshot,
+  saveOfflineVaultSnapshot,
+} from '../services/offlineVault';
+import { hapticLight, hapticMedium, hapticSelection, hapticWarning } from '../utils/haptics';
+import CardBrandLogo from '../components/CardBrandLogo';
+import { detectCardBrand } from '../utils/cardBrand';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
 const SCREEN_PADDING = 20;
 const DOC_CARD_WIDTH = (width - SCREEN_PADDING * 2 - CARD_GAP) / 2;
 
+const VAULT_AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
+
+const fastServerProbe = async (timeoutMs = 2500) => {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    /*
+     * This checks whether the backend process is reachable before starting the
+     * heavier vault sync. Any HTTP response means the server is alive, even if
+     * the root path returns 401/403/404.
+     */
+    await fetch(API_BASE_URL, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+
+    return true;
+  } catch (error) {
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+};
+
+
+type PreparedVaultScreenData = {
+  email: string;
+  vaultItems: VaultItem[];
+  notes: SecureNoteResponse[];
+  offlineMode: boolean;
+  offlineSavedAt: string | null;
+  loadedAt: number;
+};
+
+let vaultScreenMemoryCache: PreparedVaultScreenData | null = null;
+let lastOnlineVaultSyncAt = 0;
+
 type VaultTab = 'Passwords' | 'Documents' | 'Cards' | 'Notes';
+type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
 const tabs: { label: VaultTab; icon: string }[] = [
   { label: 'Passwords', icon: 'key-outline' },
@@ -45,6 +98,62 @@ const formatSize = (bytes?: number) => {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
+
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+
+  if (parts.length < 2) return '';
+
+  return String(parts.pop() || '').trim().toLowerCase();
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+
+  if (
+    mime.includes('wordprocessingml') ||
+    mime === 'application/msword' ||
+    extension === 'docx' ||
+    extension === 'doc'
+  ) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+
+  if (
+    mime.includes('spreadsheetml') ||
+    mime === 'application/vnd.ms-excel' ||
+    extension === 'xlsx' ||
+    extension === 'xls'
+  ) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+
+  if (
+    mime.includes('presentationml') ||
+    mime === 'application/vnd.ms-powerpoint' ||
+    extension === 'pptx' ||
+    extension === 'ppt'
+  ) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+
+  if (extension) return extension.toUpperCase();
+
+  return 'Document';
+};
+
 
 const getDocumentSize = (doc: any) => {
   if (doc.sizeBytes) return doc.sizeBytes;
@@ -67,6 +176,57 @@ const normalizeDate = (value?: string) => {
   });
 };
 
+const cleanVaultDisplayValue = (value?: string | null) => {
+  if (value === undefined || value === null) return '';
+
+  let cleaned = String(value).trim();
+
+  if (!cleaned || cleaned.startsWith('v1:')) return '';
+
+  for (let index = 0; index < 2; index++) {
+    if (!cleaned.includes('%')) break;
+
+    try {
+      const decoded = decodeURIComponent(cleaned);
+      if (decoded === cleaned) break;
+      cleaned = decoded.trim();
+    } catch {
+      break;
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed === 'string') cleaned = parsed.trim();
+  } catch {
+    // Keep the cleaned string when it is not JSON.
+  }
+
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  return cleaned;
+};
+
+const getRejectedReason = (results: PromiseSettledResult<any>[]) => {
+  const failed = results.find(
+    (result): result is PromiseRejectedResult => result.status === 'rejected'
+  );
+
+  return failed?.reason || null;
+};
+
+const getFulfilledValue = <T,>(
+  result: PromiseSettledResult<T>,
+  fallback: T
+): T => {
+  return result.status === 'fulfilled' ? result.value : fallback;
+};
+
 const VaultScreen = () => {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
@@ -79,53 +239,291 @@ const VaultScreen = () => {
   const [notes, setNotes] = useState<SecureNoteResponse[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
+  const [plan, setPlan] = useState<Plan>('FREE');
+  const [checkingPlan, setCheckingPlan] = useState(true);
 
-  const loadVaultItems = async () => {
+  const lastLoadAttemptRef = useRef(0);
+  const activeLoadSequenceRef = useRef(0);
+  const currentEmailRef = useRef<string | null>(null);
+
+
+  const isPaidPlan = plan === 'PREMIUM' || plan === 'FAMILY';
+  const shouldBlockDocumentAdd = activeTab === 'Documents' && !checkingPlan && !isPaidPlan;
+
+  const loadSubscriptionPlan = async () => {
     try {
-      setLoading(true);
+      setCheckingPlan(true);
+      const subscription = await api
+        .getSubscriptionFresh()
+        .catch(() => api.getSubscription().catch(() => ({ plan: 'FREE' as const })));
 
-      const [passwords, cards, documents, noteData] = await Promise.all([
+      setPlan((subscription?.plan || 'FREE') as Plan);
+    } finally {
+      setCheckingPlan(false);
+    }
+  };
+
+  const buildVaultScreenData = (
+    passwords: any[] = [],
+    cards: any[] = [],
+    documents: any[] = [],
+    noteData: SecureNoteResponse[] = [],
+    fromOffline = false,
+    savedAt?: string | null,
+    ownerEmail?: string | null
+  ): PreparedVaultScreenData => {
+    const fixedPasswords = passwords.map((item: any) => ({
+      ...item,
+      itemType: 'PASSWORD' as const,
+    }));
+
+    const fixedCards = cards.map((card: any) => {
+      const cardholderName =
+        cleanVaultDisplayValue(
+          card.encryptedCardholderName ||
+            card.encryptedCardHolderName ||
+            card.cardholderName
+        ) || 'Cardholder';
+
+      return {
+        id: card.id,
+        itemType: 'CARD' as const,
+        title: cleanVaultDisplayValue(card.cardName) || 'Saved Card',
+        usernameValue: cardholderName,
+        encryptedData: JSON.stringify({
+          ...card,
+          encryptedCardholderName: cardholderName,
+          encryptedCardHolderName: cardholderName,
+        }),
+        website: cleanVaultDisplayValue(card.last4) || '••••',
+        createdAt: card.createdAt,
+        updatedAt: card.updatedAt,
+      };
+    });
+
+    const fixedDocuments = documents.map((doc: any) => ({
+      id: doc.id,
+      itemType: 'DOCUMENT' as const,
+      title: doc.documentName,
+      fileName: doc.documentName,
+      mimeType: doc.documentType,
+      sizeBytes: getDocumentSize(doc),
+      encryptedData: doc.encryptedFileUrl,
+      notes: doc.encryptedNotes,
+      createdAt: doc.createdAt,
+      updatedAt: doc.updatedAt,
+    }));
+
+    return {
+      email: String(ownerEmail || '').trim().toLowerCase(),
+      vaultItems: [...fixedPasswords, ...fixedCards, ...fixedDocuments],
+      notes: noteData || [],
+      offlineMode: fromOffline,
+      offlineSavedAt: savedAt || null,
+      loadedAt: Date.now(),
+    };
+  };
+
+  const applyPreparedVaultData = (data: PreparedVaultScreenData) => {
+    vaultScreenMemoryCache = data;
+    setVaultItems(data.vaultItems);
+    setNotes(data.notes);
+    setOfflineMode(data.offlineMode);
+    setOfflineSavedAt(data.offlineSavedAt);
+  };
+
+  const applyVaultData = (
+    passwords: any[] = [],
+    cards: any[] = [],
+    documents: any[] = [],
+    noteData: SecureNoteResponse[] = [],
+    fromOffline = false,
+    savedAt?: string | null,
+    ownerEmail?: string | null
+  ) => {
+    applyPreparedVaultData(
+      buildVaultScreenData(passwords, cards, documents, noteData, fromOffline, savedAt, ownerEmail)
+    );
+  };
+
+  const applyOfflineSnapshotInstantly = async (markAsOffline: boolean) => {
+    const memorySnapshot = await getOfflineVaultMemorySnapshot();
+    const snapshot = memorySnapshot || await loadOfflineVaultSnapshot();
+
+    if (!snapshot) return false;
+
+    applyVaultData(
+      snapshot.passwords,
+      snapshot.cards,
+      snapshot.documents,
+      snapshot.notes,
+      markAsOffline,
+      snapshot.savedAt,
+      snapshot.email
+    );
+
+    return true;
+  };
+
+  const loadVaultItems = async (options?: {
+    force?: boolean;
+    showFullLoader?: boolean;
+    background?: boolean;
+  }) => {
+    const force = Boolean(options?.force);
+    const showFullLoader = Boolean(options?.showFullLoader);
+    const background = Boolean(options?.background);
+    const now = Date.now();
+    const currentEmail = await getCurrentUserEmail();
+
+    if (currentEmailRef.current && currentEmailRef.current !== currentEmail) {
+      vaultScreenMemoryCache = null;
+      lastOnlineVaultSyncAt = 0;
+      setVaultItems([]);
+      setNotes([]);
+      setOfflineMode(false);
+      setOfflineSavedAt(null);
+    }
+
+    currentEmailRef.current = currentEmail;
+
+    const hasMatchingMemoryCache = vaultScreenMemoryCache?.email === currentEmail;
+    const hasVisibleData = vaultItems.length > 0 || notes.length > 0 || hasMatchingMemoryCache;
+
+    if (!force && vaultScreenMemoryCache && hasMatchingMemoryCache) {
+      applyPreparedVaultData(vaultScreenMemoryCache);
+    }
+
+    const stale = await isOfflineVaultStale();
+    const recentlySynced =
+      lastOnlineVaultSyncAt > 0 &&
+      now - lastOnlineVaultSyncAt < VAULT_AUTO_REFRESH_INTERVAL_MS;
+
+    /*
+     * This prevents a full reload every time the user returns to Vault from a
+     * details page. Manual pull-to-refresh still forces a server sync.
+     */
+    if (!force && recentlySynced && !stale && vaultScreenMemoryCache && hasMatchingMemoryCache) {
+      return;
+    }
+
+    /*
+     * If we have an offline snapshot, show it immediately while the server sync
+     * runs silently in the background. This removes the slow blank/skeleton wait.
+     */
+    if (!force && !hasVisibleData) {
+      await applyOfflineSnapshotInstantly(false);
+    }
+
+    if (!force && !stale && background && now - lastLoadAttemptRef.current < 8000) {
+      return;
+    }
+
+    /*
+     * Fast offline detection:
+     * Before starting the heavier vault section requests, do a tiny server probe.
+     * If the laptop/Render server is unreachable, show the local encrypted snapshot
+     * immediately instead of waiting for every vault request to timeout.
+     */
+    const serverReachable = await fastServerProbe(2500);
+
+    if (serverReachable === false) {
+      const loaded = await applyOfflineSnapshotInstantly(true);
+
+      if (loaded) {
+        return;
+      }
+    }
+
+    lastLoadAttemptRef.current = now;
+
+    const loadSequence = activeLoadSequenceRef.current + 1;
+    activeLoadSequenceRef.current = loadSequence;
+
+    try {
+      if (showFullLoader && !hasVisibleData) {
+        setLoading(true);
+      }
+
+      const results = await Promise.allSettled([
         api.getVaultItems(),
         api.getCards(),
         api.getDocuments(),
         api.getSecureNotes(),
       ]);
 
-      const fixedPasswords = passwords.map((item: any) => ({
-        ...item,
-        itemType: 'PASSWORD' as const,
-      }));
+      if (loadSequence !== activeLoadSequenceRef.current) {
+        return;
+      }
 
-      const fixedCards = cards.map((card: any) => ({
-        id: card.id,
-        itemType: 'CARD' as const,
-        title: card.cardName || 'Saved Card',
-        usernameValue:
-          card.encryptedCardholderName ||
-          card.encryptedCardHolderName ||
-          'Cardholder',
-        encryptedData: JSON.stringify(card),
-        website: card.last4 || '••••',
-        createdAt: card.createdAt,
-        updatedAt: card.updatedAt,
-      }));
+      const failedReason = getRejectedReason(results);
 
-      const fixedDocuments = documents.map((doc: any) => ({
-        id: doc.id,
-        itemType: 'DOCUMENT' as const,
-        title: doc.documentName,
-        fileName: doc.documentName,
-        mimeType: doc.documentType,
-        sizeBytes: getDocumentSize(doc),
-        encryptedData: doc.encryptedFileUrl,
-        createdAt: doc.createdAt,
-        updatedAt: doc.updatedAt,
-      }));
+      if (failedReason) {
+        console.log('VAULT SERVER SYNC FAILED', failedReason);
 
-      setVaultItems([...fixedPasswords, ...fixedCards, ...fixedDocuments]);
-      setNotes(noteData || []);
+        /**
+         * Important UX rule:
+         * If the user already has visible vault data, do not suddenly switch the
+         * whole screen into offline mode because of one slow background refresh.
+         * Keep the current encrypted vault visible and only show offline mode
+         * when we are using an offline snapshot as the primary source.
+         */
+        if (hasVisibleData) {
+          if (force) {
+            Alert.alert(
+              'Could not refresh vault',
+              'The Guardian could not refresh your vault right now. Your latest loaded vault data is still shown.'
+            );
+          }
+          return;
+        }
+
+        if (isOfflineReadableError(failedReason)) {
+          const loaded = await applyOfflineSnapshotInstantly(true);
+          if (loaded) return;
+        }
+
+        Alert.alert(
+          'Could not load vault',
+          failedReason?.message || 'The Guardian could not load your vault right now.'
+        );
+        return;
+      }
+
+      const passwords = getFulfilledValue(results[0], []);
+      const cards = getFulfilledValue(results[1], []);
+      const documents = getFulfilledValue(results[2], []);
+      const noteData = getFulfilledValue(results[3], []);
+
+      applyVaultData(passwords || [], cards || [], documents || [], noteData || [], false, null, currentEmail);
+      lastOnlineVaultSyncAt = Date.now();
+
+      const snapshot = await createOfflineVaultSnapshot({
+        passwords: passwords || [],
+        cards: cards || [],
+        documents: documents || [],
+        notes: noteData || [],
+      });
+
+      await saveOfflineVaultSnapshot(snapshot);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Could not load vault.');
+      console.log('VAULT LOAD FAILED', error);
+
+      if (!hasVisibleData && isOfflineReadableError(error)) {
+        const loaded = await applyOfflineSnapshotInstantly(true);
+        if (loaded) return;
+      }
+
+      if (!hasVisibleData) {
+        Alert.alert('Error', error.message || 'Could not load vault.');
+      } else if (force) {
+        Alert.alert(
+          'Could not refresh vault',
+          'The Guardian could not refresh your vault right now. Your latest loaded vault data is still shown.'
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -133,38 +531,50 @@ const VaultScreen = () => {
 
   useFocusEffect(
     useCallback(() => {
+      /*
+       * Preserve the current vault section when returning from a details screen.
+       * Before this, every focus with no ?tab= param forced the Vault back to
+       * Passwords, so Android native back from Documents/Cards/Notes felt wrong.
+       */
       if (tab === 'Documents') setActiveTab('Documents');
       else if (tab === 'Cards') setActiveTab('Cards');
       else if (tab === 'Notes') setActiveTab('Notes');
-      else setActiveTab('Passwords');
+      else if (tab === 'Passwords') setActiveTab('Passwords');
 
-      loadVaultItems();
+      loadSubscriptionPlan();
+      loadVaultItems({ showFullLoader: true, background: true });
     }, [tab])
   );
 
   const onRefresh = async () => {
     try {
       setRefreshing(true);
-      await loadVaultItems();
+      await loadVaultItems({ force: true });
     } finally {
       setRefreshing(false);
     }
   };
 
   const openItem = (item: VaultItem) => {
+    hapticLight();
     router.push({
       pathname: '/vaultdetails',
       params: {
         id: String(item.id),
         type: item.itemType,
+        returnTab: activeTab,
       },
     });
   };
 
   const openNote = (note: SecureNoteResponse) => {
+    hapticLight();
     router.push({
       pathname: '/notedetails',
-      params: { id: String(note.id) },
+      params: {
+        id: String(note.id),
+        returnTab: 'Notes',
+      },
     });
   };
 
@@ -217,7 +627,73 @@ const VaultScreen = () => {
 
   const activeTabIcon = tabs.find((item) => item.label === activeTab)?.icon || 'lock-closed-outline';
 
+  const showOfflineWriteWarning = () => {
+    Alert.alert(
+      'Offline mode',
+      'You can view your saved vault while offline. Add, edit, and delete will work again when The Guardian can reach the server.'
+    );
+  };
+
+
+  const showDocumentUpgradePrompt = () => {
+    hapticWarning();
+    Alert.alert(
+      'Document uploads are premium',
+      'Free accounts can view existing documents, but uploading new encrypted documents requires Premium or Family.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Upgrade', onPress: () => router.push('/subscription?from=vault-documents') },
+      ]
+    );
+  };
+
+  const handleAddPress = () => {
+    if (offlineMode) {
+      hapticWarning();
+      showOfflineWriteWarning();
+      return;
+    }
+
+    if (activeTab === 'Documents') {
+      if (checkingPlan) return;
+
+      if (!isPaidPlan) {
+        showDocumentUpgradePrompt();
+        return;
+      }
+    }
+
+    hapticMedium();
+    router.push(getAddRoute() as any);
+  };
+
+  const renderDocumentUpgradeCard = () => (
+    <View style={styles.documentUpgradeCard}>
+      <View style={styles.documentUpgradeIcon}>
+        <Ionicons name="document-text-outline" size={32} color={C.primary} />
+      </View>
+
+      <Text style={styles.documentUpgradeTitle}>Upgrade to add documents</Text>
+      <Text style={styles.documentUpgradeSub}>
+        Free accounts can view saved documents, but uploading encrypted PDFs, images, and files requires Premium or Family.
+      </Text>
+
+      <TouchableOpacity
+        style={styles.documentUpgradeBtn}
+        onPress={() => { hapticMedium(); router.push('/subscription?from=vault-documents'); }}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="sparkles-outline" size={18} color="#fff" />
+        <Text style={styles.documentUpgradeBtnText}>Upgrade plan</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   const renderEmpty = (type: 'password' | 'document' | 'card' | 'note') => {
+    if (type === 'document' && !checkingPlan && !isPaidPlan) {
+      return renderDocumentUpgradeCard();
+    }
+
     const route =
       type === 'password'
         ? '/addpassword'
@@ -250,14 +726,16 @@ const VaultScreen = () => {
           Add your first {type} or adjust your search.
         </Text>
 
-        <TouchableOpacity
-          style={styles.emptyBtn}
-          activeOpacity={0.82}
-          onPress={() => router.push(route as any)}
-        >
-          <Ionicons name="add" size={18} color="#fff" />
-          <Text style={styles.emptyBtnText}>Add {type}</Text>
-        </TouchableOpacity>
+        {!offlineMode && (
+          <TouchableOpacity
+            style={styles.emptyBtn}
+            activeOpacity={0.82}
+            onPress={type === 'document' ? handleAddPress : () => router.push(route as any)}
+          >
+            <Ionicons name="add" size={18} color="#fff" />
+            <Text style={styles.emptyBtnText}>Add {type}</Text>
+          </TouchableOpacity>
+        )}
       </View>
     );
   };
@@ -327,7 +805,7 @@ const VaultScreen = () => {
                 {item.fileName || item.title || 'Document'}
               </Text>
               <Text style={styles.documentCategory} numberOfLines={1}>
-                {item.mimeType || 'Document'}
+                {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
               </Text>
               <Text style={styles.documentSize}>{formatSize(item.sizeBytes)}</Text>
             </TouchableOpacity>
@@ -339,32 +817,37 @@ const VaultScreen = () => {
     <View style={styles.cardList}>
       {cards.length === 0
         ? renderEmpty('card')
-        : cards.map((item) => (
-            <TouchableOpacity
-              key={`card-${item.id}`}
-              style={[styles.creditCard, { backgroundColor: getAvatarColor(item.title || 'Card') }]}
-              onPress={() => openItem(item)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.creditCardTop}>
-                <View>
-                  <Text style={styles.creditCardLabel}>SECURE CARD</Text>
-                  <Text style={styles.creditCardName}>{item.title || 'Saved Card'}</Text>
-                </View>
-                <Ionicons name="card-outline" size={28} color="#fff" />
-              </View>
+        : cards.map((item) => {
+            const brand = detectCardBrand(item.title || 'Card', item.encryptedData || item.website || '');
 
-              <Text style={styles.creditCardNumber}>••••  ••••  ••••  {item.website || '••••'}</Text>
-
-              <View style={styles.creditCardBottom}>
-                <Text style={styles.creditCardBank}>{item.usernameValue || 'Cardholder'}</Text>
-                <View style={styles.cardEncryptedPill}>
-                  <Ionicons name="lock-closed" size={10} color="#fff" />
-                  <Text style={styles.cardEncryptedText}>Encrypted</Text>
+            return (
+              <TouchableOpacity
+                key={`card-${item.id}`}
+                style={[styles.creditCard, { backgroundColor: getAvatarColor(item.title || 'Card') }]}
+                onPress={() => openItem(item)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.creditCardTop}>
+                  <View>
+                    <CardBrandLogo brand={brand} compact />
+                    <Text style={styles.creditCardLabel}>SECURE CARD</Text>
+                    <Text style={styles.creditCardName}>{item.title || 'Saved Card'}</Text>
+                  </View>
+                  <Ionicons name="card-outline" size={28} color="#fff" />
                 </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+
+                <Text style={styles.creditCardNumber}>••••  ••••  ••••  {item.website || '••••'}</Text>
+
+                <View style={styles.creditCardBottom}>
+                  <Text style={styles.creditCardBank}>{item.usernameValue || 'Cardholder'}</Text>
+                  <View style={styles.cardEncryptedPill}>
+                    <Ionicons name="lock-closed" size={10} color="#fff" />
+                    <Text style={styles.cardEncryptedText}>Encrypted</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
     </View>
   );
 
@@ -479,17 +962,35 @@ const VaultScreen = () => {
       >
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.eyebrow}>Encrypted vault</Text>
+            <Text style={styles.eyebrow}>{offlineMode ? 'Offline encrypted vault' : 'Encrypted vault'}</Text>
             <Text style={styles.headerTitle}>My Vault</Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.addBtn}
-            activeOpacity={0.82}
-            onPress={() => router.push(getAddRoute() as any)}
-          >
-            <Ionicons name="add" size={28} color="#fff" />
-          </TouchableOpacity>
+          {activeTab === 'Documents' && !isPaidPlan ? (
+            <TouchableOpacity
+              style={styles.headerUpgradeBtn}
+              activeOpacity={0.82}
+              disabled={checkingPlan}
+              onPress={handleAddPress}
+            >
+              {checkingPlan ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Ionicons name="sparkles-outline" size={17} color="#fff" />
+                  <Text style={styles.headerUpgradeText}>Upgrade</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.addBtn}
+              activeOpacity={0.82}
+              onPress={handleAddPress}
+            >
+              <Ionicons name="add" size={28} color="#fff" />
+            </TouchableOpacity>
+          )}
         </View>
 
         <View style={styles.overviewCard}>
@@ -502,6 +1003,14 @@ const VaultScreen = () => {
             <Text style={styles.overviewTitle}>{headerCount()}</Text>
           </View>
         </View>
+
+        {offlineMode && (
+          <OfflineBanner
+            colors={C}
+            savedAt={offlineSavedAt}
+            onRetry={() => { hapticLight(); loadVaultItems({ force: true }); }}
+          />
+        )}
 
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={C.tabInactive} />
@@ -530,6 +1039,7 @@ const VaultScreen = () => {
                 key={tabItem.label}
                 style={[styles.tab, isActive && styles.tabActive]}
                 onPress={() => {
+                  hapticSelection();
                   setActiveTab(tabItem.label);
                   setSearch('');
                 }}
@@ -619,6 +1129,30 @@ const makeStyles = (C: ThemeColors) =>
       shadowOpacity: 0.25,
       shadowRadius: 16,
       elevation: 7,
+    },
+
+
+    headerUpgradeBtn: {
+      minWidth: 104,
+      height: 48,
+      backgroundColor: C.primary,
+      borderRadius: 20,
+      justifyContent: 'center',
+      alignItems: 'center',
+      flexDirection: 'row',
+      gap: 7,
+      paddingHorizontal: 14,
+      shadowColor: C.primary,
+      shadowOffset: { width: 0, height: 10 },
+      shadowOpacity: 0.25,
+      shadowRadius: 16,
+      elevation: 7,
+    },
+
+    headerUpgradeText: {
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '900',
     },
 
     overviewCard: {
@@ -843,6 +1377,59 @@ const makeStyles = (C: ThemeColors) =>
       fontWeight: '700',
     },
 
+
+    documentUpgradeCard: {
+      marginHorizontal: 3,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 26,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 22,
+      alignItems: 'center',
+    },
+
+    documentUpgradeIcon: {
+      width: 74,
+      height: 74,
+      borderRadius: 26,
+      backgroundColor: C.actionCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+    },
+
+    documentUpgradeTitle: {
+      color: C.text,
+      fontSize: 18,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+
+    documentUpgradeSub: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 20,
+      textAlign: 'center',
+      marginTop: 8,
+      marginBottom: 18,
+    },
+
+    documentUpgradeBtn: {
+      backgroundColor: C.primary,
+      borderRadius: 999,
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+
+    documentUpgradeBtnText: {
+      color: '#fff',
+      fontSize: 13,
+      fontWeight: '900',
+    },
+
     cardList: {
       paddingHorizontal: 20,
       gap: 14,
@@ -867,6 +1454,7 @@ const makeStyles = (C: ThemeColors) =>
       fontSize: 10,
       fontWeight: '900',
       letterSpacing: 1,
+      marginTop: 8,
       marginBottom: 4,
     },
 

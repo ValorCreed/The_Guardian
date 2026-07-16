@@ -19,7 +19,7 @@ import { router, useFocusEffect } from 'expo-router';
 import * as LocalAuthentication from 'expo-local-authentication';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api, saveLoginSession } from '../services/api';
+import { api, saveLoginSession, isDeviceLimitError } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import { saveBiometricCredentials, biometricLogin } from '../utils/secureAuth';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
@@ -72,11 +72,7 @@ export default function UnlockScreen() {
         return false;
       };
 
-      const subscription = BackHandler.addEventListener(
-        'hardwareBackPress',
-        onBackPress
-      );
-
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => subscription.remove();
     }, [vaultLocked])
   );
@@ -95,10 +91,7 @@ export default function UnlockScreen() {
       const data = await biometricLogin();
 
       if (data.requiresTwoFactor) {
-        router.push({
-          pathname: '/twofactor',
-          params: { email: data.email || '' },
-        });
+        router.push({ pathname: '/twofactor', params: { email: data.email || '' } });
         return;
       }
 
@@ -117,6 +110,31 @@ export default function UnlockScreen() {
     }
   };
 
+  const completeLogin = async (data: any, cleanEmail: string, cleanPassword: string) => {
+    if (data.requiresTwoFactor) {
+      router.push({ pathname: '/twofactor', params: { email: cleanEmail } });
+      return;
+    }
+
+    await saveLoginSession(data);
+    await saveBiometricCredentials(cleanEmail, cleanPassword);
+    await reloadTheme?.();
+    await unlockSuccess();
+  };
+
+  const performLogin = async (forceReplaceDevice = false) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password;
+
+    const data = await api.login({
+      email: cleanEmail,
+      password: cleanPassword,
+      forceReplaceDevice,
+    });
+
+    await completeLogin(data, cleanEmail, cleanPassword);
+  };
+
   const handleLogin = async () => {
     if (loading) return;
 
@@ -124,50 +142,52 @@ export default function UnlockScreen() {
     const cleanPassword = password;
 
     if (!cleanEmail || !cleanPassword) {
-      Alert.alert(
-        'Missing details',
-        'Please enter both your email and master password.'
-      );
+      Alert.alert('Missing details', 'Please enter both your email and master password.');
       return;
     }
 
     try {
       setLoading(true);
-
-      const data = await api.login({
-        email: cleanEmail,
-        password: cleanPassword,
-      });
-
-      if (data.requiresTwoFactor) {
-        router.push({
-          pathname: '/twofactor',
-          params: { email: cleanEmail },
-        });
-        return;
-      }
-
-      await saveLoginSession(data);
-      await saveBiometricCredentials(cleanEmail, cleanPassword);
-      await reloadTheme?.();
-      await unlockSuccess();
+      await performLogin(false);
     } catch (error: any) {
       const message =
         error.message ||
         'We could not sign you in. Please check your details and try again.';
 
-      const isDeviceLimitError = message
-        .toLowerCase()
-        .includes('free plan allows only one active device');
+      if (isDeviceLimitError(error)) {
+        Alert.alert(
+          'Device limit reached',
+          'Your free plan allows one trusted device at a time. This looks like a different device from the one currently signed in.\n\nYou can remove the previous device and continue signing in on this device.',
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+            },
+            {
+              text: 'Remove previous device',
+              style: 'destructive',
+              onPress: async () => {
+                try {
+                  setLoading(true);
+                  await performLogin(true);
+                } catch (retryError: any) {
+                  Alert.alert(
+                    'Login failed',
+                    retryError.message ||
+                      'We could not sign you in on this device. Please try again.'
+                  );
+                } finally {
+                  setLoading(false);
+                }
+              },
+            },
+          ]
+        );
 
-      Alert.alert(
-        isDeviceLimitError ? 'Device limit reached' : 'Login failed',
-        isDeviceLimitError
-          ? `${message}
+        return;
+      }
 
-To use this device, open The Guardian on your active device and remove the old session from Settings > Trusted Devices.`
-          : message
-      );
+      Alert.alert('Login failed', message);
     } finally {
       setLoading(false);
     }
@@ -175,10 +195,7 @@ To use this device, open The Guardian on your active device and remove the old s
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={C.background}
-      />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
 
       <KeyboardAvoidingView
         style={styles.keyboardView}
@@ -193,24 +210,16 @@ To use this device, open The Guardian on your active device and remove the old s
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
-          <View style={styles.logoContainer}>
-            <GuardianLogoTile
-              size={60}
-              logoSize={48}
-              radius={16}
-              style={styles.logoBox}
-            />
-          </View>
+          <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.iconBox} />
 
           <Text style={styles.title}>Welcome back</Text>
 
           <Text style={styles.subtitle}>
-            Unlock your vault with your master password.
+            Sign in with your master password to unlock The Guardian.
           </Text>
 
-          <Text style={styles.label}>Email</Text>
-
-          <View style={styles.inputBox}>
+          <View style={styles.formCard}>
+            <Text style={styles.label}>Email</Text>
             <TextInput
               style={styles.input}
               placeholder="you@example.com"
@@ -224,81 +233,82 @@ To use this device, open The Guardian on your active device and remove the old s
               textContentType="username"
               importantForAutofill="yes"
               returnKeyType="next"
+              editable={!loading}
             />
-          </View>
 
-          <Text style={styles.label}>Master Password</Text>
+            <Text style={styles.label}>Master Password</Text>
+            <View style={styles.passwordBox}>
+              <TextInput
+                style={styles.passwordInput}
+                placeholder="Enter master password"
+                placeholderTextColor={C.tabInactive}
+                secureTextEntry={!showPassword}
+                value={password}
+                onChangeText={setPassword}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="current-password"
+                textContentType="password"
+                importantForAutofill="yes"
+                returnKeyType="done"
+                onSubmitEditing={handleLogin}
+                editable={!loading}
+              />
 
-          <View style={styles.inputBox}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter master password"
-              placeholderTextColor={C.tabInactive}
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-              autoCapitalize="none"
-              autoCorrect={false}
-              autoComplete="current-password"
-              textContentType="password"
-              importantForAutofill="yes"
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-            />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((current) => !current)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={22}
+                  color={C.textSecondary}
+                />
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity
-              style={styles.eyeButton}
-              onPress={() => setShowPassword((current) => !current)}
-              activeOpacity={0.6}
+              activeOpacity={0.7}
+              onPress={() => router.push('/forgotpassword')}
+              disabled={loading}
+              style={styles.forgotButton}
             >
-              <Ionicons
-                name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                size={20}
-                color={C.tabInactive}
-              />
+              <Text style={styles.forgotText}>Forgot password?</Text>
             </TouchableOpacity>
           </View>
-
-          <TouchableOpacity
-            activeOpacity={0.6}
-            onPress={() => router.push('/forgotpassword')}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
 
           {biometricEnabled && (
             <TouchableOpacity
               style={styles.biometricBtn}
               onPress={handleBiometricLogin}
-              activeOpacity={0.7}
+              activeOpacity={0.8}
               disabled={loading}
             >
-              <Ionicons
-                name="finger-print-outline"
-                size={26}
-                color={C.primary}
-              />
-
-              <Text style={styles.biometricText}>
-                Use Face ID / Fingerprint
-              </Text>
+              <Ionicons name="finger-print-outline" size={24} color={C.primary} />
+              <Text style={styles.biometricText}>Use Biometrics</Text>
             </TouchableOpacity>
           )}
 
-          <View style={styles.buttonArea}>
-            <TouchableOpacity
-              style={[styles.unlockButton, loading && styles.unlockButtonDisabled]}
-              activeOpacity={0.85}
-              onPress={handleLogin}
-              disabled={loading}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.unlockButtonText}>Unlock Vault</Text>
-              )}
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.continueButton, loading && styles.disabledButton]}
+            activeOpacity={0.85}
+            onPress={handleLogin}
+            disabled={loading}
+          >
+            {loading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.continueText}>Unlock Vault</Text>}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.signupLink}
+            activeOpacity={0.7}
+            onPress={() => router.replace('/signup')}
+            disabled={loading}
+          >
+            <Text style={styles.signupText}>
+              New to The Guardian? <Text style={styles.signupTextBold}>Create account</Text>
+            </Text>
+          </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -323,71 +333,95 @@ const makeStyles = (C: any) =>
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 80,
+      paddingTop: 108,
       paddingBottom: 180,
     },
 
-    logoContainer: {
-      marginBottom: 24,
+    iconBox: {
+      marginBottom: 20,
     },
 
-    logoBox: {},
-
     title: {
-      fontSize: 28,
-      fontWeight: '700',
+      fontSize: 30,
+      fontWeight: '900',
       color: C.text,
       marginBottom: 8,
     },
 
     subtitle: {
-      fontSize: 15,
+      fontSize: 14,
       color: C.textSecondary,
-      lineHeight: 22,
-      marginBottom: 32,
+      lineHeight: 21,
+      marginBottom: 22,
+    },
+
+    formCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: C.border,
+      marginBottom: 18,
     },
 
     label: {
       fontSize: 13,
-      color: C.textSecondary,
+      color: C.text,
+      fontWeight: '800',
       marginBottom: 8,
-      marginLeft: 2,
-      fontWeight: '700',
+      marginLeft: 4,
     },
 
-    inputBox: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: C.backgroundElement,
-      borderRadius: 14,
+    input: {
+      backgroundColor: C.background,
+      borderRadius: 18,
       paddingHorizontal: 16,
-      paddingVertical: 14,
-      marginBottom: 20,
+      paddingVertical: 15,
+      fontSize: 15,
+      color: C.text,
+      marginBottom: 16,
       borderWidth: 1,
       borderColor: C.border,
     },
 
-    input: {
+    passwordBox: {
+      backgroundColor: C.background,
+      borderRadius: 18,
+      paddingLeft: 16,
+      paddingRight: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 10,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+
+    passwordInput: {
       flex: 1,
       fontSize: 15,
       color: C.text,
-      paddingVertical: 0,
+      paddingVertical: 15,
+      paddingRight: 10,
     },
 
     eyeButton: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
+      width: 42,
+      height: 42,
+      borderRadius: 21,
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: 8,
+    },
+
+    forgotButton: {
+      alignSelf: 'flex-end',
+      paddingVertical: 6,
+      paddingHorizontal: 4,
     },
 
     forgotText: {
-      fontSize: 15,
-      fontWeight: '600',
+      fontSize: 14,
+      fontWeight: '900',
       color: C.primary,
-      marginTop: 4,
     },
 
     biometricBtn: {
@@ -395,38 +429,54 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 10,
-      marginTop: 24,
+      marginBottom: 16,
       padding: 14,
       backgroundColor: C.actionCard,
-      borderRadius: 16,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: C.border,
     },
 
     biometricText: {
       fontSize: 15,
-      fontWeight: '600',
+      fontWeight: '800',
       color: C.primary,
     },
 
-    buttonArea: {
-      marginTop: 28,
-    },
-
-    unlockButton: {
+    continueButton: {
       backgroundColor: C.backgroundbutton,
-      borderRadius: 30,
       paddingVertical: 18,
+      borderRadius: 50,
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 56,
+      marginTop: 2,
     },
 
-    unlockButtonDisabled: {
+    disabledButton: {
       opacity: 0.7,
     },
 
-    unlockButtonText: {
-      fontSize: 16,
-      fontWeight: '700',
+    continueText: {
       color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '900',
+    },
+
+    signupLink: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 18,
+    },
+
+    signupText: {
+      color: C.textSecondary,
+      fontSize: 14,
+      fontWeight: '600',
+    },
+
+    signupTextBold: {
+      color: C.primary,
+      fontWeight: '900',
     },
   });

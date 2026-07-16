@@ -19,11 +19,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { encryptPassword } from '../utils/vaultcrypto';
+import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const NUMBERS = '0123456789';
 const SYMBOLS = '!@#$%^&*()_+-=[]{}';
+const FREE_PASSWORD_LIMIT = 10;
+type Plan = 'FREE' | 'PREMIUM' | 'FAMILY' | string;
 
 const generatePassword = (length: number, useNumbers: boolean, useSymbols: boolean) => {
   let chars = LOWER + UPPER;
@@ -72,6 +75,9 @@ const AddPasswordScreen = () => {
   const [includeNumbers, setIncludeNumbers] = useState(true);
   const [includeSymbols, setIncludeSymbols] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [plan, setPlan] = useState<Plan>('FREE');
+  const [passwordCount, setPasswordCount] = useState(0);
+  const [checkingLimits, setCheckingLimits] = useState(true);
 
   useEffect(() => {
     if (params.generatedPassword) {
@@ -82,16 +88,53 @@ const AddPasswordScreen = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.generatedPassword]);
 
+  useEffect(() => {
+    const loadPlanLimits = async () => {
+      try {
+        setCheckingLimits(true);
+        const [subscription, vaultItems] = await Promise.all([
+          api.getSubscription().catch(() => ({ plan: 'FREE' })),
+          api.getVaultItems().catch(() => []),
+        ]);
+
+        setPlan(subscription?.plan || 'FREE');
+        setPasswordCount(Array.isArray(vaultItems) ? vaultItems.length : 0);
+      } finally {
+        setCheckingLimits(false);
+      }
+    };
+
+    loadPlanLimits();
+  }, []);
+
   const score = useMemo(() => getStrengthScore(password), [password]);
   const scoreColor = score >= 75 ? C.success : score >= 45 ? C.warning : C.danger;
   const scoreLabel = score >= 75 ? 'Strong' : score >= 45 ? 'Moderate' : 'Weak';
+  const isPaidPlan = String(plan).toUpperCase() === 'PREMIUM' || String(plan).toUpperCase() === 'FAMILY';
+  const freePasswordLimitReached = !isPaidPlan && passwordCount >= FREE_PASSWORD_LIMIT;
 
   const regenerate = (length = passLength, numbers = includeNumbers, symbols = includeSymbols) => {
     setPassword(generatePassword(length, numbers, symbols));
   };
 
+  const showPasswordLimitAlert = (message?: string) => {
+    Alert.alert(
+      'Password limit reached',
+      message || `Your Free plan can save up to ${FREE_PASSWORD_LIMIT} passwords. Upgrade to Premium or Family for unlimited password storage.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Upgrade', onPress: () => router.push('/subscription?from=addpassword') },
+      ]
+    );
+  };
+
   const handleSave = async () => {
     if (saving) return;
+
+    if (freePasswordLimitReached) {
+      showPasswordLimitAlert();
+      return;
+    }
 
     if (!website.trim()) {
       Alert.alert('Missing website', 'Please enter the website or app name.');
@@ -124,7 +167,21 @@ const AddPasswordScreen = () => {
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
-      Alert.alert('Save failed', error.message || 'Could not save password.');
+      const code = String(error?.code || '').toUpperCase();
+      const message = String(error?.message || '');
+      const lowerMessage = message.toLowerCase();
+
+      if (
+        code === 'PLAN_LIMIT_REACHED' ||
+        lowerMessage.includes('free plan') ||
+        lowerMessage.includes('password limit') ||
+        lowerMessage.includes('vault limit')
+      ) {
+        showPasswordLimitAlert(message);
+        return;
+      }
+
+      Alert.alert('Save failed', message || 'Could not save password.');
     } finally {
       setSaving(false);
     }
@@ -135,12 +192,28 @@ const AddPasswordScreen = () => {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
-            <Text style={styles.headerTitle}>Add Password</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.headerTitle}>Add Password</Text>
+              <Text style={styles.headerSubtitle}>
+                {checkingLimits
+                  ? 'Checking plan limit...'
+                  : isPaidPlan
+                    ? 'Unlimited passwords on your current plan'
+                    : `${passwordCount}/${FREE_PASSWORD_LIMIT} passwords used on Free plan`}
+              </Text>
+            </View>
             <TouchableOpacity style={styles.headerTool} onPress={() => router.push('/passwordgenerator')}>
               <Ionicons name="sparkles-outline" size={17} color={C.primary} />
               <Text style={styles.headerToolText}>Advanced generator</Text>
             </TouchableOpacity>
           </View>
+
+          {freePasswordLimitReached && (
+            <View style={styles.limitBox}>
+              <Ionicons name="alert-circle-outline" size={20} color={C.warning} />
+              <Text style={styles.limitText}>You have reached the Free plan password limit. Upgrade to save more passwords.</Text>
+            </View>
+          )}
 
           <View style={styles.form}>
             <Text style={styles.label}>Website / App</Text>
@@ -203,6 +276,7 @@ const AddPasswordScreen = () => {
                     style={styles.sliderBtn}
                     onPress={() => {
                       const newLen = Math.max(8, passLength - 1);
+                      hapticSelection();
                       setPassLength(newLen);
                       regenerate(newLen, includeNumbers, includeSymbols);
                     }}
@@ -214,6 +288,7 @@ const AddPasswordScreen = () => {
                     style={styles.sliderBtn}
                     onPress={() => {
                       const newLen = Math.min(32, passLength + 1);
+                      hapticSelection();
                       setPassLength(newLen);
                       regenerate(newLen, includeNumbers, includeSymbols);
                     }}
@@ -228,6 +303,7 @@ const AddPasswordScreen = () => {
                 <Switch
                   value={includeNumbers}
                   onValueChange={(val) => {
+                    val ? hapticToggleOn() : hapticToggleOff();
                     setIncludeNumbers(val);
                     regenerate(passLength, val, includeSymbols);
                   }}
@@ -242,6 +318,7 @@ const AddPasswordScreen = () => {
                 <Switch
                   value={includeSymbols}
                   onValueChange={(val) => {
+                    val ? hapticToggleOn() : hapticToggleOff();
                     setIncludeSymbols(val);
                     regenerate(passLength, includeNumbers, val);
                   }}
@@ -263,13 +340,17 @@ const AddPasswordScreen = () => {
             />
           </View>
 
-          <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
+          <TouchableOpacity
+            style={[styles.saveBtn, (saving || freePasswordLimitReached) && styles.disabledBtn]}
+            onPress={handleSave}
+            disabled={saving}
+          >
             {saving ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />
+              <Ionicons name={freePasswordLimitReached ? 'lock-closed-outline' : 'checkmark-circle-outline'} size={20} color="#fff" />
             )}
-            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Password'}</Text>
+            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : freePasswordLimitReached ? 'Upgrade to Save More' : 'Save Password'}</Text>
           </TouchableOpacity>
 
           <View style={{ height: 90 }} />
@@ -294,6 +375,31 @@ const makeStyles = (C: ThemeColors) =>
       gap: 10,
     },
     headerTitle: { fontSize: 24, fontWeight: '900', color: C.text },
+    headerSubtitle: {
+      marginTop: 6,
+      color: C.textSecondary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    limitBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      borderWidth: 1,
+      borderColor: C.warning,
+      backgroundColor: C.actionCard,
+      borderRadius: 18,
+      padding: 14,
+      marginHorizontal: 20,
+      marginBottom: 16,
+    },
+    limitText: {
+      flex: 1,
+      color: C.text,
+      fontSize: 13,
+      lineHeight: 19,
+      fontWeight: '700',
+    },
     headerTool: {
       alignSelf: 'flex-start',
       flexDirection: 'row',
@@ -403,5 +509,6 @@ const makeStyles = (C: ThemeColors) =>
       marginTop: 4,
       marginBottom: 20,
     },
+    disabledBtn: { opacity: 0.65 },
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   });

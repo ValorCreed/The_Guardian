@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import { CreditCard, FileText, KeyRound, Mail, NotebookText, UserPlus } from 'lu
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import { hapticToggleOn, hapticToggleOff, hapticWarning, hapticSuccess } from '../utils/haptics';
 
 export default function NewMemberScreen() {
   const { isDark, colors: C } = useAppTheme();
@@ -28,22 +29,83 @@ export default function NewMemberScreen() {
   const [shareDocuments, setShareDocuments] = useState(false);
   const [shareNotes, setShareNotes] = useState(false);
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
+
+  const ensureFamilyPlanBeforeSubmit = async () => {
+    const subscription = await api.getSubscriptionFresh?.();
+
+    const plan = String(subscription?.plan || '').toUpperCase();
+    const active = subscription?.active !== false;
+
+    if (plan !== 'FAMILY' || !active) {
+      Alert.alert(
+        'Family plan required',
+        'This account is not currently recognized as a Family plan account by the server. Refresh your subscription, sign in again, or confirm the subscription is active.'
+      );
+      return false;
+    }
+
+    return true;
+  };
 
   const handleAddMember = async () => {
+    if (submittingRef.current || loading) return;
+
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail) {
+      hapticWarning();
       Alert.alert('Missing email', 'Enter the email of the user you want to add.');
       return;
     }
 
     if (!sharePasswords && !shareCards && !shareDocuments && !shareNotes) {
+      hapticWarning();
       Alert.alert('Choose what to share', 'Select at least one vault type: passwords, cards, documents, or secure notes.');
       return;
     }
 
     try {
+      submittingRef.current = true;
       setLoading(true);
+
+      const familyAllowed = await ensureFamilyPlanBeforeSubmit();
+      if (!familyAllowed) {
+        return;
+      }
+
+      /*
+       * Check the target account before creating the family member.
+       * This prevents the confusing case where a non-existing email reaches
+       * the create endpoint and gets displayed as a Family-plan error.
+       */
+      try {
+        await api.lookupFamilyMemberAccount(cleanEmail);
+      } catch (lookupError: any) {
+        const lookupStatus = lookupError?.status;
+        const lookupCode = String(lookupError?.code || '').toUpperCase();
+
+        if (lookupStatus === 404 || lookupCode === 'ACCOUNT_NOT_FOUND') {
+          hapticWarning();
+          Alert.alert(
+            'Account not found',
+            'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.'
+          );
+          return;
+        }
+
+        if (lookupStatus === 403 || lookupCode === 'FAMILY_PLAN_REQUIRED') {
+          hapticWarning();
+          Alert.alert(
+            'Family plan required',
+            'Only Family plan users can add members. Refresh your subscription, sign in again, or confirm that this account is active on the Family plan.'
+          );
+          return;
+        }
+
+        throw lookupError;
+      }
+
       await api.addFamilyMember(cleanEmail, {
         sharePasswords,
         shareCards,
@@ -52,12 +114,30 @@ export default function NewMemberScreen() {
       });
       api.clearCache();
 
+      hapticSuccess();
       Alert.alert('Member added', 'This user can now access the vault types you selected.', [
         { text: 'OK', onPress: () => router.replace('/family') },
       ]);
     } catch (error: any) {
-      Alert.alert('Could not add member', error.message || 'Please try again.');
+      const status = error?.status;
+      const message =
+        status === 404
+          ? 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.'
+          : status === 403
+            ? 'Only Family plan users can add members. Refresh your subscription, sign in again, or confirm that this account is active on the Family plan.'
+            : error?.message || 'Please try again.';
+
+      const title =
+        status === 404
+          ? 'Account not found'
+          : status === 403
+            ? 'Family plan required'
+            : 'Could not add member';
+
+      hapticWarning();
+      Alert.alert(title, message);
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
   };
@@ -189,7 +269,14 @@ function PermissionRow({
       </View>
       <Switch
         value={value}
-        onValueChange={onChange}
+        onValueChange={(nextValue) => {
+          if (nextValue) {
+            hapticToggleOn();
+          } else {
+            hapticToggleOff();
+          }
+          onChange(nextValue);
+        }}
         trackColor={{ false: C.border, true: C.primary }}
         thumbColor="#fff"
         ios_backgroundColor={C.border}

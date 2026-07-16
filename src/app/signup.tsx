@@ -318,7 +318,7 @@ const makeStyles = (C: any) =>
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 78,
+      paddingTop: 108,
       paddingBottom: 180,
     },
 

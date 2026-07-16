@@ -14,11 +14,13 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
+import { hapticLight, hapticMedium, hapticSelection, hapticToggleOff, hapticToggleOn, hapticWarning } from '../utils/haptics';
+import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 const HISTORY_KEY = 'guardian.passwordGenerator.history.v1';
 
@@ -132,6 +134,8 @@ export default function PasswordGeneratorScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
+  useSensitiveScreenProtection(true);
+
   const [plan, setPlan] = useState<Plan>('FREE');
   const [loadingPlan, setLoadingPlan] = useState(true);
   const [mode, setMode] = useState<GeneratorMode>('random');
@@ -225,8 +229,8 @@ export default function PasswordGeneratorScreen() {
 
   const copyPassword = async () => {
     if (!generated) return;
-    await Clipboard.setStringAsync(generated);
-    Alert.alert('Copied', 'Generated password copied to clipboard.');
+    await setSecureClipboard(generated);
+    Alert.alert('Copied', getSecureClipboardMessage('Generated password'));
   };
 
   const useInAddPassword = () => {
@@ -247,7 +251,7 @@ export default function PasswordGeneratorScreen() {
         'Passphrases and PIN generation are available on Premium and Family plans.',
         [
           { text: 'Not now', style: 'cancel' },
-          { text: 'View plans', onPress: () => router.push('/subscription') },
+          { text: 'View plans', onPress: () => router.push('/subscription?from=passwordgenerator') },
         ]
       );
       return;
@@ -338,7 +342,7 @@ export default function PasswordGeneratorScreen() {
         </View>
 
         {!isPaid && (
-          <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/subscription')} activeOpacity={0.85}>
+          <TouchableOpacity style={styles.upgradeCard} onPress={() => { hapticWarning(); router.push('/subscription?from=passwordgenerator'); }} activeOpacity={0.85}>
             <Ionicons name="sparkles-outline" size={22} color={C.warning} />
             <View style={{ flex: 1 }}>
               <Text style={styles.upgradeTitle}>Unlock advanced generator</Text>
@@ -348,17 +352,17 @@ export default function PasswordGeneratorScreen() {
           </TouchableOpacity>
         )}
 
-        <TouchableOpacity style={styles.primaryButton} onPress={generate} activeOpacity={0.86}>
+        <TouchableOpacity style={styles.primaryButton} onPress={() => { hapticMedium(); generate(); }} activeOpacity={0.86}>
           <Ionicons name="refresh-outline" size={20} color="#fff" />
           <Text style={styles.primaryButtonText}>Generate new</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={copyPassword} activeOpacity={0.82}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => { hapticLight(); copyPassword(); }} activeOpacity={0.82}>
           <Ionicons name="copy-outline" size={20} color={C.primary} />
           <Text style={styles.secondaryButtonText}>Copy password</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={useInAddPassword} activeOpacity={0.82}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => { hapticMedium(); useInAddPassword(); }} activeOpacity={0.82}>
           <Ionicons name="add-circle-outline" size={20} color={C.primary} />
           <Text style={styles.secondaryButtonText}>Use in Add Password</Text>
         </TouchableOpacity>
@@ -367,7 +371,7 @@ export default function PasswordGeneratorScreen() {
           <View style={styles.historyCard}>
             <Text style={styles.sectionTitle}>Recent generated passwords</Text>
             {history.map((item, index) => (
-              <TouchableOpacity key={`${item}-${index}`} style={styles.historyRow} onPress={() => setGenerated(item)}>
+              <TouchableOpacity key={`${item}-${index}`} style={styles.historyRow} onPress={() => { hapticSelection(); setGenerated(item); }}>
                 <Text style={styles.historyText} numberOfLines={1}>{item}</Text>
                 <Ionicons name="return-down-back-outline" size={18} color={C.primary} />
               </TouchableOpacity>
@@ -399,7 +403,17 @@ function ToggleRow({ label, value, onValueChange, C, disabled = false }: { label
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: C.border, paddingVertical: 12 }}>
       <Text style={{ color: disabled ? C.textSecondary : C.text, fontSize: 14, fontWeight: '700' }}>{label}</Text>
-      <Switch value={value} onValueChange={onValueChange} disabled={disabled} trackColor={{ false: C.border, true: C.primary }} thumbColor="#fff" ios_backgroundColor={C.border} />
+      <Switch
+        value={value}
+        onValueChange={(nextValue) => {
+          nextValue ? hapticToggleOn() : hapticToggleOff();
+          onValueChange(nextValue);
+        }}
+        disabled={disabled}
+        trackColor={{ false: C.border, true: C.primary }}
+        thumbColor="#fff"
+        ios_backgroundColor={C.border}
+      />
     </View>
   );
 }

@@ -14,6 +14,7 @@ import { router, usePathname } from 'expo-router';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
+import { hapticSelection } from '../utils/haptics';
 
 const tabs = [
   { label: 'Home', route: '/home', icon: 'home-outline', activeIcon: 'home' },
@@ -91,7 +92,8 @@ function FloatingTabItem({
   active: boolean;
   onPress: () => void;
 }) {
-  const { colors } = useAppTheme();
+  const { isDark, colors } = useAppTheme();
+  const inactiveColor = isDark ? 'rgba(243, 244, 246, 0.98)' : '#475569';
 
   const itemScale = useRef(new Animated.Value(active ? 1.04 : 1)).current;
   const itemTranslateY = useRef(new Animated.Value(active ? -2 : 0)).current;
@@ -162,8 +164,8 @@ function FloatingTabItem({
       >
         <Ionicons
           name={(active ? tab.activeIcon : tab.icon) as any}
-          size={22}
-          color={active ? '#FFFFFF' : colors.tabInactive}
+          size={23}
+          color={active ? '#FFFFFF' : inactiveColor}
         />
 
         <Text
@@ -171,7 +173,7 @@ function FloatingTabItem({
           style={[
             styles.label,
             {
-              color: active ? '#FFFFFF' : colors.tabInactive,
+              color: active ? '#FFFFFF' : inactiveColor,
             },
           ]}
         >
@@ -324,10 +326,12 @@ function FloatingTabBar() {
         index === localActiveIndexRef.current && pathname === tabs[index].route;
 
       if (isSameTab) {
+        hapticSelection();
         animateStationaryPillBounce();
         return;
       }
 
+      hapticSelection();
       moveToTabImmediately(index);
     },
     [animateStationaryPillBounce, moveToTabImmediately, pathname]
@@ -336,24 +340,25 @@ function FloatingTabBar() {
   const androidBlurMethod =
     Platform.OS === 'android' ? 'dimezisBlurViewSdk31Plus' : undefined;
 
+    //Blur configuration for the tab bar using the blur effect from expo blur.
   return (
     <View pointerEvents="box-none" style={styles.wrapper}>
       <View style={styles.shadowContainer}>
         <BlurView
           blurTarget={blurTarget?.targetRef}
           blurMethod={androidBlurMethod}
-          intensity={Platform.OS === 'android' ? 50 : 40}
+          intensity={Platform.OS === 'android' ? 47 : 48}
           blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
           tint={isDark ? 'dark' : 'light'}
           style={[
             styles.blurBox,
             {
               backgroundColor: isDark
-                ? 'rgba(6, 10, 8, 0.60)'
-                : 'rgba(255, 255, 255, 0.58)',
+                ? 'rgba(10, 15, 20, 0.76)'
+                : 'rgba(255, 255, 255, 0.72)',
               borderColor: isDark
-                ? 'rgba(255,255,255,0.14)'
-                : 'rgba(255,255,255,0.82)',
+                ? 'rgba(255,255,255,0.20)'
+                : 'rgba(255,255,255,0.95)',
             },
           ]}
         >
@@ -363,8 +368,8 @@ function FloatingTabBar() {
               StyleSheet.absoluteFill,
               {
                 backgroundColor: isDark
-                  ? 'rgba(6, 10, 8, 0.28)'
-                  : 'rgba(255, 255, 255, 0.18)',
+                  ? 'rgba(2, 6, 10, 0.34)'
+                  : 'rgba(255, 255, 255, 0.22)',
               },
             ]}
           />
@@ -406,8 +411,8 @@ function FloatingTabBar() {
                     height: PILL_HEIGHT,
                     top: pillTop,
                     backgroundColor: isDark
-                      ? 'rgba(21, 168, 106, 0.74)'
-                      : 'rgba(21, 168, 106, 0.88)',
+                      ? 'rgba(16, 185, 129, 0.92)'
+                      : 'rgba(6, 95, 70, 0.96)',
                     borderColor: isDark
                       ? 'rgba(255,255,255,0.16)'
                       : 'rgba(255,255,255,0.68)',
@@ -531,7 +536,7 @@ const styles = StyleSheet.create({
 
   label: {
     marginTop: 3,
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 11,
+    fontWeight: '900',
   },
 });

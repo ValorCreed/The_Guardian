@@ -3,6 +3,7 @@ package com.vault.theguardian.autofill;
 import android.app.PendingIntent;
 import android.app.assist.AssistStructure;
 import android.content.Intent;
+import android.os.Build;
 import android.os.CancellationSignal;
 import android.service.autofill.AutofillService;
 import android.service.autofill.Dataset;
@@ -55,28 +56,39 @@ public class GuardianAutofillService extends AutofillService {
             }
 
             Intent authIntent = new Intent(this, AutofillUnlockActivity.class);
-            authIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             authIntent.putParcelableArrayListExtra(EXTRA_USERNAME_IDS, usernameFields);
             authIntent.putParcelableArrayListExtra(EXTRA_PASSWORD_IDS, passwordFields);
             authIntent.putExtra(EXTRA_PACKAGE_NAME, metadata.packageName);
             authIntent.putExtra(EXTRA_WEB_DOMAIN, metadata.webDomain);
 
+            int pendingIntentFlags = PendingIntent.FLAG_CANCEL_CURRENT;
+
+            /*
+             * Autofill authentication must be mutable on Android 12+.
+             * The platform needs to hand the authenticated Dataset result back to
+             * the original app that requested autofill. Using an immutable pending
+             * intent can make the picker close without filling the selected login.
+             */
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                pendingIntentFlags |= PendingIntent.FLAG_MUTABLE;
+            }
+
             PendingIntent pendingIntent = PendingIntent.getActivity(
                     this,
                     (int) System.currentTimeMillis(),
                     authIntent,
-                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                    pendingIntentFlags
             );
 
             RemoteViews presentation = createPresentation("Unlock The Guardian");
             Dataset.Builder datasetBuilder = new Dataset.Builder(presentation);
 
             for (AutofillId id : usernameFields) {
-                datasetBuilder.setValue(id, AutofillValue.forText(""), presentation);
+                datasetBuilder.setValue(id, null, presentation);
             }
 
             for (AutofillId id : passwordFields) {
-                datasetBuilder.setValue(id, AutofillValue.forText(""), presentation);
+                datasetBuilder.setValue(id, null, presentation);
             }
 
             Dataset lockedDataset = datasetBuilder
