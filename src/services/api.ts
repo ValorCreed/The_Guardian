@@ -6,8 +6,8 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { UploadType } from 'expo-file-system';
 import { markOfflineVaultStale } from './offlineVault';
 
-export const API_BASE_URL = 'http://10.229.103.37:8080';
-//export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
+// export const API_BASE_URL = 'http://10.229.103.37:8080';
+export const API_BASE_URL = 'your-api-base-url';
 
 /**
  * REQUEST TIMEOUT SETTINGS
