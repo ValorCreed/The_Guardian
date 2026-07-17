@@ -17,7 +17,12 @@ import * as Updates from 'expo-updates';
  * preview builds, and production builds without adding native analytics modules.
  */
 
-declare const process: { env?: Record<string, string | undefined> } | undefined;
+declare const process: {
+  env: {
+    EXPO_PUBLIC_POSTHOG_API_KEY?: string;
+    EXPO_PUBLIC_POSTHOG_HOST?: string;
+  };
+};
 
 type AnalyticsValue = string | number | boolean | null;
 type AnalyticsProperties = Record<string, AnalyticsValue | undefined>;
@@ -55,11 +60,11 @@ let distinctIdCache: string | null = null;
 let lastScreenPath: string | null = null;
 
 function getPostHogApiKey() {
-  return process?.env?.EXPO_PUBLIC_POSTHOG_API_KEY?.trim() || '';
+  return process.env.EXPO_PUBLIC_POSTHOG_API_KEY?.trim() || '';
 }
 
 function getPostHogHost() {
-  const configuredHost = process?.env?.EXPO_PUBLIC_POSTHOG_HOST?.trim();
+  const configuredHost = process.env.EXPO_PUBLIC_POSTHOG_HOST?.trim();
   return (configuredHost || DEFAULT_POSTHOG_HOST).replace(/\/$/, '');
 }
 

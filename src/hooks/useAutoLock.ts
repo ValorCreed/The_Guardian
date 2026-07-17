@@ -164,23 +164,26 @@ export const useAutoLock = () => {
   const lockingRef = useRef(false);
   const mountedRef = useRef(false);
 
-  const lockVault = useCallback(async () => {
-    if (lockingRef.current) return;
-    if (!shouldUseAutoLock(pathname)) return;
+  const lockVault = useCallback(
+    async (options?: { force?: boolean }) => {
+      if (lockingRef.current) return;
+      if (!options?.force && !shouldUseAutoLock(pathname)) return;
 
-    try {
-      lockingRef.current = true;
+      try {
+        lockingRef.current = true;
 
-      await AsyncStorage.setItem('vaultLocked', 'true');
-      await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+        await AsyncStorage.setItem('vaultLocked', 'true');
+        await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
 
-      await logout();
+        await logout();
 
-      router.replace('/signin');
-    } finally {
-      lockingRef.current = false;
-    }
-  }, [pathname]);
+        router.replace('/signin');
+      } finally {
+        lockingRef.current = false;
+      }
+    },
+    [pathname]
+  );
 
   const markAppLeftAt = useCallback(async () => {
     if (!shouldUseAutoLock(pathname)) return;
@@ -216,20 +219,43 @@ export const useAutoLock = () => {
     }
   }, [lockVault, pathname]);
 
+  const checkColdStartShouldLock = useCallback(async () => {
+    if (!mountedRef.current) return;
+
+    const lastBackgroundAt = await getStoredBackgroundTime();
+
+    if (!lastBackgroundAt) return;
+
+    /*
+     * Security-first cold-start protection:
+     * React Native JavaScript cannot run after the user swipes the app away
+     * from Recent Apps. Because markAppLeftAt() stores this timestamp only
+     * when the user leaves a protected screen, its presence on a fresh start
+     * means the previous protected vault session ended while the app was away.
+     * Lock immediately, even if the configured timeout has not elapsed.
+     *
+     * Normal background -> active returns still use checkIfShouldLock(), so
+     * the selected timeout continues to work when the app is not killed.
+     */
+    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+    await lockVault({ force: true });
+  }, [lockVault]);
+
   useEffect(() => {
     mountedRef.current = true;
 
     /*
      * Cold-start protection:
-     * If the app was sent to the background, then killed from Recent Apps,
-     * JavaScript timers and AppState listeners stop running. The old code only
-     * checked the timeout on a background -> active transition, so a killed app
-     * could reopen unlocked even after the timeout had elapsed.
+     * If the app was sent to the background, then killed/swiped away from
+     * Recent Apps, JavaScript timers and AppState listeners stop running.
+     * On the next launch, lock immediately when a protected-session background
+     * marker is found.
      *
-     * This startup check reads the persisted background timestamp and locks the
-     * vault as soon as the protected app tree mounts again.
+     * Normal background -> active returns are still handled below by
+     * checkIfShouldLock(), so the selected timeout remains unchanged when the
+     * app is merely minimized and reopened from Recent Apps.
      */
-    checkIfShouldLock();
+    checkColdStartShouldLock();
 
     const subscription = AppState.addEventListener('change', async (nextState) => {
       const previousState = appState.current;
@@ -257,7 +283,7 @@ export const useAutoLock = () => {
       mountedRef.current = false;
       subscription.remove();
     };
-  }, [checkIfShouldLock, markAppLeftAt]);
+  }, [checkColdStartShouldLock, checkIfShouldLock, markAppLeftAt]);
 
   return {
     lockVault,
