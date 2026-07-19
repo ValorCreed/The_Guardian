@@ -7,8 +7,8 @@ import com.vault.theguardian.documents.DocumentService;
 import com.vault.theguardian.documents.DocumentVault;
 import com.vault.theguardian.notes.SecureNote;
 import com.vault.theguardian.notes.SecureNoteRepository;
-import com.vault.theguardian.notification.NotificationService;
-import com.vault.theguardian.subscription.SubscriptionService;
+import com.vault.theguardian.integration.notification.NotificationClient;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import com.vault.theguardian.vault.VaultCryptoService;
@@ -37,25 +37,25 @@ public class FamilyService {
     private final FamilyGroupRepository familyGroupRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final UserRepository userRepository;
-    private final SubscriptionService subscriptionService;
+    private final SubscriptionClient subscriptionService;
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
     private final DocumentService documentService;
     private final SecureNoteRepository secureNoteRepository;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final VaultCryptoService vaultCryptoService;
 
     public FamilyService(FamilyGroupRepository familyGroupRepository,
                          FamilyMemberRepository familyMemberRepository,
                          UserRepository userRepository,
-                         SubscriptionService subscriptionService,
+                         SubscriptionClient subscriptionService,
                          VaultItemRepository vaultItemRepository,
                          CreditCardRepository creditCardRepository,
                          DocumentRepository documentRepository,
                          DocumentService documentService,
                          SecureNoteRepository secureNoteRepository,
-                         NotificationService notificationService,
+                         NotificationClient notificationClient,
                          VaultCryptoService vaultCryptoService) {
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
@@ -66,7 +66,7 @@ public class FamilyService {
         this.documentRepository = documentRepository;
         this.documentService = documentService;
         this.secureNoteRepository = secureNoteRepository;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultCryptoService = vaultCryptoService;
     }
 
@@ -213,7 +213,7 @@ public class FamilyService {
             existingMember.setShareNotes(request.shareNotes());
 
             FamilyMember updated = familyMemberRepository.save(existingMember);
-            notificationService.notifyFamilyMemberAdded(admin, memberUser.getEmail());
+            notificationClient.notifyFamilyMemberAdded(admin, memberUser.getEmail());
             return toMemberResponse(updated);
         }
 
@@ -237,7 +237,7 @@ public class FamilyService {
                         .build()
         );
 
-        notificationService.notifyFamilyMemberAdded(admin, memberUser.getEmail());
+        notificationClient.notifyFamilyMemberAdded(admin, memberUser.getEmail());
         return toMemberResponse(saved);
     }
 
@@ -249,7 +249,7 @@ public class FamilyService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Family member not found."));
 
         familyMemberRepository.delete(member);
-        notificationService.notifyFamilyMemberRemoved(admin, member.getUser().getEmail());
+        notificationClient.notifyFamilyMemberRemoved(admin, member.getUser().getEmail());
     }
 
     public SharedFamilyItemsResponse getSharedItems(User user) {

@@ -9,9 +9,6 @@ import com.vault.theguardian.family.FamilyGroup;
 import com.vault.theguardian.family.FamilyGroupRepository;
 import com.vault.theguardian.family.FamilyMemberRepository;
 import com.vault.theguardian.notes.SecureNoteRepository;
-import com.vault.theguardian.notification.NotificationRepository;
-import com.vault.theguardian.payment.PaymentRepository;
-import com.vault.theguardian.subscription.SubscriptionRepository;
 import com.vault.theguardian.vault.VaultItemRepository;
 import jakarta.transaction.Transactional;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,9 +22,6 @@ public class UserService {
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
     private final SecureNoteRepository secureNoteRepository;
-    private final SubscriptionRepository subscriptionRepository;
-    private final PaymentRepository paymentRepository;
-    private final NotificationRepository notificationRepository;
     private final FamilyGroupRepository familyGroupRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final EmergencyContactRepository emergencyContactRepository;
@@ -41,9 +35,6 @@ public class UserService {
             CreditCardRepository creditCardRepository,
             DocumentRepository documentRepository,
             SecureNoteRepository secureNoteRepository,
-            SubscriptionRepository subscriptionRepository,
-            PaymentRepository paymentRepository,
-            NotificationRepository notificationRepository,
             FamilyGroupRepository familyGroupRepository,
             FamilyMemberRepository familyMemberRepository,
             EmergencyContactRepository emergencyContactRepository,
@@ -56,9 +47,6 @@ public class UserService {
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
         this.secureNoteRepository = secureNoteRepository;
-        this.subscriptionRepository = subscriptionRepository;
-        this.paymentRepository = paymentRepository;
-        this.notificationRepository = notificationRepository;
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
         this.emergencyContactRepository = emergencyContactRepository;
@@ -121,16 +109,10 @@ public class UserService {
             familyGroupRepository.delete(ownGroup);
         }
 
-        notificationRepository.deleteAll(notificationRepository.findByUserOrderByCreatedAtDesc(managedUser));
         vaultItemRepository.deleteAll(vaultItemRepository.findByUser(managedUser));
         creditCardRepository.deleteAll(creditCardRepository.findByUser(managedUser));
         documentRepository.deleteAll(documentRepository.findByUser(managedUser));
         secureNoteRepository.deleteAll(secureNoteRepository.findByUserOrderByPinnedDescUpdatedAtDesc(managedUser));
-        paymentRepository.deleteAll(paymentRepository.findByUser(managedUser));
-
-        subscriptionRepository.findByUser(managedUser)
-                .ifPresent(subscriptionRepository::delete);
-
         userRepository.delete(managedUser);
 
         return new DeleteAccountResponse("Your account and vault data have been deleted.");

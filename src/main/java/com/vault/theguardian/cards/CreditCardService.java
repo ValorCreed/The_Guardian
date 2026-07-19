@@ -1,6 +1,6 @@
 package com.vault.theguardian.cards;
 
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.vault.VaultCryptoService;
 import org.springframework.stereotype.Service;
@@ -12,14 +12,14 @@ import java.util.List;
 public class CreditCardService {
 
     private final CreditCardRepository creditCardRepository;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final VaultCryptoService vaultCryptoService;
 
     public CreditCardService(CreditCardRepository creditCardRepository,
-                             NotificationService notificationService,
+                             NotificationClient notificationClient,
                              VaultCryptoService vaultCryptoService) {
         this.creditCardRepository = creditCardRepository;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultCryptoService = vaultCryptoService;
     }
 
@@ -35,7 +35,7 @@ public class CreditCardService {
                 .build();
 
         CreditCardEntity savedCard = creditCardRepository.save(card);
-        notificationService.notifyCardAdded(user, savedCard.getCardName());
+        notificationClient.notifyCardAdded(user, savedCard.getCardName());
         return toResponse(savedCard);
     }
 
@@ -61,7 +61,7 @@ public class CreditCardService {
         card.setEncryptedCardholderName(vaultCryptoService.encryptNullable(request.encryptedCardholderName()));
 
         CreditCardEntity savedCard = creditCardRepository.save(card);
-        notificationService.notifyCardAdded(user, savedCard.getCardName());
+        notificationClient.notifyCardAdded(user, savedCard.getCardName());
         return toResponse(savedCard);
     }
 

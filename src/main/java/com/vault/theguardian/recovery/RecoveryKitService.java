@@ -4,7 +4,7 @@ import com.vault.theguardian.auth.MessageResponse;
 import com.vault.theguardian.cards.CreditCardRepository;
 import com.vault.theguardian.documents.DocumentRepository;
 import com.vault.theguardian.notes.SecureNoteRepository;
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
@@ -26,7 +26,7 @@ public class RecoveryKitService {
     private final RecoveryKitRepository recoveryKitRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
@@ -38,7 +38,7 @@ public class RecoveryKitService {
             RecoveryKitRepository recoveryKitRepository,
             UserRepository userRepository,
             PasswordEncoder passwordEncoder,
-            NotificationService notificationService,
+            NotificationClient notificationClient,
             VaultItemRepository vaultItemRepository,
             CreditCardRepository creditCardRepository,
             DocumentRepository documentRepository,
@@ -48,7 +48,7 @@ public class RecoveryKitService {
         this.recoveryKitRepository = recoveryKitRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
@@ -93,7 +93,7 @@ public class RecoveryKitService {
                 .build();
 
         RecoveryKit saved = recoveryKitRepository.save(kit);
-        notificationService.notifyRecoveryKitCreated(user);
+        notificationClient.notifyRecoveryKitCreated(user);
 
         return new RecoveryKitResponse(
                 saved.getRecoveryId(),
@@ -118,7 +118,7 @@ public class RecoveryKitService {
         }
 
         recoveryKitRepository.saveAll(activeKits);
-        notificationService.notifyRecoveryKitRevoked(user);
+        notificationClient.notifyRecoveryKitRevoked(user);
 
         return new MessageResponse("Recovery kit revoked successfully.");
     }
@@ -155,7 +155,7 @@ public class RecoveryKitService {
         recoveryKitRepository.save(kit);
 
         revokeActiveSessions(user, now);
-        notificationService.notifyRecoveryKitUsed(user);
+        notificationClient.notifyRecoveryKitUsed(user);
 
         return new MessageResponse("Password reset successfully. Sign in and generate a new recovery kit.");
     }
@@ -197,7 +197,7 @@ public class RecoveryKitService {
         user.setTwoFactorCodeExpiresAt(null);
         userRepository.save(user);
 
-        notificationService.notifyAccountResetVaultErased(user);
+        notificationClient.notifyAccountResetVaultErased(user);
 
         return new MessageResponse("Account reset successfully. Your old vault data was permanently erased. Sign in and set up a recovery kit.");
     }

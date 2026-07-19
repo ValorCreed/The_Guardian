@@ -1,6 +1,6 @@
 package com.vault.theguardian.subscription;
 
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
 
@@ -16,12 +16,12 @@ public class SubscriptionService {
     private static final long PREMIUM_EMERGENCY_CONTACT_LIMIT = 3;
     private static final long FAMILY_EMERGENCY_CONTACT_LIMIT = 6;
     private final SubscriptionRepository subscriptionRepository;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
 
     public SubscriptionService(SubscriptionRepository subscriptionRepository,
-                               NotificationService notificationService) {
+                               NotificationClient notificationClient) {
         this.subscriptionRepository = subscriptionRepository;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
     }
 
     public Subscription getMySubscription(User user) {
@@ -54,7 +54,7 @@ public class SubscriptionService {
         subscription.setExpiresAt(now.plusMonths(1));
 
         Subscription saved = subscriptionRepository.save(subscription);
-        notificationService.notifySubscriptionActivated(user, plan, saved.getExpiresAt());
+        notificationClient.notifySubscriptionActivated(user, plan, saved.getExpiresAt());
         return saved;
     }
 
@@ -66,7 +66,7 @@ public class SubscriptionService {
         subscription.setExpiresAt(LocalDateTime.now());
 
         Subscription saved = subscriptionRepository.save(subscription);
-        notificationService.notifySubscriptionCancelled(user);
+        notificationClient.notifySubscriptionCancelled(user);
         return saved;
     }
 

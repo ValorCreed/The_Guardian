@@ -1,6 +1,6 @@
 package com.vault.theguardian.documents;
 
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import org.springframework.beans.factory.annotation.Value;
@@ -38,7 +38,7 @@ public class DocumentService {
 
     private final DocumentRepository documentRepository;
     private final SubscriptionService subscriptionService;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final B2StorageService b2StorageService;
     private final SecureRandom secureRandom = new SecureRandom();
     private final SecretKeySpec documentKeySpec;
@@ -46,13 +46,13 @@ public class DocumentService {
     public DocumentService(
             DocumentRepository documentRepository,
             SubscriptionService subscriptionService,
-            NotificationService notificationService,
+            NotificationClient notificationClient,
             B2StorageService b2StorageService,
             @Value("${vault.document.secret}") String documentSecret
     ) {
         this.documentRepository = documentRepository;
         this.subscriptionService = subscriptionService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.b2StorageService = b2StorageService;
         this.documentKeySpec = buildKey(documentSecret);
     }
@@ -76,7 +76,7 @@ public class DocumentService {
         storeFileBytes(user, document, fileBytes, finalDocumentName, finalDocumentType);
 
         DocumentVault savedDocument = documentRepository.save(document);
-        notificationService.notifyDocumentAdded(user, savedDocument.getDocumentName());
+        notificationClient.notifyDocumentAdded(user, savedDocument.getDocumentName());
         return toMetadataResponse(savedDocument);
     }
 
@@ -130,7 +130,7 @@ public class DocumentService {
         storeFileBytes(user, document, file.getBytes(), finalDocumentName, finalDocumentType);
 
         DocumentVault savedDocument = documentRepository.save(document);
-        notificationService.notifyDocumentAdded(user, savedDocument.getDocumentName());
+        notificationClient.notifyDocumentAdded(user, savedDocument.getDocumentName());
         return toMetadataResponse(savedDocument);
     }
 

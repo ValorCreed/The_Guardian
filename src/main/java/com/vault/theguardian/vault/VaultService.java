@@ -1,8 +1,8 @@
 package com.vault.theguardian.vault;
 
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.subscription.PlanLimitException;
-import com.vault.theguardian.subscription.SubscriptionService;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
 import com.vault.theguardian.user.User;
 import org.springframework.stereotype.Service;
 
@@ -12,17 +12,17 @@ import java.util.List;
 @Service
 public class VaultService {
     private final VaultItemRepository vaultItemRepository;
-    private final SubscriptionService subscriptionService;
-    private final NotificationService notificationService;
+    private final SubscriptionClient subscriptionService;
+    private final NotificationClient notificationClient;
     private final VaultCryptoService vaultCryptoService;
 
     public VaultService(VaultItemRepository vaultItemRepository,
-                        SubscriptionService subscriptionService,
-                        NotificationService notificationService,
+                        SubscriptionClient subscriptionService,
+                        NotificationClient notificationClient,
                         VaultCryptoService vaultCryptoService) {
         this.vaultItemRepository = vaultItemRepository;
         this.subscriptionService = subscriptionService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultCryptoService = vaultCryptoService;
     }
 
@@ -52,7 +52,7 @@ public class VaultService {
                 .build();
 
         VaultItem saved = vaultItemRepository.save(item);
-        notificationService.notifyPasswordAdded(user, saved.getTitle());
+        notificationClient.notifyPasswordAdded(user, saved.getTitle());
         return toResponse(saved);
     }
 

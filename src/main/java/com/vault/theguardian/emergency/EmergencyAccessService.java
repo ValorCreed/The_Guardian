@@ -5,10 +5,9 @@ import com.vault.theguardian.documents.DocumentRepository;
 import com.vault.theguardian.documents.DocumentResponse;
 import com.vault.theguardian.documents.DocumentService;
 import com.vault.theguardian.documents.DocumentVault;
-import com.vault.theguardian.notification.NotificationService;
-import com.vault.theguardian.subscription.Subscription;
-import com.vault.theguardian.subscription.SubscriptionPlan;
-import com.vault.theguardian.subscription.SubscriptionService;
+import com.vault.theguardian.integration.notification.NotificationClient;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
+import com.vault.theguardian.integration.subscription.SubscriptionSnapshot;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import com.vault.theguardian.vault.VaultItem;
@@ -31,8 +30,8 @@ public class EmergencyAccessService {
     private final EmergencyAccessRequestRepository emergencyAccessRequestRepository;
     private final EmergencyAccessAuditLogRepository emergencyAccessAuditLogRepository;
     private final UserRepository userRepository;
-    private final SubscriptionService subscriptionService;
-    private final NotificationService notificationService;
+    private final SubscriptionClient subscriptionService;
+    private final NotificationClient notificationClient;
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
@@ -43,8 +42,8 @@ public class EmergencyAccessService {
                                   EmergencyAccessRequestRepository emergencyAccessRequestRepository,
                                   EmergencyAccessAuditLogRepository emergencyAccessAuditLogRepository,
                                   UserRepository userRepository,
-                                  SubscriptionService subscriptionService,
-                                  NotificationService notificationService,
+                                  SubscriptionClient subscriptionService,
+                                  NotificationClient notificationClient,
                                   VaultItemRepository vaultItemRepository,
                                   CreditCardRepository creditCardRepository,
                                   DocumentRepository documentRepository,
@@ -55,7 +54,7 @@ public class EmergencyAccessService {
         this.emergencyAccessAuditLogRepository = emergencyAccessAuditLogRepository;
         this.userRepository = userRepository;
         this.subscriptionService = subscriptionService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
@@ -67,7 +66,7 @@ public class EmergencyAccessService {
         refreshAvailableRequestsForOwner(user);
         refreshAvailableRequestsForRequester(user);
 
-        Subscription subscription = subscriptionService.getMySubscription(user);
+        SubscriptionSnapshot subscription = subscriptionService.getMySubscription(user);
         boolean premiumOrFamily = isPremiumOrFamily(subscription);
         int contactLimit = getContactLimit(subscription);
 
@@ -97,7 +96,7 @@ public class EmergencyAccessService {
                 .toList();
 
         return new EmergencyOverviewResponse(
-                subscription.getPlan() == null ? "FREE" : subscription.getPlan().name(),
+                subscription.plan() == null ? "FREE" : subscription.plan(),
                 premiumOrFamily,
                 contactLimit,
                 contacts.size(),
@@ -159,7 +158,7 @@ public class EmergencyAccessService {
                 .build();
 
         EmergencyContact saved = emergencyContactRepository.save(contact);
-        notificationService.notifyEmergencyContactAdded(owner, saved.getContactEmail());
+        notificationClient.notifyEmergencyContactAdded(owner, saved.getContactEmail());
         log(owner, owner, EmergencyAuditAction.CONTACT_CREATED, "Emergency contact added", saved.getContactEmail() + " was added as a trusted contact.");
         return toContactResponse(saved);
     }
@@ -188,7 +187,7 @@ public class EmergencyAccessService {
         EmergencyContact contact = getOwnedContact(owner, id);
         String email = contact.getContactEmail();
         emergencyContactRepository.delete(contact);
-        notificationService.notifyEmergencyContactRemoved(owner, email);
+        notificationClient.notifyEmergencyContactRemoved(owner, email);
         log(owner, owner, EmergencyAuditAction.CONTACT_DELETED, "Emergency contact removed", email + " was removed from your emergency contacts.");
     }
 
@@ -223,7 +222,7 @@ public class EmergencyAccessService {
                 .build();
 
         EmergencyAccessRequest saved = emergencyAccessRequestRepository.save(request);
-        notificationService.notifyEmergencyAccessRequested(owner, requester.getEmail());
+        notificationClient.notifyEmergencyAccessRequested(owner, requester.getEmail());
         log(owner, requester, EmergencyAuditAction.ACCESS_REQUESTED, "Emergency access requested", requester.getEmail() + " requested emergency access.");
         return toRequestResponse(saved);
     }
@@ -250,7 +249,7 @@ public class EmergencyAccessService {
         request.setReleasedAt(now);
         EmergencyAccessRequest saved = emergencyAccessRequestRepository.save(request);
 
-        notificationService.notifyEmergencyAccessApproved(request.getRequester(), owner.getEmail());
+        notificationClient.notifyEmergencyAccessApproved(request.getRequester(), owner.getEmail());
         log(owner, owner, EmergencyAuditAction.ACCESS_APPROVED, "Emergency access approved", request.getRequester().getEmail() + " was approved for emergency access.");
         return toRequestResponse(saved);
     }
@@ -267,7 +266,7 @@ public class EmergencyAccessService {
         request.setDeniedAt(LocalDateTime.now());
         EmergencyAccessRequest saved = emergencyAccessRequestRepository.save(request);
 
-        notificationService.notifyEmergencyAccessDenied(request.getRequester(), owner.getEmail());
+        notificationClient.notifyEmergencyAccessDenied(request.getRequester(), owner.getEmail());
         log(owner, owner, EmergencyAuditAction.ACCESS_DENIED, "Emergency access denied", request.getRequester().getEmail() + " was denied emergency access.");
         return toRequestResponse(saved);
     }
@@ -402,12 +401,9 @@ public class EmergencyAccessService {
             request.setStatus(EmergencyAccessStatus.AVAILABLE);
             request.setReleasedAt(now);
             emergencyAccessRequestRepository.save(request);
-            notificationService.createNotification(
+            notificationClient.notifyEmergencyAccessAvailable(
                     request.getRequester(),
-                    com.vault.theguardian.notification.NotificationType.EMERGENCY_ACCESS_AVAILABLE,
-                    "Emergency access available",
-                    "The waiting period for " + request.getOwner().getEmail() + " has ended.",
-                    "/emergencyaccess"
+                    request.getOwner().getEmail()
             );
             log(request.getOwner(), request.getRequester(), EmergencyAuditAction.ACCESS_AVAILABLE, "Emergency access available", "Waiting period ended for " + request.getRequester().getEmail() + ".");
         }
@@ -722,16 +718,16 @@ public class EmergencyAccessService {
         }
     }
 
-    private boolean isPremiumOrFamily(Subscription subscription) {
-        return subscription.isActive()
-                && (subscription.getPlan() == SubscriptionPlan.PREMIUM
-                || subscription.getPlan() == SubscriptionPlan.FAMILY);
+    private boolean isPremiumOrFamily(SubscriptionSnapshot subscription) {
+        if (subscription == null || subscription.plan() == null || !subscription.active()) return false;
+        return "PREMIUM".equalsIgnoreCase(subscription.plan())
+                || "FAMILY".equalsIgnoreCase(subscription.plan());
     }
 
-    private int getContactLimit(Subscription subscription) {
-        if (!subscription.isActive() || subscription.getPlan() == null || subscription.getPlan() == SubscriptionPlan.FREE) return 1;
-        if (subscription.getPlan() == SubscriptionPlan.PREMIUM) return 3;
-        if (subscription.getPlan() == SubscriptionPlan.FAMILY) return 6;
+    private int getContactLimit(SubscriptionSnapshot subscription) {
+        if (subscription == null || subscription.plan() == null || !subscription.active()) return 1;
+        if ("PREMIUM".equalsIgnoreCase(subscription.plan())) return 3;
+        if ("FAMILY".equalsIgnoreCase(subscription.plan())) return 6;
         return 1;
     }
 

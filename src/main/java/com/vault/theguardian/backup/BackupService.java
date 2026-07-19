@@ -10,9 +10,9 @@ import com.vault.theguardian.family.FamilyGroup;
 import com.vault.theguardian.family.FamilyGroupRepository;
 import com.vault.theguardian.family.FamilyMember;
 import com.vault.theguardian.family.FamilyMemberRepository;
-import com.vault.theguardian.notification.NotificationService;
-import com.vault.theguardian.subscription.Subscription;
-import com.vault.theguardian.subscription.SubscriptionService;
+import com.vault.theguardian.integration.notification.NotificationClient;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
+import com.vault.theguardian.integration.subscription.SubscriptionSnapshot;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.vault.VaultItem;
 import com.vault.theguardian.vault.VaultItemRepository;
@@ -38,37 +38,37 @@ import java.util.Map;
 public class BackupService {
     private static final int BACKUP_VERSION = 2;
 
-    private final SubscriptionService subscriptionService;
+    private final SubscriptionClient subscriptionService;
     private final VaultItemRepository vaultItemRepository;
     private final CreditCardRepository creditCardRepository;
     private final DocumentRepository documentRepository;
     private final FamilyGroupRepository familyGroupRepository;
     private final FamilyMemberRepository familyMemberRepository;
     private final ObjectMapper objectMapper;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
 
     @Value("${vault.backup.secret:change-this-backup-secret}")
     private String backupSecret;
 
-    public BackupService(SubscriptionService subscriptionService,
+    public BackupService(SubscriptionClient subscriptionService,
                          VaultItemRepository vaultItemRepository,
                          CreditCardRepository creditCardRepository,
                          DocumentRepository documentRepository,
                          FamilyGroupRepository familyGroupRepository,
                          FamilyMemberRepository familyMemberRepository,
-                         NotificationService notificationService) {
+                         NotificationClient notificationClient) {
         this.subscriptionService = subscriptionService;
         this.vaultItemRepository = vaultItemRepository;
         this.creditCardRepository = creditCardRepository;
         this.documentRepository = documentRepository;
         this.familyGroupRepository = familyGroupRepository;
         this.familyMemberRepository = familyMemberRepository;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.objectMapper = new ObjectMapper().findAndRegisterModules();
     }
 
     public BackupStatusResponse getBackupStatus(User user) {
-        Subscription subscription = subscriptionService.getMySubscription(user);
+        SubscriptionSnapshot subscription = subscriptionService.getMySubscription(user);
         boolean allowed = subscriptionService.canUseBackup(user);
         Counts counts = getCounts(user);
 
@@ -78,9 +78,9 @@ public class BackupService {
 
         return new BackupStatusResponse(
                 allowed,
-                subscription.getPlan().name(),
+                subscription.plan(),
                 message,
-                subscription.getExpiresAt(),
+                subscription.expiresAt(),
                 counts.passwordCount(),
                 counts.cardCount(),
                 counts.documentCount(),
@@ -94,7 +94,7 @@ public class BackupService {
         requireStrongBackupSecret();
 
         try {
-            Subscription subscription = subscriptionService.getMySubscription(user);
+            SubscriptionSnapshot subscription = subscriptionService.getMySubscription(user);
             LocalDateTime now = LocalDateTime.now();
 
             List<VaultItem> passwords = vaultItemRepository.findByUser(user);
@@ -127,7 +127,7 @@ public class BackupService {
             String fileName = "theguardian-backup-" + now.format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")) + ".tgvault";
             int totalItemCount = passwords.size() + cards.size() + documents.size() + familyMembers.size();
 
-            notificationService.notifyBackupCreated(user, totalItemCount);
+            notificationClient.notifyBackupCreated(user, totalItemCount);
 
             return new BackupResponse(
                     fileName,
@@ -188,7 +188,7 @@ public class BackupService {
             int restoredDocuments = restoreDocuments(user, documents);
             int total = restoredPasswords + restoredCards + restoredDocuments;
 
-            notificationService.notifyBackupRestored(user, total, replaceExisting);
+            notificationClient.notifyBackupRestored(user, total, replaceExisting);
 
             String message = replaceExisting
                     ? "Backup restored. Existing passwords, cards, and documents were replaced."
@@ -349,12 +349,12 @@ public class BackupService {
         return owner;
     }
 
-    private Map<String, Object> subscriptionBackup(Subscription subscription) {
+    private Map<String, Object> subscriptionBackup(SubscriptionSnapshot subscription) {
         Map<String, Object> data = new LinkedHashMap<>();
-        data.put("plan", subscription.getPlan().name());
-        data.put("active", subscription.isActive());
-        data.put("startedAt", subscription.getStartedAt() == null ? "" : subscription.getStartedAt().toString());
-        data.put("expiresAt", subscription.getExpiresAt() == null ? "" : subscription.getExpiresAt().toString());
+        data.put("plan", subscription.plan());
+        data.put("active", subscription.active());
+        data.put("startedAt", subscription.startedAt() == null ? "" : subscription.startedAt().toString());
+        data.put("expiresAt", subscription.expiresAt() == null ? "" : subscription.expiresAt().toString());
         return data;
     }
 

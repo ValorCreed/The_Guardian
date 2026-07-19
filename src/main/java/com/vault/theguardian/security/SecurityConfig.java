@@ -55,8 +55,7 @@ public class SecurityConfig {
                                 "/vault/auth/reset-password",
                                 "/vault/auth/verify-2fa",
                                 "/vault/recovery-kit/reset-password",
-                                "/vault/recovery-kit/reset-account",
-                                "/vault/payments/callback"
+                                "/vault/recovery-kit/reset-account"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
@@ -168,8 +167,7 @@ public class SecurityConfig {
                 || path.equals("/vault/auth/reset-password")
                 || path.equals("/vault/auth/verify-2fa")
                 || path.equals("/vault/recovery-kit/reset-password")
-                || path.equals("/vault/recovery-kit/reset-account")
-                || path.equals("/vault/payments/callback");
+                || path.equals("/vault/recovery-kit/reset-account");
     }
 
     private void touchSessionIfNeeded(UserSession session) {

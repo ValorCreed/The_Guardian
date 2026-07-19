@@ -1,7 +1,7 @@
 package com.vault.theguardian.securityhealth;
 
 import com.vault.theguardian.auth.MessageResponse;
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.subscription.SubscriptionService;
 import com.vault.theguardian.user.User;
 import jakarta.validation.Valid;
@@ -14,14 +14,14 @@ import org.springframework.web.server.ResponseStatusException;
 @RequestMapping("/vault/security-alerts")
 @CrossOrigin
 public class SecurityAlertController {
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final SubscriptionService subscriptionService;
 
     public SecurityAlertController(
-            NotificationService notificationService,
+            NotificationClient notificationClient,
             SubscriptionService subscriptionService
     ) {
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.subscriptionService = subscriptionService;
     }
 
@@ -37,7 +37,7 @@ public class SecurityAlertController {
             );
         }
 
-        notificationService.notifySecurityScanAlert(
+        notificationClient.notifySecurityScanAlert(
                 user,
                 request.score(),
                 request.totalIssues(),

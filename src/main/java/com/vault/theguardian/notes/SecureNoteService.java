@@ -1,7 +1,7 @@
 package com.vault.theguardian.notes;
 
-import com.vault.theguardian.notification.NotificationService;
-import com.vault.theguardian.subscription.SubscriptionService;
+import com.vault.theguardian.integration.notification.NotificationClient;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.vault.VaultCryptoService;
 import org.springframework.stereotype.Service;
@@ -12,17 +12,17 @@ import java.util.List;
 @Service
 public class SecureNoteService {
     private final SecureNoteRepository secureNoteRepository;
-    private final SubscriptionService subscriptionService;
-    private final NotificationService notificationService;
+    private final SubscriptionClient subscriptionService;
+    private final NotificationClient notificationClient;
     private final VaultCryptoService vaultCryptoService;
 
     public SecureNoteService(SecureNoteRepository secureNoteRepository,
-                             SubscriptionService subscriptionService,
-                             NotificationService notificationService,
+                             SubscriptionClient subscriptionService,
+                             NotificationClient notificationClient,
                              VaultCryptoService vaultCryptoService) {
         this.secureNoteRepository = secureNoteRepository;
         this.subscriptionService = subscriptionService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.vaultCryptoService = vaultCryptoService;
     }
 
@@ -46,7 +46,7 @@ public class SecureNoteService {
                 .build();
 
         SecureNote saved = secureNoteRepository.save(note);
-        notificationService.notifySecureNoteAdded(user, saved.getTitle());
+        notificationClient.notifySecureNoteAdded(user, saved.getTitle());
         return toResponse(saved);
     }
 
@@ -71,7 +71,7 @@ public class SecureNoteService {
         note.setUpdatedAt(LocalDateTime.now());
 
         SecureNote saved = secureNoteRepository.save(note);
-        notificationService.notifySecureNoteUpdated(user, saved.getTitle());
+        notificationClient.notifySecureNoteUpdated(user, saved.getTitle());
         return toResponse(saved);
     }
 
@@ -79,7 +79,7 @@ public class SecureNoteService {
         SecureNote note = getOwnedNote(user, id);
         String title = note.getTitle();
         secureNoteRepository.delete(note);
-        notificationService.notifySecureNoteDeleted(user, title);
+        notificationClient.notifySecureNoteDeleted(user, title);
     }
 
     private SecureNote getOwnedNote(User user, Long id) {

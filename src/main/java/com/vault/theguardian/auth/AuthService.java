@@ -1,13 +1,13 @@
 package com.vault.theguardian.auth;
 
 import com.vault.theguardian.email.EmailService;
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
+import com.vault.theguardian.integration.subscription.SubscriptionClient;
+import com.vault.theguardian.integration.subscription.SubscriptionEntitlements;
+import com.vault.theguardian.integration.subscription.SubscriptionSnapshot;
 import com.vault.theguardian.security.JwtService;
 import com.vault.theguardian.session.DeviceSessionService;
 import com.vault.theguardian.session.UserSession;
-import com.vault.theguardian.subscription.Subscription;
-import com.vault.theguardian.subscription.SubscriptionPlan;
-import com.vault.theguardian.subscription.SubscriptionRepository;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,29 +23,29 @@ public class AuthService {
     private static final int CODE_MAX = 999999;
 
     private final UserRepository userRepository;
-    private final SubscriptionRepository subscriptionRepository;
+    private final SubscriptionClient subscriptionClient;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
     private final DeviceSessionService deviceSessionService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(
             UserRepository userRepository,
-            SubscriptionRepository subscriptionRepository,
+            SubscriptionClient subscriptionClient,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             EmailService emailService,
-            NotificationService notificationService,
+            NotificationClient notificationClient,
             DeviceSessionService deviceSessionService
     ) {
         this.userRepository = userRepository;
-        this.subscriptionRepository = subscriptionRepository;
+        this.subscriptionClient = subscriptionClient;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.emailService = emailService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
         this.deviceSessionService = deviceSessionService;
     }
 
@@ -75,30 +75,22 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
 
-        Subscription subscription = Subscription.builder()
-                .user(savedUser)
-                .plan(SubscriptionPlan.FREE)
-                .active(true)
-                .startedAt(LocalDateTime.now())
-                .expiresAt(null)
-                .build();
+        SubscriptionSnapshot subscription = subscriptionClient.ensureFreeSubscription(savedUser.getId());
 
-        Subscription savedSubscription = subscriptionRepository.save(subscription);
-
-        notificationService.notifyWelcome(savedUser);
+        notificationClient.notifyWelcome(savedUser);
 
         trySendVerificationEmail(savedUser.getEmail(), verificationCode);
 
         UserSession session = deviceSessionService.createLoginSession(
                 savedUser,
                 httpRequest,
-                hasMultipleDeviceAccess(savedSubscription),
+                false,
                 false
         );
 
         String token = jwtService.generateToken(savedUser.getEmail(), session.getTokenId());
 
-        return toAuthResponse(savedUser, savedSubscription, token, false);
+        return toAuthResponse(savedUser, subscription.plan(), token, false);
     }
 
     public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
@@ -113,10 +105,7 @@ public class AuthService {
             throw new RuntimeException("Invalid email or password");
         }
 
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Subscription not found"));
-
-        subscription = refreshExpiredSubscription(subscription);
+        SubscriptionEntitlements entitlements = subscriptionClient.getEntitlements(user.getId());
 
         if (user.isTwoFactorEnabled()) {
             String code = generateCode();
@@ -128,19 +117,19 @@ public class AuthService {
 
             trySendTwoFactorEmail(user.getEmail(), code);
 
-            return toAuthResponse(user, subscription, null, true);
+            return toAuthResponse(user, entitlements.plan(), null, true);
         }
 
         UserSession session = deviceSessionService.createLoginSession(
                 user,
                 httpRequest,
-                hasMultipleDeviceAccess(subscription),
+                entitlements.multipleDevicesAllowed(),
                 request.shouldForceReplaceDevice()
         );
 
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
 
-        return toAuthResponse(user, subscription, token, false);
+        return toAuthResponse(user, entitlements.plan(), token, false);
     }
 
     public AuthResponse verifyTwoFactor(VerifyTwoFactorRequest request, HttpServletRequest httpRequest) {
@@ -170,21 +159,18 @@ public class AuthService {
 
         userRepository.save(user);
 
-        Subscription subscription = subscriptionRepository.findByUser(user)
-                .orElseThrow(() -> new RuntimeException("Subscription not found"));
-
-        subscription = refreshExpiredSubscription(subscription);
+        SubscriptionEntitlements entitlements = subscriptionClient.getEntitlements(user.getId());
 
         UserSession session = deviceSessionService.createLoginSession(
                 user,
                 httpRequest,
-                hasMultipleDeviceAccess(subscription),
-                false
+                entitlements.multipleDevicesAllowed(),
+                request.shouldForceReplaceDevice()
         );
 
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
 
-        return toAuthResponse(user, subscription, token, false);
+        return toAuthResponse(user, entitlements.plan(), token, false);
     }
 
     public SecuritySettingsResponse getSecuritySettings(User user) {
@@ -300,7 +286,7 @@ public class AuthService {
 
     private AuthResponse toAuthResponse(
             User user,
-            Subscription subscription,
+            String plan,
             String token,
             boolean requiresTwoFactor
     ) {
@@ -309,46 +295,11 @@ public class AuthService {
                 user.getId(),
                 user.getFullName(),
                 user.getEmail(),
-                subscription.getPlan().name(),
+                plan == null || plan.isBlank() ? "FREE" : plan,
                 user.isEmailVerified(),
                 user.isTwoFactorEnabled(),
                 requiresTwoFactor
         );
-    }
-
-    private boolean hasMultipleDeviceAccess(Subscription subscription) {
-        if (subscription == null || subscription.getPlan() == null) {
-            return false;
-        }
-
-        if (!subscription.isActive()) {
-            return false;
-        }
-
-        if (
-                subscription.getExpiresAt() != null &&
-                        subscription.getExpiresAt().isBefore(LocalDateTime.now())
-        ) {
-            return false;
-        }
-
-        return subscription.getPlan() == SubscriptionPlan.PREMIUM
-                || subscription.getPlan() == SubscriptionPlan.FAMILY;
-    }
-
-    private Subscription refreshExpiredSubscription(Subscription subscription) {
-        if (
-                subscription.isActive() &&
-                        subscription.getExpiresAt() != null &&
-                        subscription.getExpiresAt().isBefore(LocalDateTime.now())
-        ) {
-            subscription.setPlan(SubscriptionPlan.FREE);
-            subscription.setActive(false);
-
-            return subscriptionRepository.save(subscription);
-        }
-
-        return subscription;
     }
 
     private String generateCode() {

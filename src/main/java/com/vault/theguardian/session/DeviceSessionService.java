@@ -1,6 +1,6 @@
 package com.vault.theguardian.session;
 
-import com.vault.theguardian.notification.NotificationService;
+import com.vault.theguardian.integration.notification.NotificationClient;
 import com.vault.theguardian.security.JwtService;
 import com.vault.theguardian.user.User;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,16 +32,16 @@ public class DeviceSessionService {
 
     private final UserSessionRepository userSessionRepository;
     private final JwtService jwtService;
-    private final NotificationService notificationService;
+    private final NotificationClient notificationClient;
 
     public DeviceSessionService(
             UserSessionRepository userSessionRepository,
             JwtService jwtService,
-            NotificationService notificationService
+            NotificationClient notificationClient
     ) {
         this.userSessionRepository = userSessionRepository;
         this.jwtService = jwtService;
-        this.notificationService = notificationService;
+        this.notificationClient = notificationClient;
     }
 
     /*
@@ -150,7 +150,7 @@ public class DeviceSessionService {
 
         UserSession saved = userSessionRepository.save(session);
 
-        notificationService.notifyNewDeviceLogin(user, deviceName, ipAddress);
+        notificationClient.notifyNewDeviceLogin(user, deviceName, ipAddress);
 
         return saved;
     }
@@ -247,7 +247,7 @@ public class DeviceSessionService {
         session.setActive(false);
         session.setRevokedAt(LocalDateTime.now());
         userSessionRepository.saveAndFlush(session);
-        notificationService.notifySessionRevoked(user, session.getDeviceName());
+        notificationClient.notifySessionRevoked(user, session.getDeviceName());
     }
 
     @Transactional
