@@ -1,0 +1,36 @@
+### Maven ###
+target/
+.mvn/timing.properties
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### VS Code ###
+.vscode/
+
+### Eclipse / STS ###
+.apt_generated/
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache/
+
+### Java ###
+*.class
+hs_err_pid*
+replay_pid*
+
+### Environment and secrets ###
+.env
+.env.*
+!.env.example
+
+### Logs and OS files ###
+*.log
+.DS_Store
+Thumbs.db

@@ -1,0 +1,62 @@
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: auth-service
+              uri: "${AUTH_SERVICE_URL:http://localhost:8081}"
+              predicates:
+                - Path=/vault/auth/**,/vault/sessions/**
+
+            - id: notification-service
+              uri: "${NOTIFICATION_SERVICE_URL:http://localhost:8082}"
+              predicates:
+                - Path=/vault/notifications,/vault/notifications/**
+
+            - id: subscription-service
+              uri: "${SUBSCRIPTION_SERVICE_URL:http://localhost:8083}"
+              predicates:
+                - Path=/vault/api/subscriptions,/vault/api/subscriptions/**,/vault/payments,/vault/payments/**
+
+            - id: vault-service
+              uri: "${VAULT_SERVICE_URL:http://localhost:8084}"
+              predicates:
+                - Path=/api/vault,/api/vault/**,/vault/cards,/vault/cards/**,/vault/documents,/vault/documents/**,/vault/notes,/vault/notes/**
+
+            - id: access-sharing-service
+              uri: "${ACCESS_SHARING_SERVICE_URL:http://localhost:8085}"
+              predicates:
+                - Path=/vault/family,/vault/family/**,/vault/emergency,/vault/emergency/**
+
+            - id: backup-recovery-service
+              uri: "${BACKUP_RECOVERY_SERVICE_URL:http://localhost:8086}"
+              predicates:
+                - Path=/vault/backup,/vault/backup/**,/vault/recovery-kit,/vault/recovery-kit/**
+
+            - id: user-account-service
+              uri: "${USER_ACCOUNT_SERVICE_URL:http://localhost:8087}"
+              predicates:
+                - Path=/vault/users,/vault/users/**
+
+            - id: security-health-service
+              uri: "${SECURITY_HEALTH_SERVICE_URL:http://localhost:8088}"
+              predicates:
+                - Path=/vault/security-alerts,/vault/security-alerts/**
+
+            - id: support-service
+              uri: "${SUPPORT_SERVICE_URL:http://localhost:8090}"
+              predicates:
+                - Path=/vault/support,/vault/support/**
+
+            - id: legacy-theguardian-backend
+              uri: "${LEGACY_BACKEND_URL:http://localhost:8089}"
+              predicates:
+                - Path=/vault/**,/api/vault/**
+
+server:
+  address: 0.0.0.0
+  port: ${PORT:8080}

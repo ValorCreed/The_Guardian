@@ -1,0 +1,31 @@
+### IntelliJ IDEA ###
+.idea/
+*.iml
+
+### VS Code ###
+.vscode/
+
+### Maven ###
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+### Logs ###
+*.log
+
+### OS ###
+.DS_Store
+Thumbs.db
+
+### Environment ###
+.env
+.env.*
+!.env.example
+
+### Spring Boot ###
+spring.log
+
+### Java ###
+*.class
+
+### Generated ###
+dependency-reduced-pom.xml

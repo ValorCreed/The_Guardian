@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+MAVEN_VERSION=3.9.9
+MAVEN_USER_HOME=${MAVEN_USER_HOME:-"${HOME}/.m2"}
+INSTALL_DIR="${MAVEN_USER_HOME}/wrapper/dists/apache-maven-${MAVEN_VERSION}"
+MAVEN_CMD="${INSTALL_DIR}/apache-maven-${MAVEN_VERSION}/bin/mvn"
+ARCHIVE="${INSTALL_DIR}/apache-maven-${MAVEN_VERSION}-bin.zip"
+DIST_URL="https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/${MAVEN_VERSION}/apache-maven-${MAVEN_VERSION}-bin.zip"
+
+if [ ! -x "$MAVEN_CMD" ]; then
+  mkdir -p "$INSTALL_DIR"
+  if [ ! -f "$ARCHIVE" ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fL "$DIST_URL" -o "$ARCHIVE"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -O "$ARCHIVE" "$DIST_URL"
+    else
+      echo "Maven Wrapper requires curl or wget to download Maven." >&2
+      exit 1
+    fi
+  fi
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "$ARCHIVE" -d "$INSTALL_DIR"
+  else
+    echo "Maven Wrapper requires unzip to extract Maven." >&2
+    exit 1
+  fi
+fi
+
+exec "$MAVEN_CMD" -f "$BASE_DIR/pom.xml" "$@"
