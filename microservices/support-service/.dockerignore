@@ -1,8 +1,12 @@
 target/
 .git/
+.github/
 .idea/
 .vscode/
-.env
+*.iml
 *.log
+.env
+.env.*
+!.env.example
 README.md
 HELP.md

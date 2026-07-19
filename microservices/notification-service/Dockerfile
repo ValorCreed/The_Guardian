@@ -20,10 +20,10 @@ RUN apk add --no-cache curl \
 WORKDIR /app
 COPY --from=build --chown=guardian:guardian /workspace/app.jar /app/app.jar
 
-ENV PORT=8087
+ENV PORT=8082
 ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:InitialRAMPercentage=20.0 -XX:+UseSerialGC -Djava.security.egd=file:/dev/./urandom"
 
-EXPOSE 8087
+EXPOSE 8082
 USER guardian
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=5 \
