@@ -52,11 +52,6 @@ spring:
               predicates:
                 - Path=/vault/support,/vault/support/**
 
-            - id: legacy-theguardian-backend
-              uri: "${LEGACY_BACKEND_URL:http://localhost:8089}"
-              predicates:
-                - Path=/vault/**,/api/vault/**
-
 server:
   address: 0.0.0.0
   port: ${PORT:8080}
