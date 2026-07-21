@@ -1,11 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -13,34 +12,160 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import { CreditCard, FileText, KeyRound, Mail, NotebookText, UserPlus } from 'lucide-react-native';
+import {
+  Check,
+  CreditCard,
+  FileText,
+  KeyRound,
+  Mail,
+  NotebookText,
+  UserPlus,
+} from 'lucide-react-native';
 
-import { api } from '../services/api';
+import {
+  api,
+  CreditCardResponse,
+  SecureNoteResponse,
+  VaultItem,
+} from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
-import { hapticToggleOn, hapticToggleOff, hapticWarning, hapticSuccess } from '../utils/haptics';
+import {
+  hapticToggleOn,
+  hapticToggleOff,
+  hapticWarning,
+  hapticSuccess,
+} from '../utils/haptics';
+
+type DocumentOption = {
+  id: number;
+  documentName?: string;
+  documentType?: string;
+};
+
+type SelectableItem = {
+  id: number;
+  title: string;
+  subtitle: string;
+};
+
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+  return parts.length > 1 ? String(parts.pop() || '').toLowerCase() : '';
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+  if (mime.includes('wordprocessingml') || mime === 'application/msword' || ['doc', 'docx'].includes(extension)) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+  if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || ['xls', 'xlsx'].includes(extension)) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+  if (mime.includes('presentationml') || mime === 'application/vnd.ms-powerpoint' || ['ppt', 'pptx'].includes(extension)) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+  return extension ? extension.toUpperCase() : 'Document';
+};
+
+const toggleSelection = (
+  current: number[],
+  itemId: number,
+  onChange: (next: number[]) => void
+) => {
+  const selected = current.includes(itemId);
+  if (selected) {
+    hapticToggleOff();
+    onChange(current.filter((id) => id !== itemId));
+  } else {
+    hapticToggleOn();
+    onChange([...current, itemId]);
+  }
+};
 
 export default function NewMemberScreen() {
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [email, setEmail] = useState('');
-  const [sharePasswords, setSharePasswords] = useState(true);
-  const [shareCards, setShareCards] = useState(false);
-  const [shareDocuments, setShareDocuments] = useState(false);
-  const [shareNotes, setShareNotes] = useState(false);
+  const [passwords, setPasswords] = useState<VaultItem[]>([]);
+  const [cards, setCards] = useState<CreditCardResponse[]>([]);
+  const [documents, setDocuments] = useState<DocumentOption[]>([]);
+  const [notes, setNotes] = useState<SecureNoteResponse[]>([]);
+
+  const [selectedPasswordIds, setSelectedPasswordIds] = useState<number[]>([]);
+  const [selectedCardIds, setSelectedCardIds] = useState<number[]>([]);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<number[]>([]);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<number[]>([]);
+
+  const [itemsLoading, setItemsLoading] = useState(true);
+  const [itemsNotice, setItemsNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const submittingRef = useRef(false);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadShareableItems = async () => {
+      setItemsLoading(true);
+      const results = await Promise.allSettled([
+        api.getVaultItems(),
+        api.getCards(),
+        api.getDocuments(),
+        api.getSecureNotes(),
+      ]);
+
+      if (!active) return;
+
+      const [passwordResult, cardResult, documentResult, noteResult] = results;
+
+      setPasswords(passwordResult.status === 'fulfilled' ? passwordResult.value || [] : []);
+      setCards(cardResult.status === 'fulfilled' ? cardResult.value || [] : []);
+      setDocuments(documentResult.status === 'fulfilled' ? documentResult.value || [] : []);
+      setNotes(noteResult.status === 'fulfilled' ? noteResult.value || [] : []);
+
+      const failedCount = results.filter((result) => result.status === 'rejected').length;
+      setItemsNotice(
+        failedCount > 0
+          ? 'Some vault categories could not be loaded. Refresh this screen before sharing an item from those categories.'
+          : ''
+      );
+      setItemsLoading(false);
+    };
+
+    loadShareableItems();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedCount = useMemo(
+    () =>
+      selectedPasswordIds.length +
+      selectedCardIds.length +
+      selectedDocumentIds.length +
+      selectedNoteIds.length,
+    [selectedPasswordIds, selectedCardIds, selectedDocumentIds, selectedNoteIds]
+  );
+
   const ensureFamilyPlanBeforeSubmit = async () => {
     const subscription = await api.getSubscriptionFresh?.();
-
     const plan = String(subscription?.plan || '').toUpperCase();
     const active = subscription?.active !== false;
 
     if (plan !== 'FAMILY' || !active) {
       Alert.alert(
         'Family plan required',
-        'This account is not currently recognized as a Family plan account by the server. Refresh your subscription, sign in again, or confirm the subscription is active.'
+        'This account is not currently recognized as an active Family plan account.'
       );
       return false;
     }
@@ -59,9 +184,12 @@ export default function NewMemberScreen() {
       return;
     }
 
-    if (!sharePasswords && !shareCards && !shareDocuments && !shareNotes) {
+    if (selectedCount === 0) {
       hapticWarning();
-      Alert.alert('Choose what to share', 'Select at least one vault type: passwords, cards, documents, or secure notes.');
+      Alert.alert(
+        'Choose specific items',
+        'Select at least one password, card, document, or secure note to share.'
+      );
       return;
     }
 
@@ -69,16 +197,8 @@ export default function NewMemberScreen() {
       submittingRef.current = true;
       setLoading(true);
 
-      const familyAllowed = await ensureFamilyPlanBeforeSubmit();
-      if (!familyAllowed) {
-        return;
-      }
+      if (!(await ensureFamilyPlanBeforeSubmit())) return;
 
-      /*
-       * Check the target account before creating the family member.
-       * This prevents the confusing case where a non-existing email reaches
-       * the create endpoint and gets displayed as a Family-plan error.
-       */
       try {
         await api.lookupFamilyMemberAccount(cleanEmail);
       } catch (lookupError: any) {
@@ -89,17 +209,14 @@ export default function NewMemberScreen() {
           hapticWarning();
           Alert.alert(
             'Account not found',
-            'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.'
+            'That email is not registered on The Guardian. Ask the person to create an account first.'
           );
           return;
         }
 
         if (lookupStatus === 403 || lookupCode === 'FAMILY_PLAN_REQUIRED') {
           hapticWarning();
-          Alert.alert(
-            'Family plan required',
-            'Only Family plan users can add members. Refresh your subscription, sign in again, or confirm that this account is active on the Family plan.'
-          );
+          Alert.alert('Family plan required', 'Only active Family plan users can add members.');
           return;
         }
 
@@ -107,40 +224,63 @@ export default function NewMemberScreen() {
       }
 
       await api.addFamilyMember(cleanEmail, {
-        sharePasswords,
-        shareCards,
-        shareDocuments,
-        shareNotes,
+        sharePasswords: selectedPasswordIds.length > 0,
+        shareCards: selectedCardIds.length > 0,
+        shareDocuments: selectedDocumentIds.length > 0,
+        shareNotes: selectedNoteIds.length > 0,
+        passwordItemIds: selectedPasswordIds,
+        cardItemIds: selectedCardIds,
+        documentItemIds: selectedDocumentIds,
+        noteItemIds: selectedNoteIds,
       });
       api.clearCache();
 
       hapticSuccess();
-      Alert.alert('Member added', 'This user can now access the vault types you selected.', [
-        { text: 'OK', onPress: () => router.replace('/family') },
-      ]);
+      Alert.alert(
+        'Member added',
+        `${selectedCount} selected vault item${selectedCount === 1 ? '' : 's'} can now be viewed by this member.`,
+        [{ text: 'OK', onPress: () => router.replace('/family') }]
+      );
     } catch (error: any) {
       const status = error?.status;
       const message =
         status === 404
-          ? 'That email is not registered on The Guardian. Ask the person to create an account first, then add them again.'
+          ? 'That email is not registered on The Guardian.'
           : status === 403
-            ? 'Only Family plan users can add members. Refresh your subscription, sign in again, or confirm that this account is active on the Family plan.'
+            ? 'Only active Family plan users can add members.'
             : error?.message || 'Please try again.';
 
-      const title =
-        status === 404
-          ? 'Account not found'
-          : status === 403
-            ? 'Family plan required'
-            : 'Could not add member';
-
       hapticWarning();
-      Alert.alert(title, message);
+      Alert.alert(status === 404 ? 'Account not found' : 'Could not add member', message);
     } finally {
       submittingRef.current = false;
       setLoading(false);
     }
   };
+
+  const passwordOptions: SelectableItem[] = passwords.map((item) => ({
+    id: Number(item.id),
+    title: item.title || 'Untitled password',
+    subtitle: item.usernameValue || item.website || 'Saved login',
+  }));
+
+  const cardOptions: SelectableItem[] = cards.map((item) => ({
+    id: Number(item.id),
+    title: item.cardName || 'Saved card',
+    subtitle: 'Payment card',
+  }));
+
+  const documentOptions: SelectableItem[] = documents.map((item) => ({
+    id: Number(item.id),
+    title: item.documentName || 'Untitled document',
+    subtitle: getFriendlyDocumentType(item.documentType, item.documentName),
+  }));
+
+  const noteOptions: SelectableItem[] = notes.map((item) => ({
+    id: Number(item.id),
+    title: item.title || 'Untitled note',
+    subtitle: item.category || 'Secure note',
+  }));
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -157,7 +297,7 @@ export default function NewMemberScreen() {
 
         <Text style={styles.title}>Add family member</Text>
         <Text style={styles.subtitle}>
-          Enter the email address of someone who already has a Guardian account, then choose what they can view.
+          Enter a Guardian account email, then choose the exact vault items this person can view.
         </Text>
 
         <Text style={styles.label}>Member email</Text>
@@ -177,110 +317,152 @@ export default function NewMemberScreen() {
           />
         </View>
 
-        <Text style={styles.sectionLabel}>WHAT SHOULD THIS MEMBER ACCESS?</Text>
-
-        <View style={styles.permissionsCard}>
-          <PermissionRow
-            icon={<KeyRound size={20} color={C.primary} />}
-            title="Passwords"
-            subtitle="Share saved login credentials"
-            value={sharePasswords}
-            onChange={setSharePasswords}
-            C={C}
-            styles={styles}
-            divider
-          />
-
-          <PermissionRow
-            icon={<CreditCard size={20} color={C.primary} />}
-            title="Cards"
-            subtitle="Share saved credit/debit cards"
-            value={shareCards}
-            onChange={setShareCards}
-            C={C}
-            styles={styles}
-            divider
-          />
-
-          <PermissionRow
-            icon={<FileText size={20} color={C.primary} />}
-            title="Documents"
-            subtitle="Share uploaded encrypted documents"
-            value={shareDocuments}
-            onChange={setShareDocuments}
-            C={C}
-            styles={styles}
-            divider
-          />
-
-          <PermissionRow
-            icon={<NotebookText size={20} color={C.primary} />}
-            title="Secure notes"
-            subtitle="Share encrypted notes, recovery codes, and private text"
-            value={shareNotes}
-            onChange={setShareNotes}
-            C={C}
-            styles={styles}
-          />
+        <View style={styles.selectionHeader}>
+          <Text style={styles.sectionLabel}>SELECT SPECIFIC VAULT ITEMS</Text>
+          <View style={styles.selectionCount}>
+            <Text style={styles.selectionCountText}>{selectedCount} selected</Text>
+          </View>
         </View>
 
+        {!!itemsNotice && <Text style={styles.notice}>{itemsNotice}</Text>}
+
+        {itemsLoading ? (
+          <View style={styles.loadingCard}>
+            <ActivityIndicator color={C.primary} />
+            <Text style={styles.loadingText}>Loading your vault items…</Text>
+          </View>
+        ) : (
+          <>
+            <ItemSection
+              icon={<KeyRound size={20} color={C.primary} />}
+              title="Passwords"
+              items={passwordOptions}
+              selectedIds={selectedPasswordIds}
+              setSelectedIds={setSelectedPasswordIds}
+              emptyText="No saved passwords"
+              C={C}
+              styles={styles}
+            />
+            <ItemSection
+              icon={<CreditCard size={20} color={C.primary} />}
+              title="Cards"
+              items={cardOptions}
+              selectedIds={selectedCardIds}
+              setSelectedIds={setSelectedCardIds}
+              emptyText="No saved cards"
+              C={C}
+              styles={styles}
+            />
+            <ItemSection
+              icon={<FileText size={20} color={C.primary} />}
+              title="Documents"
+              items={documentOptions}
+              selectedIds={selectedDocumentIds}
+              setSelectedIds={setSelectedDocumentIds}
+              emptyText="No saved documents"
+              C={C}
+              styles={styles}
+            />
+            <ItemSection
+              icon={<NotebookText size={20} color={C.primary} />}
+              title="Secure notes"
+              items={noteOptions}
+              selectedIds={selectedNoteIds}
+              setSelectedIds={setSelectedNoteIds}
+              emptyText="No saved secure notes"
+              C={C}
+              styles={styles}
+            />
+          </>
+        )}
+
         <TouchableOpacity
-          style={[styles.button, loading && styles.disabledButton]}
+          style={[styles.button, (loading || itemsLoading) && styles.disabledButton]}
           onPress={handleAddMember}
-          disabled={loading}
+          disabled={loading || itemsLoading}
           activeOpacity={0.75}
         >
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Add member</Text>}
         </TouchableOpacity>
 
         <Text style={styles.note}>
-          Only Family plan users can add members. Members can only view the vault types you select; they cannot edit or delete your items.
+          The member receives read-only access only to the items checked above. Unselected items remain private.
         </Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function PermissionRow({
+function ItemSection({
   icon,
   title,
-  subtitle,
-  value,
-  onChange,
+  items,
+  selectedIds,
+  setSelectedIds,
+  emptyText,
   C,
   styles,
-  divider,
 }: {
   icon: React.ReactNode;
   title: string;
-  subtitle: string;
-  value: boolean;
-  onChange: (value: boolean) => void;
+  items: SelectableItem[];
+  selectedIds: number[];
+  setSelectedIds: (ids: number[]) => void;
+  emptyText: string;
   C: any;
   styles: any;
-  divider?: boolean;
 }) {
+  const allSelected = items.length > 0 && selectedIds.length === items.length;
+
   return (
-    <View style={[styles.permissionRow, divider && styles.permissionDivider]}>
-      <View style={styles.permissionIcon}>{icon}</View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.permissionTitle}>{title}</Text>
-        <Text style={styles.permissionSub}>{subtitle}</Text>
+    <View style={styles.itemsCard}>
+      <View style={styles.itemsHeader}>
+        <View style={styles.permissionIcon}>{icon}</View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.permissionTitle}>{title}</Text>
+          <Text style={styles.permissionSub}>{selectedIds.length}/{items.length} selected</Text>
+        </View>
+        {items.length > 0 && (
+          <TouchableOpacity
+            style={styles.selectAllButton}
+            onPress={() => {
+              if (allSelected) {
+                hapticToggleOff();
+                setSelectedIds([]);
+              } else {
+                hapticToggleOn();
+                setSelectedIds(items.map((item) => item.id));
+              }
+            }}
+          >
+            <Text style={styles.selectAllText}>{allSelected ? 'Clear' : 'Select all'}</Text>
+          </TouchableOpacity>
+        )}
       </View>
-      <Switch
-        value={value}
-        onValueChange={(nextValue) => {
-          if (nextValue) {
-            hapticToggleOn();
-          } else {
-            hapticToggleOff();
-          }
-          onChange(nextValue);
-        }}
-        trackColor={{ false: C.border, true: C.primary }}
-        thumbColor="#fff"
-        ios_backgroundColor={C.border}
-      />
+
+      {items.length === 0 ? (
+        <Text style={styles.emptyText}>{emptyText}</Text>
+      ) : (
+        items.map((item, index) => {
+          const selected = selectedIds.includes(item.id);
+          return (
+            <TouchableOpacity
+              key={`${title}-${item.id}`}
+              style={[styles.itemRow, index !== items.length - 1 && styles.itemDivider]}
+              activeOpacity={0.75}
+              onPress={() => toggleSelection(selectedIds, item.id, setSelectedIds)}
+            >
+              <View style={[styles.checkbox, selected && styles.checkboxSelected]}>
+                {selected && <Check size={15} color="#fff" strokeWidth={3} />}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
+                <Text style={styles.itemSubtitle} numberOfLines={1}>{item.subtitle}</Text>
+              </View>
+            </TouchableOpacity>
+          );
+        })
+      )}
     </View>
   );
 }
@@ -289,8 +471,6 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
     scrollContent: { paddingHorizontal: 20, paddingTop: 100, paddingBottom: 150 },
-    backButton: { marginTop: 6, marginBottom: 30 },
-    backText: { color: C.text, fontSize: 18, fontWeight: '600' },
     iconBox: {
       width: 86,
       height: 86,
@@ -311,52 +491,49 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 16,
       borderWidth: 1,
       borderColor: C.border,
-      marginBottom: 22,
+      marginBottom: 24,
     },
-    input: { flex: 1, color: C.text, fontSize: 16, paddingVertical: 16, paddingLeft: 10 },
-    sectionLabel: {
-      fontSize: 12,
-      fontWeight: '800',
-      color: C.textSecondary,
-      letterSpacing: 0.5,
-      marginLeft: 4,
-      marginBottom: 8,
+    input: { flex: 1, color: C.text, fontSize: 16, paddingVertical: 16, marginLeft: 10 },
+    selectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    sectionLabel: { flex: 1, color: C.textSecondary, fontSize: 12, fontWeight: '900', letterSpacing: 0.7 },
+    selectionCount: { backgroundColor: C.actionCard, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 999 },
+    selectionCountText: { color: C.primary, fontSize: 11, fontWeight: '900' },
+    notice: { color: C.warning, fontSize: 12, lineHeight: 18, marginBottom: 12, fontWeight: '700' },
+    loadingCard: {
+      backgroundColor: C.backgroundElement,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: 22,
+      padding: 22,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 18,
     },
-    permissionsCard: {
+    loadingText: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
+    itemsCard: {
       backgroundColor: C.backgroundElement,
       borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
-      marginBottom: 18,
+      marginBottom: 14,
     },
-    permissionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 14,
-    },
-    permissionDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
-    permissionIcon: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: C.backgroundSelected,
-      marginRight: 12,
-    },
-    permissionTitle: { color: C.text, fontSize: 15, fontWeight: '800' },
-    permissionSub: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
-    button: {
-      backgroundColor: C.primary,
-      borderRadius: 22,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingVertical: 17,
-      marginTop: 4,
-    },
-    disabledButton: { opacity: 0.7 },
-    buttonText: { color: '#fff', fontWeight: '800', fontSize: 16 },
-    note: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 18, textAlign: 'center' },
+    itemsHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15, backgroundColor: C.actionCard },
+    permissionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.backgroundElement, alignItems: 'center', justifyContent: 'center' },
+    permissionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
+    permissionSub: { color: C.textSecondary, fontSize: 11, marginTop: 3, fontWeight: '700' },
+    selectAllButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: C.backgroundElement },
+    selectAllText: { color: C.primary, fontSize: 11, fontWeight: '900' },
+    itemRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 13 },
+    itemDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
+    checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+    checkboxSelected: { backgroundColor: C.primary, borderColor: C.primary },
+    itemTitle: { color: C.text, fontSize: 14, fontWeight: '800' },
+    itemSubtitle: { color: C.textSecondary, fontSize: 11, marginTop: 3 },
+    emptyText: { color: C.textSecondary, fontSize: 12, padding: 16, textAlign: 'center' },
+    button: { backgroundColor: C.primary, borderRadius: 999, paddingVertical: 17, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+    disabledButton: { opacity: 0.55 },
+    buttonText: { color: '#fff', fontSize: 16, fontWeight: '900' },
+    note: { color: C.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 16 },
   });

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
-  Image,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -30,11 +30,6 @@ type CardPayload = {
   bankName: string;
 };
 
-type DocumentPayload = {
-  fileName: string;
-  mimeType: string;
-  base64Content: string;
-};
 
 const defaultCard: CardPayload = {
   cardholderName: '',
@@ -49,6 +44,35 @@ const formatSize = (size?: number | null) => {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+};
+
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+  return parts.length > 1 ? String(parts.pop() || '').toLowerCase() : '';
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+  if (mime.includes('wordprocessingml') || mime === 'application/msword' || ['doc', 'docx'].includes(extension)) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+  if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || ['xls', 'xlsx'].includes(extension)) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+  if (mime.includes('presentationml') || mime === 'application/vnd.ms-powerpoint' || ['ppt', 'pptx'].includes(extension)) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+  return extension ? extension.toUpperCase() : 'Document';
 };
 
 const decryptStoredText = (value?: string | null) => {
@@ -85,6 +109,7 @@ export default function EmergencyVaultDetailsScreen() {
   const [item, setItem] = useState<EmergencyVaultItemResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [showSecret, setShowSecret] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   const loadItem = useCallback(async () => {
     if (!requestId || !itemId || !itemType) return;
@@ -122,65 +147,63 @@ export default function EmergencyVaultDetailsScreen() {
     };
   }, [item]);
 
-  const getBase64Document = () => {
-    const value = item?.encryptedFileUrl || item?.encryptedData || '';
-    if (!value) return '';
-
-    const maybeJson = decryptJson<DocumentPayload | null>(value, null);
-    if (maybeJson?.base64Content) return maybeJson.base64Content;
-    return value;
-  };
-
   const downloadDocument = async () => {
-    if (!item) return;
+    if (!item || downloading || !requestId || !itemId) return;
 
     try {
-      const base64Content = getBase64Document();
-      if (!base64Content) {
-        Alert.alert('Download failed', 'Document data is missing.');
-        return;
-      }
-
-      const safeName = (item.fileName || item.documentName || item.title || 'emergency_document').replace(/[^a-zA-Z0-9._-]/g, '_');
+      setDownloading(true);
+      const safeName = (
+        item.fileName || item.documentName || item.title || 'emergency_document'
+      ).replace(/[^a-zA-Z0-9._-]/g, '_');
       const mimeType = item.mimeType || item.documentType || 'application/octet-stream';
+
+      const downloaded = await api.downloadEmergencyDocumentToCache(
+        requestId,
+        itemId,
+        safeName,
+        mimeType
+      );
 
       const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
 
       if (permissions.granted) {
+        const base64Content = await FileSystem.readAsStringAsync(downloaded.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
         const uri = await FileSystem.StorageAccessFramework.createFileAsync(
           permissions.directoryUri,
-          safeName,
-          mimeType
+          downloaded.fileName || safeName,
+          downloaded.mimeType || mimeType
         );
-
         await FileSystem.writeAsStringAsync(uri, base64Content, {
           encoding: FileSystem.EncodingType.Base64,
         });
-
         Alert.alert('Downloaded', 'The document was saved successfully.');
         return;
       }
 
-      const fallbackUri = `${FileSystem.cacheDirectory}${safeName}`;
-      await FileSystem.writeAsStringAsync(fallbackUri, base64Content, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fallbackUri, { mimeType, dialogTitle: safeName });
+        await Sharing.shareAsync(downloaded.uri, {
+          mimeType: downloaded.mimeType || mimeType,
+          dialogTitle: downloaded.fileName || safeName,
+        });
       } else {
-        Alert.alert('Saved temporarily', fallbackUri);
+        Alert.alert('Saved temporarily', downloaded.uri);
       }
     } catch (error: any) {
       Alert.alert('Download failed', error.message || 'Could not download document.');
+    } finally {
+      setDownloading(false);
     }
   };
 
   const title = item?.title || item?.documentName || item?.fileName || 'Emergency item';
-  const password = item?.encryptedPassword ? decryptPassword(item.encryptedPassword) : '';
-  const noteContent = item?.encryptedContent ? decryptPassword(item.encryptedContent) : '';
-  const documentBase64 = item?.itemType === 'DOCUMENT' ? getBase64Document() : '';
-  const isImage = String(item?.mimeType || item?.documentType || '').startsWith('image/');
+  const password = decryptStoredText(item?.encryptedPassword);
+  const noteContent = decryptStoredText(item?.encryptedContent);
+  const documentName = item?.fileName || item?.documentName || item?.title || 'Document';
+  const rawDocumentType = item?.mimeType || item?.documentType || '';
+  const friendlyDocumentType = getFriendlyDocumentType(rawDocumentType, documentName);
+  const isImageDocument = item?.itemType === 'DOCUMENT' && String(rawDocumentType).startsWith('image/');
 
   if (loading) {
     return (
@@ -242,7 +265,7 @@ export default function EmergencyVaultDetailsScreen() {
               secretToggle={() => setShowSecret((current) => !current)}
               showSecret={showSecret}
             />
-            {!!item.notes && <InfoRow label="Notes" value={item.notes} onCopy={() => copyValue('Notes', item.notes || '')} styles={styles} C={C} last />}
+            {!!item.notes && <InfoRow label="Notes" value={decryptStoredText(item.notes)} onCopy={() => copyValue('Notes', decryptStoredText(item.notes))} styles={styles} C={C} last />}
           </View>
         )}
 
@@ -258,19 +281,32 @@ export default function EmergencyVaultDetailsScreen() {
 
         {item.itemType === 'DOCUMENT' && (
           <View style={styles.card}>
-            {isImage && documentBase64 ? (
-              <Image source={{ uri: `data:${item.mimeType || item.documentType || 'image/png'};base64,${documentBase64}` }} style={styles.imagePreview} resizeMode="contain" />
-            ) : null}
-            <InfoRow label="File name" value={item.fileName || item.documentName || title} onCopy={() => copyValue('File name', item.fileName || item.documentName || title)} styles={styles} C={C} />
-            <InfoRow label="Type" value={item.mimeType || item.documentType || 'Unknown'} onCopy={() => copyValue('File type', item.mimeType || item.documentType || '')} styles={styles} C={C} />
+            {isImageDocument && (
+              <View style={styles.documentPreviewPlaceholder}>
+                <Ionicons name="image-outline" size={24} color={C.primary} />
+                <Text style={styles.documentPreviewTitle}>Encrypted image document</Text>
+                <Text style={styles.documentPreviewText}>Use Download document to decrypt and open this image securely.</Text>
+              </View>
+            )}
+            <InfoRow label="File name" value={documentName} onCopy={() => copyValue('File name', documentName)} styles={styles} C={C} />
+            <InfoRow label="Type" value={friendlyDocumentType} onCopy={() => copyValue('File type', friendlyDocumentType)} styles={styles} C={C} />
             <InfoRow label="Size" value={formatSize(item.sizeBytes)} onCopy={() => copyValue('Size', formatSize(item.sizeBytes))} styles={styles} C={C} last />
           </View>
         )}
 
         {item.itemType === 'DOCUMENT' && (
-          <TouchableOpacity style={styles.mainButton} activeOpacity={0.85} onPress={downloadDocument}>
-            <Ionicons name="download-outline" size={18} color="#fff" />
-            <Text style={styles.mainButtonText}>Download document</Text>
+          <TouchableOpacity
+            style={[styles.mainButton, downloading && styles.mainButtonDisabled]}
+            activeOpacity={0.85}
+            onPress={downloadDocument}
+            disabled={downloading}
+          >
+            {downloading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Ionicons name="download-outline" size={18} color="#fff" />
+            )}
+            <Text style={styles.mainButtonText}>{downloading ? 'Preparing document...' : 'Download document'}</Text>
           </TouchableOpacity>
         )}
 
@@ -336,8 +372,11 @@ const makeStyles = (C: any) => StyleSheet.create({
   infoLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '800', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3 },
   infoValue: { color: C.text, fontSize: 15, fontWeight: '800', lineHeight: 21 },
   iconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
-  imagePreview: { width: '100%', height: 260, backgroundColor: C.backgroundSelected },
+  documentPreviewPlaceholder: { margin: 15, padding: 18, borderRadius: 16, backgroundColor: C.actionCard, alignItems: 'center', gap: 7 },
+  documentPreviewTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  documentPreviewText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   mainButton: { backgroundColor: C.backgroundbutton || C.primary, borderRadius: 999, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 14 },
+  mainButtonDisabled: { opacity: 0.6 },
   mainButtonText: { color: '#fff', fontSize: 15, fontWeight: '900' },
   noteContentBox: { padding: 15 },
   noteContent: { color: C.text, fontSize: 15, lineHeight: 23, fontWeight: '600' },

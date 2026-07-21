@@ -17,9 +17,12 @@ import {
   trackPlanLimitReached,
 } from './analytics';
 
-// export const API_BASE_URL = 'http://10.229.103.37:8080';
-//export const API_BASE_URL = 'http://10.19.4.37:8080';
-export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
+export const API_BASE_URL = (
+  process.env.EXPO_PUBLIC_API_BASE_URL ||
+  process.env.EXPO_PUBLIC_API_URL ||
+  'https://guardian-vault-gateway.onrender.com'
+   //'http://10.252.149.37:8080'
+).replace(/\/+$/, '');
 /**
  * REQUEST TIMEOUT SETTINGS
  *
@@ -32,10 +35,10 @@ export const API_BASE_URL = 'https://the-guardian-op6t.onrender.com';
  * LONG_REQUEST_TIMEOUT_MS:
  * Backup, restore, document upload, payment initialization.
  */
-const AUTH_REQUEST_TIMEOUT_MS = 100000; //If taking too long i will adjust to 100000
-const DEFAULT_REQUEST_TIMEOUT_MS = 20000;
-const LONG_REQUEST_TIMEOUT_MS = 30000; //If taking too long i will adjust to 45000
-const VAULT_LIST_TIMEOUT_MS = 30000; // Normal online vault load. Offline fallback uses a faster server probe first.
+const AUTH_REQUEST_TIMEOUT_MS = 300000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 300000;
+const LONG_REQUEST_TIMEOUT_MS = 300000;
+const VAULT_LIST_TIMEOUT_MS = 300000; // Render free services may need time to wake before returning data.
 const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 400000; // Documents can be large because the backend decrypts and returns Base64.
 const DOCUMENT_UPLOAD_TIMEOUT_MS = 300000; // Multipart uploads, especially PDFs/DOCX, need more time than normal API calls.
 
@@ -2011,6 +2014,18 @@ export const api = {
   getEmergencyVaultItem: (requestId: number | string, itemType: string, itemId: number | string) =>
     cachedGet<EmergencyVaultItemResponse>(`/vault/emergency/requests/${requestId}/vault/${String(itemType).toUpperCase()}/${itemId}`),
 
+  downloadEmergencyDocumentToCache: (
+    requestId: number | string,
+    itemId: number | string,
+    fileName = 'emergency-document',
+    mimeType = 'application/octet-stream'
+  ) =>
+    downloadAuthenticatedFile(
+      `/vault/emergency/requests/${requestId}/vault/DOCUMENT/${itemId}/download`,
+      fileName,
+      mimeType
+    ),
+
 
   getFamilyOverview: () =>
     cachedGet<FamilyOverview>('/vault/family', undefined, VAULT_LIST_TIMEOUT_MS),
@@ -2024,16 +2039,34 @@ export const api = {
 
   addFamilyMember: async (
     email: string,
-    permissions?: { sharePasswords?: boolean; shareCards?: boolean; shareDocuments?: boolean; shareNotes?: boolean }
+    permissions?: {
+      sharePasswords?: boolean;
+      shareCards?: boolean;
+      shareDocuments?: boolean;
+      shareNotes?: boolean;
+      passwordItemIds?: number[];
+      cardItemIds?: number[];
+      documentItemIds?: number[];
+      noteItemIds?: number[];
+    }
   ) => {
+    const passwordItemIds = permissions?.passwordItemIds || [];
+    const cardItemIds = permissions?.cardItemIds || [];
+    const documentItemIds = permissions?.documentItemIds || [];
+    const noteItemIds = permissions?.noteItemIds || [];
+
     const result = await request<FamilyMember>('/vault/family/members', {
       method: 'POST',
       body: JSON.stringify({
         email,
-        sharePasswords: permissions?.sharePasswords ?? true,
-        shareCards: permissions?.shareCards ?? false,
-        shareDocuments: permissions?.shareDocuments ?? false,
-        shareNotes: permissions?.shareNotes ?? false,
+        sharePasswords: permissions?.sharePasswords ?? passwordItemIds.length > 0,
+        shareCards: permissions?.shareCards ?? cardItemIds.length > 0,
+        shareDocuments: permissions?.shareDocuments ?? documentItemIds.length > 0,
+        shareNotes: permissions?.shareNotes ?? noteItemIds.length > 0,
+        passwordItemIds,
+        cardItemIds,
+        documentItemIds,
+        noteItemIds,
       }),
     });
     clearCache('GET:/vault/family');

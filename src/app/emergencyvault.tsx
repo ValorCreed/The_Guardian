@@ -20,10 +20,32 @@ import { api, EmergencyVaultItemResponse } from '../services/api';
 const getTitle = (item: EmergencyVaultItemResponse) =>
   item.title || item.documentName || item.fileName || 'Emergency vault item';
 
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+  return parts.length > 1 ? String(parts.pop() || '').toLowerCase() : '';
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+  if (mime.includes('wordprocessingml') || mime === 'application/msword' || ['doc', 'docx'].includes(extension)) return extension === 'doc' ? 'DOC' : 'DOCX';
+  if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || ['xls', 'xlsx'].includes(extension)) return extension === 'xls' ? 'XLS' : 'XLSX';
+  if (mime.includes('presentationml') || mime === 'application/vnd.ms-powerpoint' || ['ppt', 'pptx'].includes(extension)) return extension === 'ppt' ? 'PPT' : 'PPTX';
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+  return extension ? extension.toUpperCase() : 'Document';
+};
+
 const getSubtitle = (item: EmergencyVaultItemResponse) => {
   if (item.itemType === 'PASSWORD') return item.usernameValue || item.website || 'Password login';
   if (item.itemType === 'CARD') return item.usernameValue || 'Saved payment card';
-  if (item.itemType === 'DOCUMENT') return item.documentType || item.mimeType || 'Protected document';
+  if (item.itemType === 'DOCUMENT') return getFriendlyDocumentType(item.documentType || item.mimeType, item.documentName || item.fileName || item.title);
   if (item.itemType === 'NOTE') return item.category || 'Secure note';
   return 'Emergency vault item';
 };

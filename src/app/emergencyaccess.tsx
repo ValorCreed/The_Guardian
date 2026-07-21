@@ -69,6 +69,22 @@ export default function EmergencyAccessScreen() {
     await loadOverview(false);
   };
 
+  const updateReceivedRequest = useCallback(
+    (updatedRequest: EmergencyAccessRequestResponse) => {
+      setOverview((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          receivedRequests: current.receivedRequests.map((item) =>
+            item.id === updatedRequest.id ? { ...item, ...updatedRequest } : item
+          ),
+        };
+      });
+    },
+    []
+  );
+
   const approveRequest = (request: EmergencyAccessRequestResponse) => {
     Alert.alert(
       'Approve emergency access?',
@@ -80,7 +96,8 @@ export default function EmergencyAccessScreen() {
           onPress: async () => {
             try {
               setWorkingRequestId(request.id);
-              await api.approveEmergencyRequest(request.id);
+              const updatedRequest = await api.approveEmergencyRequest(request.id);
+              updateReceivedRequest(updatedRequest);
               await loadOverview(false);
             } catch (error: any) {
               Alert.alert('Approval failed', error.message || 'Could not approve this request.');
@@ -105,7 +122,8 @@ export default function EmergencyAccessScreen() {
           onPress: async () => {
             try {
               setWorkingRequestId(request.id);
-              await api.denyEmergencyRequest(request.id);
+              const updatedRequest = await api.denyEmergencyRequest(request.id);
+              updateReceivedRequest(updatedRequest);
               await loadOverview(false);
             } catch (error: any) {
               Alert.alert('Deny failed', error.message || 'Could not deny this request.');
@@ -321,7 +339,8 @@ function ContactRow({ contact, index, total, C, styles }: { contact: EmergencyCo
 
 function RequestRow({ request, index, total, C, styles, working, onApprove, onDeny }: any) {
   const color = statusColor(request.status, C);
-  const canAct = request.status === 'PENDING' || request.status === 'AVAILABLE';
+  const normalizedStatus = String(request.status || '').toUpperCase();
+  const canAct = normalizedStatus === 'PENDING';
 
   return (
     <View style={[styles.requestRow, index !== total - 1 && styles.divider]}>

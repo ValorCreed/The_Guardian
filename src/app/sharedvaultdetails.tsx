@@ -158,17 +158,18 @@ const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | n
 };
 
 
-const decryptSharedNoteContent = (value?: string | null) => {
+const decryptSharedValue = (value?: string | null) => {
   const cleaned = cleanSharedValue(value);
 
   if (!cleaned) return '';
 
   const decrypted = decryptJson<any>(cleaned, null);
-
   if (decrypted !== null && decrypted !== undefined) {
     return String(decrypted);
   }
 
+  // Microservices return plaintext after the Vault Service has decrypted it.
+  // Keeping the cleaned value supports both that response and older JSON-wrapped values.
   return cleaned;
 };
 
@@ -204,15 +205,15 @@ export default function SharedVaultDetailsScreen() {
           itemType: 'CARD',
           title: cleanSharedValue(data.cardName) || 'Shared card',
           cardName: cleanSharedValue(data.cardName),
-          encryptedCardholderName: cleanSharedValue(
+          encryptedCardholderName: decryptSharedValue(
             data.encryptedCardholderName || data.encryptedCardHolderName
           ),
-          encryptedCardHolderName: cleanSharedValue(
+          encryptedCardHolderName: decryptSharedValue(
             data.encryptedCardHolderName || data.encryptedCardholderName
           ),
-          encryptedCardNumber: cleanSharedValue(data.encryptedCardNumber),
-          encryptedExpiryDate: cleanSharedValue(data.encryptedExpiryDate),
-          encryptedCvv: cleanSharedValue(data.encryptedCvv),
+          encryptedCardNumber: decryptSharedValue(data.encryptedCardNumber),
+          encryptedExpiryDate: decryptSharedValue(data.encryptedExpiryDate),
+          encryptedCvv: decryptSharedValue(data.encryptedCvv),
           ownerId: data.ownerId,
           ownerName: data.ownerName,
           ownerEmail: data.ownerEmail,
@@ -231,7 +232,7 @@ export default function SharedVaultDetailsScreen() {
           documentName: cleanSharedValue(data.documentName),
           documentType: cleanSharedValue(data.documentType),
           encryptedFileUrl: cleanSharedValue(data.encryptedFileUrl),
-          encryptedNotes: cleanSharedValue(data.encryptedNotes),
+          encryptedNotes: decryptSharedValue(data.encryptedNotes),
           ownerId: data.ownerId,
           ownerName: data.ownerName,
           ownerEmail: data.ownerEmail,
@@ -248,7 +249,7 @@ export default function SharedVaultDetailsScreen() {
           itemType: 'NOTE',
           title: cleanSharedValue(data.title) || 'Shared secure note',
           category: cleanSharedValue(data.category),
-          encryptedContent: cleanSharedValue(data.encryptedContent),
+          encryptedContent: decryptSharedValue(data.encryptedContent),
           pinned: Boolean(data.pinned),
           ownerId: data.ownerId,
           ownerName: data.ownerName,
@@ -265,10 +266,10 @@ export default function SharedVaultDetailsScreen() {
         itemType: 'PASSWORD',
         title: cleanSharedValue(data.title) || 'Shared password',
         usernameValue: cleanSharedValue(data.usernameValue),
-        encryptedPassword: cleanSharedValue(data.encryptedPassword),
-        encryptedData: cleanSharedValue(data.encryptedData),
+        encryptedPassword: decryptSharedValue(data.encryptedPassword),
+        encryptedData: decryptSharedValue(data.encryptedData),
         website: cleanSharedValue(data.website),
-        notes: cleanSharedValue(data.notes),
+        notes: decryptSharedValue(data.notes),
         ownerId: data.ownerId,
         ownerName: data.ownerName,
         ownerEmail: data.ownerEmail,
@@ -724,7 +725,7 @@ function SharedNoteDetails({
   C: any;
 }) {
   const category = cleanSharedValue(item.category) || 'General';
-  const content = decryptSharedNoteContent(item.encryptedContent);
+  const content = decryptSharedValue(item.encryptedContent);
 
   return (
     <View style={styles.card}>

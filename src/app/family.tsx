@@ -38,6 +38,36 @@ import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { hapticDelete, hapticLight, hapticSuccess, hapticWarning } from '../utils/haptics';
 
+
+const getFileExtension = (fileName?: string | null) => {
+  const cleanName = String(fileName || '').split('?')[0].split('#')[0];
+  const parts = cleanName.split('.');
+  return parts.length > 1 ? String(parts.pop() || '').toLowerCase() : '';
+};
+
+const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (mime.startsWith('image/')) return 'Image';
+  if (mime.startsWith('video/')) return 'Video';
+  if (mime.startsWith('audio/')) return 'Audio';
+  if (mime === 'application/pdf' || extension === 'pdf') return 'PDF';
+  if (mime.includes('wordprocessingml') || mime === 'application/msword' || ['doc', 'docx'].includes(extension)) {
+    return extension === 'doc' ? 'DOC' : 'DOCX';
+  }
+  if (mime.includes('spreadsheetml') || mime === 'application/vnd.ms-excel' || ['xls', 'xlsx'].includes(extension)) {
+    return extension === 'xls' ? 'XLS' : 'XLSX';
+  }
+  if (mime.includes('presentationml') || mime === 'application/vnd.ms-powerpoint' || ['ppt', 'pptx'].includes(extension)) {
+    return extension === 'ppt' ? 'PPT' : 'PPTX';
+  }
+  if (mime.includes('zip') || extension === 'zip') return 'ZIP';
+  if (mime.includes('csv') || extension === 'csv') return 'CSV';
+  if (mime.startsWith('text/') || extension === 'txt') return 'TXT';
+  return extension ? extension.toUpperCase() : 'Document';
+};
+
 const EMPTY_FAMILY_OVERVIEW: FamilyOverview = {
   familyPlan: false,
   admin: false,
@@ -456,7 +486,7 @@ function SharedDocumentSection({ items, styles, C }: { items: SharedDocumentItem
             icon={<FileText size={18} color={C.primary} />}
             title={item.documentName || 'Shared document'}
             subtitle={`Shared by ${item.ownerName || item.ownerEmail}`}
-            extra={item.documentType || 'Document'}
+            extra={getFriendlyDocumentType(item.documentType, item.documentName)}
             isLast={index === items.length - 1}
             styles={styles}
             onPress={() => router.push({ pathname: '/sharedvaultdetails', params: { id: String(item.id), type: 'DOCUMENT' } })}

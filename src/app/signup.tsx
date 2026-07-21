@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,15 +10,18 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+} from "react-native";
+import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { api, getEmailDeliveryWarning, saveLoginSession } from '../services/api';
-import { useAppTheme } from '../context/ThemeContext';
-import GuardianLogoTile from '../components/GuardianLogoTitle';
+import {
+  api,
+  getEmailDeliveryWarning,
+  saveLoginSession,
+} from "../services/api";
+import { useAppTheme } from "../context/ThemeContext";
 
 const RegisterScreen = () => {
   const router = useRouter();
@@ -26,10 +29,10 @@ const RegisterScreen = () => {
   const { colors: C, resetThemeForNewAccount } = useAppTheme();
   const styles = makeStyles(C);
 
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -41,24 +44,24 @@ const RegisterScreen = () => {
 
     if (!fullName.trim() || !email.trim() || !password.trim()) {
       Alert.alert(
-        'Missing details',
-        'Enter your full name, email and master password.'
+        "Missing details",
+        "Enter your full name, email and master password.",
       );
       return;
     }
 
     if (!confirmPassword.trim()) {
-      Alert.alert('Missing details', 'Please confirm your master password.');
+      Alert.alert("Missing details", "Please confirm your master password.");
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Your passwords do not match.');
+      Alert.alert("Password mismatch", "Your passwords do not match.");
       return;
     }
 
     if (password.length < 8) {
-      Alert.alert('Weak password', 'Password must be at least 8 characters.');
+      Alert.alert("Weak password", "Password must be at least 8 characters.");
       return;
     }
 
@@ -68,13 +71,13 @@ const RegisterScreen = () => {
       const cleanEmail = email.trim().toLowerCase();
 
       await AsyncStorage.multiRemove([
-        'token',
-        'userName',
-        'userEmail',
-        'subscriptionPlan',
-        'emailVerified',
-        'twoFactorEnabled',
-        'vaultLocked',
+        "token",
+        "userName",
+        "userEmail",
+        "subscriptionPlan",
+        "emailVerified",
+        "twoFactorEnabled",
+        "vaultLocked",
       ]);
 
       const data = await api.register({
@@ -88,15 +91,15 @@ const RegisterScreen = () => {
       await resetThemeForNewAccount(cleanEmail);
 
       const verified = Boolean((data as any)?.emailVerified);
-      await AsyncStorage.setItem('emailVerified', String(verified));
+      await AsyncStorage.setItem("emailVerified", String(verified));
 
       const emailWarning = getEmailDeliveryWarning(data);
 
       if (verified) {
-        Alert.alert('Account created', 'Your account is ready.', [
+        Alert.alert("Account created", "Your account is ready.", [
           {
-            text: 'Continue',
-            onPress: () => router.replace('/verification'),
+            text: "Continue",
+            onPress: () => router.replace("/verification"),
           },
         ]);
         return;
@@ -104,47 +107,47 @@ const RegisterScreen = () => {
 
       if (emailWarning) {
         Alert.alert(
-          'Account created',
-          'Your account was created, but we could not send the verification email right now. You can still sign in and use the app. For better account security, verify your email later from User Information.',
+          "Account created",
+          "Your account was created, but we could not send the verification email right now. You can still sign in and use the app. For better account security, verify your email later from User Information.",
           [
             {
-              text: 'Continue',
-              onPress: () => router.replace('/verification'),
-              style: 'cancel',
+              text: "Continue",
+              onPress: () => router.replace("/verification"),
+              style: "cancel",
             },
             {
-              text: 'Verify later',
-              onPress: () => router.replace('/verification'),
+              text: "Verify later",
+              onPress: () => router.replace("/verification"),
             },
-          ]
+          ],
         );
         return;
       }
 
       Alert.alert(
-        'Account created',
-        'We sent a verification code to your email. You can verify now, or continue and verify later from User Information.',
+        "Account created",
+        "We sent a verification code to your email. You can verify now, or continue and verify later from User Information.",
         [
           {
-            text: 'Continue',
-            onPress: () => router.replace('/verification'),
-            style: 'cancel',
+            text: "Continue",
+            onPress: () => router.replace("/verification"),
+            style: "cancel",
           },
           {
-            text: 'Verify now',
+            text: "Verify now",
             onPress: () =>
               router.replace({
-                pathname: '/verifyemail',
+                pathname: "/verifyemail",
                 params: {
                   email: cleanEmail,
-                  next: 'verification',
+                  next: "verification",
                 },
               }),
           },
-        ]
+        ],
       );
     } catch (error: any) {
-      Alert.alert('Registration failed', error.message || 'Please try again.');
+      Alert.alert("Registration failed", error.message || "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -154,29 +157,30 @@ const RegisterScreen = () => {
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
       >
         <ScrollView
           style={styles.scrollView}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          keyboardDismissMode={
+            Platform.OS === "ios" ? "interactive" : "on-drag"
+          }
+          automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
           contentContainerStyle={styles.scrollContent}
         >
-          <GuardianLogoTile
-            size={62}
-            logoSize={50}
-            radius={18}
-            style={styles.iconBox}
-          />
+          <View style={styles.headerBlock}>
+            <View style={styles.eyebrowRow}>
+              {/* <View style={styles.eyebrowDot} />
+              <Text style={styles.eyebrow}>SECURE ACCOUNT SETUP</Text> */}
+            </View>
 
-          <Text style={styles.title}>Create your account</Text>
-
-          <Text style={styles.subtitle}>
-            Your master password is the only key. We can never see it.
-          </Text>
+            <Text style={styles.title}>Create your account</Text>
+            <Text style={styles.subtitle}>
+              Set up your private vault with a master password only you know.
+            </Text>
+          </View>
 
           <View style={styles.formCard}>
             <Text style={styles.label}>Full Name</Text>
@@ -230,7 +234,7 @@ const RegisterScreen = () => {
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
                   size={22}
                   color={C.textSecondary}
                 />
@@ -261,7 +265,7 @@ const RegisterScreen = () => {
                 activeOpacity={0.7}
               >
                 <Ionicons
-                  name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                  name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
                   size={22}
                   color={C.textSecondary}
                 />
@@ -285,10 +289,10 @@ const RegisterScreen = () => {
           <TouchableOpacity
             style={styles.signinLink}
             activeOpacity={0.7}
-            onPress={() => router.replace('/signin')}
+            onPress={() => router.replace("/signin")}
           >
             <Text style={styles.signinText}>
-              Already have an account?{' '}
+              Already have an account?{" "}
               <Text style={styles.signinTextBold}>Sign in</Text>
             </Text>
           </TouchableOpacity>
@@ -318,19 +322,40 @@ const makeStyles = (C: any) =>
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 108,
+      paddingTop: 70,
       paddingBottom: 180,
     },
 
-    iconBox: {
-      marginBottom: 20,
+    headerBlock: {
+      marginBottom: 0,
+    },
+
+    eyebrowRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 12,
+    },
+
+    eyebrowDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: C.primary,
+    },
+
+    eyebrow: {
+      color: C.primary,
+      fontSize: 12,
+      fontWeight: "900",
+      letterSpacing: 1.1,
     },
 
     title: {
       fontSize: 30,
-      fontWeight: '900',
+      fontWeight: "900",
       color: C.text,
-      marginBottom: 8,
+      marginBottom: 10,
     },
 
     subtitle: {
@@ -352,7 +377,7 @@ const makeStyles = (C: any) =>
     label: {
       fontSize: 13,
       color: C.text,
-      fontWeight: '800',
+      fontWeight: "800",
       marginBottom: 8,
       marginLeft: 4,
     },
@@ -374,8 +399,8 @@ const makeStyles = (C: any) =>
       borderRadius: 18,
       paddingLeft: 16,
       paddingRight: 8,
-      flexDirection: 'row',
-      alignItems: 'center',
+      flexDirection: "row",
+      alignItems: "center",
       marginBottom: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -393,16 +418,16 @@ const makeStyles = (C: any) =>
       width: 42,
       height: 42,
       borderRadius: 21,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: "center",
+      justifyContent: "center",
     },
 
     continueButton: {
       backgroundColor: C.backgroundbutton,
       paddingVertical: 18,
       borderRadius: 50,
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: "center",
+      justifyContent: "center",
       minHeight: 56,
       marginTop: 2,
     },
@@ -412,25 +437,25 @@ const makeStyles = (C: any) =>
     },
 
     continueText: {
-      color: '#ffffff',
+      color: "#ffffff",
       fontSize: 16,
-      fontWeight: '900',
+      fontWeight: "900",
     },
 
     signinLink: {
-      alignItems: 'center',
-      justifyContent: 'center',
+      alignItems: "center",
+      justifyContent: "center",
       paddingVertical: 18,
     },
 
     signinText: {
       color: C.textSecondary,
       fontSize: 14,
-      fontWeight: '600',
+      fontWeight: "600",
     },
 
     signinTextBold: {
       color: C.primary,
-      fontWeight: '900',
+      fontWeight: "900",
     },
   });
