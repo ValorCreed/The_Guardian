@@ -42,6 +42,31 @@ const VAULT_LIST_TIMEOUT_MS = 300000; // Render free services may need time to w
 const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 400000; // Documents can be large because the backend decrypts and returns Base64.
 const DOCUMENT_UPLOAD_TIMEOUT_MS = 300000; // Multipart uploads, especially PDFs/DOCX, need more time than normal API calls.
 
+/**
+ * Android can briefly report a transport-level network failure immediately
+ * after a cold launch or resume, even when the phone is connected. Render may
+ * also be waking the gateway at the same time. Retry only requests that are
+ * safe to repeat, and only when no HTTP response was received quickly.
+ */
+const TRANSIENT_NETWORK_RETRY_DELAYS_MS = [1200, 3000] as const;
+const TRANSIENT_NETWORK_FAILURE_WINDOW_MS = 5000;
+const RETRYABLE_AUTH_PATHS = new Set(['/vault/auth/login']);
+
+const wait = (delayMs: number) =>
+  new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+
+function getTransientNetworkRetryCount(path: string, method: string) {
+  if (method === 'GET' || method === 'HEAD') {
+    return TRANSIENT_NETWORK_RETRY_DELAYS_MS.length;
+  }
+
+  if (method === 'POST' && RETRYABLE_AUTH_PATHS.has(path)) {
+    return TRANSIENT_NETWORK_RETRY_DELAYS_MS.length;
+  }
+
+  return 0;
+}
+
 
 export type BugReportRequestBody = {
   title: string;
@@ -880,10 +905,10 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
 
   if (lower.includes('failed to fetch') || lower.includes('network request failed')) {
     if (route.includes('/vault/auth/login')) {
-      return 'Cannot connect to the server. Make sure your are connected to the internet.';
+      return 'The Guardian server could not be reached. It may still be starting. Please wait a moment and try again.';
     }
 
-    return 'Cannot connect to our servers. Check your internet connection and try again.';
+    return 'The Guardian servers are temporarily unreachable. Your internet connection may still be working. Please try again shortly.';
   }
 
   if (lower.includes('bad credentials') || lower.includes('invalid credentials')) {
@@ -970,7 +995,6 @@ async function request<T>(
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
 ): Promise<T> {
   const token = await getToken();
-
   const deviceHeaders = await getGuardianDeviceHeaders();
 
   const headers: Record<string, string> = {
@@ -981,62 +1005,115 @@ async function request<T>(
 
   if (useAuth && token) headers.Authorization = `Bearer ${token}`;
 
-  const controller = new AbortController();
   const requestStartedAt = Date.now();
   const requestMethod = String(options.method || 'GET').toUpperCase();
+  const retryCount = getTransientNetworkRetryCount(path, requestMethod);
 
-  const timeoutId = setTimeout(() => {
-    controller.abort();
-  }, timeoutMs);
+  let response: Response | null = null;
+  let attempt = 0;
 
-  let response: Response;
+  while (attempt <= retryCount) {
+    const controller = new AbortController();
+    const attemptStartedAt = Date.now();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, timeoutMs);
 
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-    });
-  } catch (error: any) {
-    console.log('FETCH ERROR', error);
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      });
 
-    const errorName = String(error?.name || '').toLowerCase();
-    const errorMessage = String(error?.message || '').toLowerCase();
-    const durationMs = Date.now() - requestStartedAt;
+      break;
+    } catch (error: any) {
+      const errorName = String(error?.name || '').toLowerCase();
+      const errorMessage = String(error?.message || '').toLowerCase();
+      const attemptDurationMs = Date.now() - attemptStartedAt;
+      const totalDurationMs = Date.now() - requestStartedAt;
+      const wasAborted =
+        errorName === 'aborterror' ||
+        errorMessage.includes('aborted') ||
+        errorMessage.includes('abort') ||
+        errorMessage.includes('canceled') ||
+        errorMessage.includes('cancelled');
 
-    if (
-      errorName === 'aborterror' ||
-      errorMessage.includes('aborted') ||
-      errorMessage.includes('abort') ||
-      errorMessage.includes('canceled') ||
-      errorMessage.includes('cancelled')
-    ) {
+      if (wasAborted) {
+        recordApiRequest({
+          path,
+          method: requestMethod,
+          durationMs: totalDurationMs,
+          success: false,
+          code: 'REQUEST_TIMEOUT',
+        });
+
+        throw new GuardianApiError(
+          getFriendlyErrorMessage(
+            undefined,
+            path,
+            `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`
+          ),
+          {
+            path,
+            rawMessage: `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`,
+            code: 'REQUEST_TIMEOUT',
+          }
+        );
+      }
+
+      const canRetry =
+        attempt < retryCount &&
+        attemptDurationMs <= TRANSIENT_NETWORK_FAILURE_WINDOW_MS;
+
+      if (canRetry) {
+        const delayMs =
+          TRANSIENT_NETWORK_RETRY_DELAYS_MS[
+            Math.min(attempt, TRANSIENT_NETWORK_RETRY_DELAYS_MS.length - 1)
+          ];
+
+        if (__DEV__) {
+          console.log('TRANSIENT NETWORK FAILURE - RETRYING', {
+            path,
+            method: requestMethod,
+            attempt: attempt + 1,
+            delayMs,
+          });
+        }
+
+        attempt += 1;
+        await wait(delayMs);
+        continue;
+      }
+
+      console.log('FETCH ERROR', error);
+
       recordApiRequest({
         path,
         method: requestMethod,
-        durationMs,
+        durationMs: totalDurationMs,
         success: false,
-        code: 'REQUEST_TIMEOUT',
+        code: 'NETWORK_UNREACHABLE',
       });
 
       throw new GuardianApiError(
-        getFriendlyErrorMessage(
-          undefined,
-          path,
-          `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`
-        ),
+        getFriendlyErrorMessage(undefined, path, 'Network request failed'),
         {
           path,
-          rawMessage: `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`,
-          code: 'REQUEST_TIMEOUT',
+          rawMessage: 'Network request failed',
+          code: 'NETWORK_UNREACHABLE',
         }
       );
+    } finally {
+      clearTimeout(timeoutId);
     }
+  }
 
+  if (!response) {
     recordApiRequest({
       path,
       method: requestMethod,
-      durationMs,
+      durationMs: Date.now() - requestStartedAt,
       success: false,
       code: 'NETWORK_UNREACHABLE',
     });
@@ -1049,8 +1126,6 @@ async function request<T>(
         code: 'NETWORK_UNREACHABLE',
       }
     );
-  } finally {
-    clearTimeout(timeoutId);
   }
 
   const text = await response.text();

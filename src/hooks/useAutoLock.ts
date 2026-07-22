@@ -226,34 +226,35 @@ export const useAutoLock = () => {
 
     if (!lastBackgroundAt) return;
 
+    const timeout = await getAutoLockTimeout();
+
     /*
-     * Security-first cold-start protection:
-     * React Native JavaScript cannot run after the user swipes the app away
-     * from Recent Apps. Because markAppLeftAt() stores this timestamp only
-     * when the user leaves a protected screen, its presence on a fresh start
-     * means the previous protected vault session ended while the app was away.
-     * Lock immediately, even if the configured timeout has not elapsed.
+     * A timestamp can remain when Android kills the process or the user swipes
+     * the app away from Recent Apps. A normal timeout must not be treated as if
+     * JavaScript had continued running while the process was gone.
      *
-     * Normal background -> active returns still use checkIfShouldLock(), so
-     * the selected timeout continues to work when the app is not killed.
+     * Therefore:
+     * - Numeric timeout modes only apply during a real background -> active
+     *   transition while the app process is still alive.
+     * - The explicit "When app closes" option still locks on a cold launch.
+     *
+     * Clearing the stale marker also prevents a launch-time race where the auth
+     * route guard briefly opens Home and this hook then logs the user out.
      */
     await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
-    await lockVault({ force: true });
+
+    if (timeout === AUTO_LOCK_ON_APP_CLOSE) {
+      await lockVault({ force: true });
+    }
   }, [lockVault]);
 
   useEffect(() => {
     mountedRef.current = true;
 
     /*
-     * Cold-start protection:
-     * If the app was sent to the background, then killed/swiped away from
-     * Recent Apps, JavaScript timers and AppState listeners stop running.
-     * On the next launch, lock immediately when a protected-session background
-     * marker is found.
-     *
-     * Normal background -> active returns are still handled below by
-     * checkIfShouldLock(), so the selected timeout remains unchanged when the
-     * app is merely minimized and reopened from Recent Apps.
+     * Resolve a marker left behind by a killed/swiped-away process. Normal
+     * timeout modes keep the existing authenticated session on a cold launch;
+     * only the explicit "When app closes" mode locks in that situation.
      */
     checkColdStartShouldLock();
 

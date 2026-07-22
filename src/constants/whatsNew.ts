@@ -1,4 +1,4 @@
-export const WHATS_NEW_VERSION = 'v2.8 Beta';
+export const WHATS_NEW_VERSION = 'v3.0.1(Beta)';
 
 export const WHATS_NEW_TITLE = 'Whats New in The Guardian';
 
