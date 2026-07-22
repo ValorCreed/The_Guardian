@@ -1,7 +1,11 @@
 package com.vault.theguardian.emergency;
 
 import com.vault.theguardian.auth.AuthenticatedUser;
+import com.vault.theguardian.vault.DownloadedDocument;
 import jakarta.validation.Valid;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -111,6 +115,32 @@ public class EmergencyAccessController {
             @PathVariable Long itemId
     ) {
         return emergencyAccessService.getEmergencyVaultItem(user, id, itemType, itemId);
+    }
+
+    @GetMapping("/requests/{id}/vault/DOCUMENT/{itemId}/download")
+    public ResponseEntity<byte[]> downloadEmergencyDocument(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long id,
+            @PathVariable Long itemId
+    ) {
+        DownloadedDocument document =
+                emergencyAccessService.downloadEmergencyDocument(user, id, itemId);
+
+        MediaType mediaType;
+        try {
+            mediaType = MediaType.parseMediaType(document.contentType());
+        } catch (Exception ignored) {
+            mediaType = MediaType.APPLICATION_OCTET_STREAM;
+        }
+
+        return ResponseEntity.ok()
+                .contentType(mediaType)
+                .contentLength(document.bytes().length)
+                .header(
+                        HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + document.fileName() + "\""
+                )
+                .body(document.bytes());
     }
 
     @GetMapping("/audit")

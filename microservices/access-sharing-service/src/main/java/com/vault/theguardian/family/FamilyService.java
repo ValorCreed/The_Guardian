@@ -24,6 +24,7 @@ public class FamilyService {
 
     private final FamilyGroupRepository groupRepository;
     private final FamilyMemberRepository memberRepository;
+    private final FamilySharedItemRepository sharedItemRepository;
     private final AuthClient authClient;
     private final SubscriptionClient subscriptionClient;
     private final NotificationClient notificationClient;
@@ -32,6 +33,7 @@ public class FamilyService {
     public FamilyService(
             FamilyGroupRepository groupRepository,
             FamilyMemberRepository memberRepository,
+            FamilySharedItemRepository sharedItemRepository,
             AuthClient authClient,
             SubscriptionClient subscriptionClient,
             NotificationClient notificationClient,
@@ -39,6 +41,7 @@ public class FamilyService {
     ) {
         this.groupRepository = groupRepository;
         this.memberRepository = memberRepository;
+        this.sharedItemRepository = sharedItemRepository;
         this.authClient = authClient;
         this.subscriptionClient = subscriptionClient;
         this.notificationClient = notificationClient;
@@ -141,13 +144,6 @@ public class FamilyService {
             throw badRequest("Enter the email of the person you want to add.");
         }
 
-        if (!request.sharePasswords()
-                && !request.shareCards()
-                && !request.shareDocuments()
-                && !request.shareNotes()) {
-            throw badRequest("Choose at least one vault type to share.");
-        }
-
         if (cleanEmail.equalsIgnoreCase(admin.email())) {
             throw badRequest("You cannot add yourself to your own family group.");
         }
@@ -162,6 +158,11 @@ public class FamilyService {
 
         requireFamilyPlan(admin.id());
 
+        SelectionPlan selections = resolveSelections(admin.id(), request);
+        if (selections.isEmpty()) {
+            throw badRequest("Select at least one specific vault item to share.");
+        }
+
         FamilyGroup group = groupRepository.findByAdminId(admin.id())
                 .orElseGet(() -> groupRepository.save(
                         FamilyGroup.builder()
@@ -174,8 +175,9 @@ public class FamilyService {
                 .orElse(null);
 
         if (existing != null) {
-            applyPermissions(existing, request);
+            applyPermissions(existing, selections);
             FamilyMember saved = memberRepository.save(existing);
+            replaceSelections(saved, selections);
             notificationClient.notifyFamilyMemberAdded(admin.id(), target.email());
             return toMemberResponse(saved, target);
         }
@@ -193,13 +195,14 @@ public class FamilyService {
                         .group(group)
                         .userId(target.id())
                         .joinedAt(LocalDateTime.now())
-                        .sharePasswords(request.sharePasswords())
-                        .shareCards(request.shareCards())
-                        .shareDocuments(request.shareDocuments())
-                        .shareNotes(request.shareNotes())
+                        .sharePasswords(!selections.passwordIds().isEmpty())
+                        .shareCards(!selections.cardIds().isEmpty())
+                        .shareDocuments(!selections.documentIds().isEmpty())
+                        .shareNotes(!selections.noteIds().isEmpty())
                         .build()
         );
 
+        replaceSelections(saved, selections);
         notificationClient.notifyFamilyMemberAdded(admin.id(), target.email());
         return toMemberResponse(saved, target);
     }
@@ -337,16 +340,33 @@ public class FamilyService {
             Permission permission,
             String itemType
     ) {
-        List<Long> ownerIds = allowedOwnerIds(viewerId, permission);
-        Map<Long, InternalUserResponse> owners = usersById(ownerIds);
+        String normalizedType = normalizeItemType(itemType);
+        List<FamilyMember> memberships = memberRepository.findByUserId(viewerId).stream()
+                .filter(permission::allowed)
+                .toList();
+
+        Map<Long, InternalUserResponse> owners = usersById(
+                memberships.stream().map(member -> member.getGroup().getAdminId()).toList()
+        );
         List<ItemWithOwner> result = new ArrayList<>();
 
-        for (Long ownerId : ownerIds) {
+        for (FamilyMember membership : memberships) {
+            Long ownerId = membership.getGroup().getAdminId();
             InternalUserResponse owner = owners.get(ownerId);
             if (owner == null) continue;
 
+            Set<Long> selectedIds = sharedItemRepository
+                    .findByMembership_IdAndItemType(membership.getId(), normalizedType)
+                    .stream()
+                    .map(FamilySharedItem::getItemId)
+                    .collect(Collectors.toSet());
+
+            if (selectedIds.isEmpty()) continue;
+
             for (InternalVaultItemResponse item : vaultClient.list(ownerId, itemType)) {
-                result.add(new ItemWithOwner(item, owner));
+                if (selectedIds.contains(item.id())) {
+                    result.add(new ItemWithOwner(item, owner));
+                }
             }
         }
 
@@ -359,7 +379,18 @@ public class FamilyService {
             String itemType,
             Long itemId
     ) {
-        for (Long ownerId : allowedOwnerIds(viewerId, permission)) {
+        String normalizedType = normalizeItemType(itemType);
+
+        for (FamilyMember membership : memberRepository.findByUserId(viewerId)) {
+            if (!permission.allowed(membership)) continue;
+
+            boolean selected = sharedItemRepository
+                    .existsByMembership_IdAndItemTypeAndItemId(
+                            membership.getId(), normalizedType, itemId
+                    );
+            if (!selected) continue;
+
+            Long ownerId = membership.getGroup().getAdminId();
             InternalVaultItemResponse item = vaultClient.getOrNull(ownerId, itemType, itemId);
             if (item == null) continue;
 
@@ -369,16 +400,8 @@ public class FamilyService {
 
         throw new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
-                "Shared " + itemType.substring(0, itemType.length() - 1) + " item not found."
+                "Shared " + normalizedType.toLowerCase() + " item not found."
         );
-    }
-
-    private List<Long> allowedOwnerIds(Long viewerId, Permission permission) {
-        return memberRepository.findByUserId(viewerId).stream()
-                .filter(member -> permission.allowed(member))
-                .map(member -> member.getGroup().getAdminId())
-                .distinct()
-                .toList();
     }
 
     private boolean isFamilyPlan(Long userId) {
@@ -395,11 +418,93 @@ public class FamilyService {
         }
     }
 
-    private void applyPermissions(FamilyMember member, AddFamilyMemberRequest request) {
-        member.setSharePasswords(request.sharePasswords());
-        member.setShareCards(request.shareCards());
-        member.setShareDocuments(request.shareDocuments());
-        member.setShareNotes(request.shareNotes());
+    private void applyPermissions(FamilyMember member, SelectionPlan selections) {
+        member.setSharePasswords(!selections.passwordIds().isEmpty());
+        member.setShareCards(!selections.cardIds().isEmpty());
+        member.setShareDocuments(!selections.documentIds().isEmpty());
+        member.setShareNotes(!selections.noteIds().isEmpty());
+    }
+
+    private SelectionPlan resolveSelections(Long ownerId, AddFamilyMemberRequest request) {
+        return new SelectionPlan(
+                resolveSelectedIds(ownerId, "passwords", request.sharePasswords(), request.passwordItemIds()),
+                resolveSelectedIds(ownerId, "cards", request.shareCards(), request.cardItemIds()),
+                resolveSelectedIds(ownerId, "documents", request.shareDocuments(), request.documentItemIds()),
+                resolveSelectedIds(ownerId, "notes", request.shareNotes(), request.noteItemIds())
+        );
+    }
+
+    private List<Long> resolveSelectedIds(
+            Long ownerId,
+            String itemType,
+            boolean enabled,
+            List<Long> requestedIds
+    ) {
+        if (!enabled) return List.of();
+
+        Set<Long> ownedIds = vaultClient.list(ownerId, itemType).stream()
+                .map(InternalVaultItemResponse::id)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        List<Long> selectedIds = requestedIds == null
+                ? List.copyOf(ownedIds)
+                : requestedIds.stream()
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        if (selectedIds.isEmpty()) {
+            throw badRequest("Select at least one " + normalizeItemType(itemType).toLowerCase() + " item to share.");
+        }
+
+        if (!ownedIds.containsAll(selectedIds)) {
+            throw badRequest("One or more selected " + normalizeItemType(itemType).toLowerCase() + " items are invalid.");
+        }
+
+        return selectedIds;
+    }
+
+    private void replaceSelections(FamilyMember membership, SelectionPlan selections) {
+        sharedItemRepository.deleteByMembership_Id(membership.getId());
+
+        List<FamilySharedItem> items = new ArrayList<>();
+        addSelections(items, membership, "PASSWORD", selections.passwordIds());
+        addSelections(items, membership, "CARD", selections.cardIds());
+        addSelections(items, membership, "DOCUMENT", selections.documentIds());
+        addSelections(items, membership, "NOTE", selections.noteIds());
+
+        if (!items.isEmpty()) {
+            sharedItemRepository.saveAll(items);
+        }
+    }
+
+    private void addSelections(
+            List<FamilySharedItem> target,
+            FamilyMember membership,
+            String itemType,
+            Collection<Long> itemIds
+    ) {
+        LocalDateTime now = LocalDateTime.now();
+        for (Long itemId : itemIds) {
+            target.add(FamilySharedItem.builder()
+                    .membership(membership)
+                    .itemType(itemType)
+                    .itemId(itemId)
+                    .createdAt(now)
+                    .build());
+        }
+    }
+
+    private String normalizeItemType(String value) {
+        String type = value == null ? "" : value.trim().toUpperCase();
+        return switch (type) {
+            case "PASSWORD", "PASSWORDS" -> "PASSWORD";
+            case "CARD", "CARDS" -> "CARD";
+            case "DOCUMENT", "DOCUMENTS" -> "DOCUMENT";
+            case "NOTE", "NOTES" -> "NOTE";
+            default -> throw badRequest("Unknown vault item type.");
+        };
     }
 
     private FamilyMemberResponse toMemberResponse(
@@ -426,9 +531,9 @@ public class FamilyService {
     ) {
         return new SharedPasswordItemResponse(
                 item.id(), "PASSWORD", safe(item.title()), safe(item.usernameValue()),
-                detail ? safe(item.password()) : "",
+                detail ? safeDecrypted(item.password()) : "",
                 safe(item.website()),
-                detail ? safe(item.notes()) : "",
+                detail ? safeDecrypted(item.notes()) : "",
                 owner.id(), safe(owner.fullName()), safe(owner.email())
         );
     }
@@ -440,10 +545,10 @@ public class FamilyService {
     ) {
         return new SharedCardItemResponse(
                 item.id(), "CARD", safe(item.cardName()),
-                detail ? safe(item.cardNumber()) : "",
-                detail ? safe(item.expiryDate()) : "",
-                detail ? safe(item.cvv()) : "",
-                detail ? safe(item.cardholderName()) : "",
+                detail ? safeDecrypted(item.cardNumber()) : "",
+                detail ? safeDecrypted(item.expiryDate()) : "",
+                detail ? safeDecrypted(item.cvv()) : "",
+                detail ? safeDecrypted(item.cardholderName()) : "",
                 owner.id(), safe(owner.fullName()), safe(owner.email())
         );
     }
@@ -454,7 +559,7 @@ public class FamilyService {
     ) {
         return new SharedDocumentItemResponse(
                 item.id(), "DOCUMENT", safe(item.documentName()),
-                safe(item.documentType()), "", safe(item.documentNotes()),
+                safe(item.documentType()), "", safeDecrypted(item.documentNotes()),
                 owner.id(), safe(owner.fullName()), safe(owner.email())
         );
     }
@@ -466,7 +571,7 @@ public class FamilyService {
     ) {
         return new SharedNoteItemResponse(
                 item.id(), "NOTE", safe(item.title()), safe(item.category()),
-                detail ? safe(item.content()) : "",
+                detail ? safeDecrypted(item.content()) : "",
                 Boolean.TRUE.equals(item.pinned()),
                 item.createdAt(), item.updatedAt(),
                 owner.id(), safe(owner.fullName()), safe(owner.email())
@@ -490,6 +595,14 @@ public class FamilyService {
         return value == null ? "" : value.trim();
     }
 
+    private String safeDecrypted(String value) {
+        String clean = safe(value);
+        if (clean.startsWith("v1:")) {
+            return "[Unable to decrypt. Please update this item in the owner's vault.]";
+        }
+        return clean;
+    }
+
     private ResponseStatusException badRequest(String message) {
         return new ResponseStatusException(HttpStatus.BAD_REQUEST, message);
     }
@@ -508,6 +621,20 @@ public class FamilyService {
 
         boolean allowed(FamilyMember member) {
             return predicate.test(member);
+        }
+    }
+
+    private record SelectionPlan(
+            List<Long> passwordIds,
+            List<Long> cardIds,
+            List<Long> documentIds,
+            List<Long> noteIds
+    ) {
+        boolean isEmpty() {
+            return passwordIds.isEmpty()
+                    && cardIds.isEmpty()
+                    && documentIds.isEmpty()
+                    && noteIds.isEmpty();
         }
     }
 

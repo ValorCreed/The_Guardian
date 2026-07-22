@@ -8,7 +8,7 @@ spring:
         webmvc:
           routes:
             - id: auth-service
-              uri: "${AUTH_SERVICE_URL:http://localhost:8081}"
+              uri: "${AUTH_SERVICE_URL:http://localhost:8089}"
               predicates:
                 - Path=/vault/auth/**,/vault/sessions/**
 

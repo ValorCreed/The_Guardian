@@ -29,10 +29,20 @@ public final class DatabaseMigrationRunner {
             System.out.println("        THE GUARDIAN");
             System.out.println("    Database Migration Runner");
             System.out.println("=========================================");
-            System.out.println("Validating Flyway migration history...");
+            System.out.println("Applying pending Flyway migrations...");
 
-            flyway.validate();
+            /*
+             * Do not call validate() before migrate(). In Flyway 12, a direct
+             * validation reports a newly added migration as pending and stops
+             * before migrate() gets the chance to apply it. migrate() already
+             * validates the existing migration history because
+             * validateOnMigrate is enabled.
+             */
             MigrateResult result = flyway.migrate();
+
+            System.out.println("Validating the completed migration history...");
+            flyway.validate();
+
             MigrationInfoService info = flyway.info();
             MigrationInfo current = info.current();
 

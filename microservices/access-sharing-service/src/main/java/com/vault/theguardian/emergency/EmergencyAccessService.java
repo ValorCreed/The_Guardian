@@ -6,6 +6,7 @@ import com.vault.theguardian.auth.InternalUserResponse;
 import com.vault.theguardian.notification.NotificationClient;
 import com.vault.theguardian.subscription.SubscriptionClient;
 import com.vault.theguardian.subscription.SubscriptionEntitlements;
+import com.vault.theguardian.vault.DownloadedDocument;
 import com.vault.theguardian.vault.InternalVaultItemResponse;
 import com.vault.theguardian.vault.VaultClient;
 import jakarta.transaction.Transactional;
@@ -388,26 +389,26 @@ public class EmergencyAccessService {
 
         List<EmergencyVaultItemResponse> passwords = contact.isAllowPasswords()
                 ? vaultClient.list(owner.id(), "passwords").stream()
-                    .map(item -> toEmergencyItem(item, owner, false))
-                    .toList()
+                .map(item -> toEmergencyItem(item, owner, false))
+                .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> cards = contact.isAllowCards()
                 ? vaultClient.list(owner.id(), "cards").stream()
-                    .map(item -> toEmergencyItem(item, owner, false))
-                    .toList()
+                .map(item -> toEmergencyItem(item, owner, false))
+                .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> documents = contact.isAllowDocuments()
                 ? vaultClient.list(owner.id(), "documents").stream()
-                    .map(item -> toEmergencyItem(item, owner, false))
-                    .toList()
+                .map(item -> toEmergencyItem(item, owner, false))
+                .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> notes = contact.isAllowNotes()
                 ? vaultClient.list(owner.id(), "notes").stream()
-                    .map(item -> toEmergencyItem(item, owner, false))
-                    .toList()
+                .map(item -> toEmergencyItem(item, owner, false))
+                .toList()
                 : List.of();
 
         log(owner.id(), requester.id(), EmergencyAuditAction.EMERGENCY_VAULT_OPENED,
@@ -460,6 +461,32 @@ public class EmergencyAccessService {
                         + " item: " + clean(response.title(), "Untitled item") + ".");
 
         return response;
+    }
+
+    public DownloadedDocument downloadEmergencyDocument(
+            AuthenticatedUser requester,
+            Long requestId,
+            Long itemId
+    ) {
+        EmergencyAccessRequest request =
+                getReleasedRequestForRequester(requester, requestId);
+
+        EmergencyContact contact = request.getContact();
+        requireItemTypeAllowed(contact, "DOCUMENT");
+
+        InternalUserResponse owner = authClient.requireById(request.getOwnerId());
+
+        // Confirm the item belongs to this owner before downloading its bytes.
+        InternalVaultItemResponse item =
+                vaultClient.get(owner.id(), "documents", itemId);
+        DownloadedDocument document = vaultClient.downloadDocument(owner.id(), itemId);
+
+        log(owner.id(), requester.id(), EmergencyAuditAction.EMERGENCY_ITEM_VIEWED,
+                "Emergency document downloaded",
+                requester.email() + " downloaded an emergency document: "
+                        + clean(item.documentName(), "Document") + ".");
+
+        return document;
     }
 
     private EmergencyAccessRequest getReleasedRequestForRequester(
@@ -648,8 +675,8 @@ public class EmergencyAccessService {
         return switch (type) {
             case "PASSWORD" -> new EmergencyVaultItemResponse(
                     item.id(), "PASSWORD", safe(item.title()),
-                    safe(item.usernameValue()), detail ? safe(item.password()) : "",
-                    safe(item.website()), detail ? safe(item.notes()) : "",
+                    safe(item.usernameValue()), detail ? safeDecrypted(item.password()) : "",
+                    safe(item.website()), detail ? safeDecrypted(item.notes()) : "",
                     null, null, null, null,
                     null, null, null, null, null,
                     null, null, null, null,
@@ -659,14 +686,14 @@ public class EmergencyAccessService {
             );
             case "CARD" -> new EmergencyVaultItemResponse(
                     item.id(), "CARD", clean(item.cardName(), "Saved Card"),
-                    detail ? safe(item.cardholderName()) : "",
+                    detail ? safeDecrypted(item.cardholderName()) : "",
                     null, null, null,
                     null, null, null, null,
-                    detail ? safe(item.cardNumber()) : "",
-                    detail ? safe(item.expiryDate()) : "",
-                    detail ? safe(item.cvv()) : "",
-                    detail ? safe(item.cardholderName()) : "",
-                    detail ? safe(item.cardholderName()) : "",
+                    detail ? safeDecrypted(item.cardNumber()) : "",
+                    detail ? safeDecrypted(item.expiryDate()) : "",
+                    detail ? safeDecrypted(item.cvv()) : "",
+                    detail ? safeDecrypted(item.cardholderName()) : "",
+                    detail ? safeDecrypted(item.cardholderName()) : "",
                     null, null, null, null,
                     null, null, null,
                     clean(owner.fullName(), owner.email()), owner.email(),
@@ -678,7 +705,7 @@ public class EmergencyAccessService {
                     item.documentName(), item.documentType(), item.sizeBytes(), null,
                     null, null, null, null, null,
                     item.documentName(), item.documentType(), "",
-                    detail ? safe(item.documentNotes()) : "",
+                    detail ? safeDecrypted(item.documentNotes()) : "",
                     null, null, null,
                     clean(owner.fullName(), owner.email()), owner.email(),
                     item.createdAt(), item.updatedAt()
@@ -689,7 +716,7 @@ public class EmergencyAccessService {
                     null, null, null, null,
                     null, null, null, null, null,
                     null, null, null, null,
-                    item.category(), detail ? safe(item.content()) : "",
+                    item.category(), detail ? safeDecrypted(item.content()) : "",
                     item.pinned(),
                     clean(owner.fullName(), owner.email()), owner.email(),
                     item.createdAt(), item.updatedAt()
@@ -784,6 +811,14 @@ public class EmergencyAccessService {
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String safeDecrypted(String value) {
+        String clean = safe(value);
+        if (clean.startsWith("v1:")) {
+            return "[Unable to decrypt. Please update this item in the owner's vault.]";
+        }
+        return clean;
     }
 
     private ResponseStatusException badRequest(String message) {
