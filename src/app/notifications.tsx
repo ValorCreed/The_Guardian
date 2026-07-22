@@ -269,12 +269,12 @@ export default function NotificationsScreen() {
                     <Ionicons name={visual.icon as any} size={21} color={visual.iconColor} />
                   </View>
 
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.notificationContent}>
                     <View style={styles.notificationTitleRow}>
-                      <Text style={styles.notificationTitle} numberOfLines={1}>{item.title}</Text>
+                      <Text style={styles.notificationTitle}>{item.title}</Text>
                       {!item.read && <View style={styles.unreadDot} />}
                     </View>
-                    <Text style={styles.notificationMessage} numberOfLines={3}>{item.message}</Text>
+                    <Text style={styles.notificationMessage}>{item.message}</Text>
                     <Text style={styles.notificationDate}>{formatNotificationDate(item.createdAt)}</Text>
                   </View>
 
@@ -310,25 +310,61 @@ const makeStyles = (C: any) =>
     eyebrow: { color: C.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase' },
     title: { color: C.text, fontSize: 31, fontWeight: '900', marginTop: 4 },
     subtitle: { color: C.textSecondary, fontSize: 14, marginTop: 4, lineHeight: 20 },
-    markAllButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border },
+    markAllButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     markAllText: { color: C.primary, fontSize: 12, fontWeight: '900' },
     disabledButton: { opacity: 0.55 },
     content: { paddingHorizontal: 20, gap: 12 },
-    notificationCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-    unreadCard: { borderColor: C.primary, backgroundColor: C.actionCard },
+    notificationCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'flex-start', gap: 12 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
+    unreadCard: { borderColor: C.primary, backgroundColor: C.actionCard 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     notificationIcon: { width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-    notificationTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    notificationTitle: { color: C.text, fontSize: 15, fontWeight: '900', flex: 1 },
+    notificationContent: { flex: 1, minWidth: 0 },
+    notificationTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+    notificationTitle: { color: C.text, fontSize: 15, fontWeight: '900', flex: 1, flexShrink: 1, lineHeight: 21 },
     unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary },
-    notificationMessage: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4 },
+    notificationMessage: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4, flexShrink: 1 },
     notificationDate: { color: C.tabInactive, fontSize: 11, fontWeight: '800', marginTop: 8 },
-    deleteButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center' },
-    emptyCard: { marginHorizontal: 20, backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 24, alignItems: 'center' },
+    deleteButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center' 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
+    emptyCard: { marginHorizontal: 20, backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 24, alignItems: 'center' 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     emptyIcon: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
     emptyTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
     emptyText: { color: C.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 20 },
-    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
-    skeletonCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
+    skeletonCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     skeletonIcon: { width: 42, height: 42, borderRadius: 16 },
     skeletonTitle: { width: '50%', height: 14, marginBottom: 10 },
     skeletonMessage: { width: '88%', height: 12 },

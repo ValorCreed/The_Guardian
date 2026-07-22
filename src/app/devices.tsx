@@ -402,7 +402,12 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     skeletonSectionTitle: {
       width: 120,
@@ -478,7 +483,12 @@ const makeStyles = (C: any) =>
       gap: 14,
       alignItems: 'center',
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     heroIcon: {
       width: 54,
@@ -516,12 +526,22 @@ const makeStyles = (C: any) =>
       padding: 15,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     dangerActionCard: {
       borderColor: C.alertDangerBg,
       backgroundColor: C.alertDangerBg,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     actionTitle: {
       color: C.text,
@@ -553,7 +573,12 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     deviceTopRow: {
       flexDirection: 'row',
@@ -614,7 +639,12 @@ const makeStyles = (C: any) =>
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     metaRow: {
       flexDirection: 'row',
@@ -631,7 +661,12 @@ const makeStyles = (C: any) =>
       borderRadius: 999,
       paddingHorizontal: 10,
       paddingVertical: 6,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     metaText: {
       color: C.textSecondary,
@@ -647,7 +682,12 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     emptyTitle: {
       color: C.text,

@@ -759,8 +759,8 @@ const VaultScreen = () => {
                 </View>
 
                 <View style={styles.cardText}>
-                  <Text style={styles.cardName} numberOfLines={1}>{title}</Text>
-                  <Text style={styles.cardSub} numberOfLines={1}>
+                  <Text style={styles.cardName}>{title}</Text>
+                  <Text style={styles.cardSub}>
                     {item.usernameValue || item.website || 'Login details'}
                   </Text>
                 </View>
@@ -801,10 +801,10 @@ const VaultScreen = () => {
                 <Ionicons name="lock-closed-outline" size={15} color={C.tabInactive} />
               </View>
 
-              <Text style={styles.documentName} numberOfLines={2}>
+              <Text style={styles.documentName}>
                 {item.fileName || item.title || 'Document'}
               </Text>
-              <Text style={styles.documentCategory} numberOfLines={1}>
+              <Text style={styles.documentCategory}>
                 {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
               </Text>
               <Text style={styles.documentSize}>{formatSize(item.sizeBytes)}</Text>
@@ -867,10 +867,10 @@ const VaultScreen = () => {
               </View>
 
               <View style={styles.cardText}>
-                <Text style={styles.cardName} numberOfLines={1}>
+                <Text style={styles.cardName}>
                   {note.title || 'Secure Note'}
                 </Text>
-                <Text style={styles.cardSub} numberOfLines={1}>
+                <Text style={styles.cardSub}>
                   {note.category || 'General'} · encrypted
                 </Text>
               </View>
@@ -1164,6 +1164,11 @@ const makeStyles = (C: ThemeColors) =>
       backgroundColor: C.primary,
       borderRadius: 28,
       padding: 18,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     overviewIcon: {
@@ -1209,6 +1214,11 @@ const makeStyles = (C: ThemeColors) =>
       gap: 8,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     searchInput: {
@@ -1228,6 +1238,11 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       gap: 4,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     tab: {
@@ -1263,10 +1278,15 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 22,
       padding: 14,
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     noteCard: {
@@ -1274,10 +1294,15 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 22,
       padding: 14,
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     avatar: {
@@ -1296,12 +1321,16 @@ const makeStyles = (C: ThemeColors) =>
 
     cardText: {
       flex: 1,
+      minWidth: 0,
+      flexShrink: 1,
     },
 
     cardName: {
       fontSize: 15,
       fontWeight: '900',
       color: C.text,
+      lineHeight: 21,
+      flexShrink: 1,
     },
 
     cardSub: {
@@ -1309,11 +1338,15 @@ const makeStyles = (C: ThemeColors) =>
       color: C.textSecondary,
       marginTop: 3,
       fontWeight: '600',
+      lineHeight: 18,
+      flexShrink: 1,
     },
 
     itemMeta: {
       alignItems: 'flex-end',
+      justifyContent: 'center',
       gap: 5,
+      flexShrink: 0,
     },
 
     itemDate: {
@@ -1337,6 +1370,11 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 4,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     documentTop: {
@@ -1359,8 +1397,8 @@ const makeStyles = (C: ThemeColors) =>
       fontSize: 14,
       fontWeight: '900',
       color: C.text,
-      minHeight: 38,
       lineHeight: 19,
+      flexShrink: 1,
     },
 
     documentCategory: {
@@ -1386,6 +1424,11 @@ const makeStyles = (C: ThemeColors) =>
       borderColor: C.border,
       padding: 22,
       alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     documentUpgradeIcon: {
@@ -1438,15 +1481,22 @@ const makeStyles = (C: ThemeColors) =>
     creditCard: {
       borderRadius: 28,
       padding: 22,
-      height: 190,
+      minHeight: 190,
       justifyContent: 'space-between',
       overflow: 'hidden',
+      gap: 18,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     creditCardTop: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'flex-start',
+      gap: 12,
     },
 
     creditCardLabel: {
@@ -1462,6 +1512,8 @@ const makeStyles = (C: ThemeColors) =>
       color: '#fff',
       fontSize: 18,
       fontWeight: '900',
+      lineHeight: 24,
+      flexShrink: 1,
     },
 
     creditCardNumber: {
@@ -1469,18 +1521,24 @@ const makeStyles = (C: ThemeColors) =>
       fontSize: 19,
       letterSpacing: 2,
       fontWeight: '800',
+      lineHeight: 28,
+      flexShrink: 1,
     },
 
     creditCardBottom: {
       flexDirection: 'row',
       justifyContent: 'space-between',
-      alignItems: 'center',
+      alignItems: 'flex-end',
+      gap: 12,
+      flexWrap: 'wrap',
     },
 
     creditCardBank: {
       color: 'rgba(255,255,255,0.88)',
       fontSize: 13,
       fontWeight: '800',
+      lineHeight: 19,
+      flexShrink: 1,
     },
 
     cardEncryptedPill: {
@@ -1501,7 +1559,9 @@ const makeStyles = (C: ThemeColors) =>
 
     noteRight: {
       alignItems: 'flex-end',
+      justifyContent: 'center',
       gap: 8,
+      flexShrink: 0,
     },
 
     pinnedPill: {
@@ -1522,11 +1582,21 @@ const makeStyles = (C: ThemeColors) =>
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
       opacity: 0.85,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 2,
     },
 
     skeletonLightBlock: {
       backgroundColor: 'rgba(255,255,255,0.18)',
       borderRadius: 999,
+      shadowColor: '#000',
+      shadowOpacity: 0.05,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
     },
 
     skeletonListTitle: {
@@ -1570,6 +1640,11 @@ const makeStyles = (C: ThemeColors) =>
       justifyContent: 'space-between',
       backgroundColor: C.primary,
       opacity: 0.88,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     skeletonCardTitle: {
@@ -1598,6 +1673,11 @@ const makeStyles = (C: ThemeColors) =>
       alignItems: 'center',
       width: '100%',
       paddingHorizontal: 30,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     emptyIcon: {

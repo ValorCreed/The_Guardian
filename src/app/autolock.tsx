@@ -284,7 +284,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     infoRow: {
       flexDirection: 'row',
@@ -337,7 +342,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 26,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     optionRow: {
       minHeight: 74,

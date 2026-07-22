@@ -837,7 +837,12 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     skeletonHeroIcon: {
       width: 82,
@@ -966,7 +971,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     infoRow: {
       flexDirection: 'row',
@@ -1010,7 +1020,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     statusHeaderRow: {
       flexDirection: 'row',
@@ -1064,7 +1079,12 @@ const makeStyles = (C: any) =>
       borderRadius: 16,
       paddingVertical: 12,
       paddingHorizontal: 12,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     statValue: {
       color: C.text,
@@ -1091,7 +1111,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     sectionTitle: {
       color: C.text,
@@ -1114,7 +1139,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       minHeight: 54,
       marginTop: 12,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     primaryButtonText: {
       color: '#fff',
@@ -1133,7 +1163,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 10,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -1159,7 +1194,12 @@ const makeStyles = (C: any) =>
       borderColor: C.primary,
       padding: 16,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     restoreStatsRow: {
       flexDirection: 'row',
@@ -1217,7 +1257,12 @@ const makeStyles = (C: any) =>
       padding: 22,
       alignItems: 'center',
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     emptyTitle: {
       color: C.text,
@@ -1241,7 +1286,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 15,
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     historyTopRow: {
       flexDirection: 'row',
@@ -1321,7 +1371,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 6,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     smallActionText: {
       color: C.primary,
@@ -1337,7 +1392,12 @@ const makeStyles = (C: any) =>
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     footnote: {
       color: C.textSecondary,

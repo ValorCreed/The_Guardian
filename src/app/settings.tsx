@@ -261,7 +261,7 @@ function PlanBadge({
               },
             ]}
           >
-            <View style={[localStyles.loadingDot, { backgroundColor: C.primary }]} />
+            {/* <View style={[localStyles.loadingDot, { backgroundColor: C.primary }]} /> */}
             <Text style={[localStyles.loadingText, { color: C.textSecondary }]}>
               Loading
             </Text>
@@ -1316,7 +1316,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       padding: 22,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     deleteModalCard: {
       width: '100%',
       backgroundColor: C.backgroundElement,
@@ -1324,7 +1329,12 @@ const makeStyles = (C: any) =>
       padding: 22,
       borderWidth: 1,
       borderColor: C.danger,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     deleteModalIcon: {
       width: 56,
       height: 56,
@@ -1333,7 +1343,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     deleteModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', marginBottom: 8 },
     deleteModalText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 18, fontWeight: '600' },
     deleteInputLabel: { color: C.text, fontSize: 13, fontWeight: '900', marginBottom: 8 },
@@ -1357,7 +1372,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       gap: 9,
       marginTop: 4,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     deleteDisabledButton: { opacity: 0.65 },
     deleteConfirmButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
     deleteCancelButton: { alignItems: 'center', paddingVertical: 13, marginTop: 8 },
@@ -1369,7 +1389,12 @@ const makeStyles = (C: any) =>
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: C.danger,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     dangerRowDivider: { borderBottomWidth: 1, borderBottomColor: C.danger },
     dangerIconCircle: {
       width: 42,

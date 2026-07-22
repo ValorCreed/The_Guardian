@@ -399,7 +399,12 @@ const makeStyles = (P: any) => {
       backgroundColor: P.softPrimaryStrong,
       borderWidth: 1,
       borderColor: P.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     trustText: {
       color: P.text,
@@ -442,7 +447,12 @@ const makeStyles = (P: any) => {
       justifyContent: 'center',
       borderWidth: 1,
       borderColor: P.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     signInButtonText: {
       color: P.text,

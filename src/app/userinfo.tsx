@@ -374,7 +374,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       backgroundColor: C.backgroundElement,
       marginRight: 12,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     title: { fontSize: 26, fontWeight: '800', color: C.text },
     profileCard: {
       alignItems: 'center',
@@ -382,7 +387,12 @@ const makeStyles = (C: any) =>
       borderRadius: 24,
       padding: 22,
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     avatar: {
       width: 72,
       height: 72,
@@ -407,7 +417,12 @@ const makeStyles = (C: any) =>
       marginBottom: 8,
       marginLeft: 4,
     },
-    card: { backgroundColor: C.backgroundElement, borderRadius: 20, marginBottom: 24, overflow: 'hidden' },
+    card: { backgroundColor: C.backgroundElement, borderRadius: 20, marginBottom: 24, overflow: 'hidden' 
+     , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, paddingHorizontal: 14 },
     rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     iconCircle: {
@@ -423,7 +438,12 @@ const makeStyles = (C: any) =>
     rowLabel: { fontSize: 15, color: C.text, fontWeight: '700' },
     rowValue: { fontSize: 14, color: C.textSecondary, marginTop: 3 },
     rowSub: { fontSize: 12, color: C.textSecondary, marginTop: 3, lineHeight: 16 },
-    smallButton: { backgroundColor: C.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14 },
+    smallButton: { backgroundColor: C.primary, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 14 
+     , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     disabledSmallButton: { opacity: 0.6 },
     smallButtonText: { color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
   });

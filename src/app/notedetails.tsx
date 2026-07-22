@@ -334,7 +334,12 @@ type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
 const makeStyles = (C: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: C.background },
-    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     skeletonNoteIcon: { width: 74, height: 74, borderRadius: 24, marginBottom: 16 },
     skeletonTitle: { width: '62%', height: 26, marginBottom: 10 },
     skeletonSubtitle: { width: '48%', height: 13 },
@@ -360,14 +365,34 @@ const makeStyles = (C: ThemeColors) =>
     categoryChipActive: { backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
-    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18 },
+    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     pinnedTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     pinnedSub: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
     noteInput: { minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
-    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18 },
+    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     noteText: { color: C.text, fontSize: 15, lineHeight: 23 },
-    mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 },
+    mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     mainBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 },
-    secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10, flexDirection: 'row', gap: 8 },
+    secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10, flexDirection: 'row', gap: 8 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     secondaryBtnText: { color: C.primary, fontWeight: '900', fontSize: 15 },
   });

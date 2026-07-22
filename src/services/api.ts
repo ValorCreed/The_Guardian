@@ -11,7 +11,8 @@ import {
   getAnalyticsFileKind,
   getAnalyticsSizeBucket,
   identifyAnalyticsUser,
-  trackApiFailure,
+  recordApiRequest,
+  trackFeatureAction,
   trackLoginSuccess,
   trackLogout,
   trackPlanLimitReached,
@@ -21,7 +22,6 @@ export const API_BASE_URL = (
   process.env.EXPO_PUBLIC_API_BASE_URL ||
   process.env.EXPO_PUBLIC_API_URL ||
   'https://guardian-vault-gateway.onrender.com'
-   //'http://10.252.149.37:8080'
 ).replace(/\/+$/, '');
 /**
  * REQUEST TIMEOUT SETTINGS
@@ -982,6 +982,8 @@ async function request<T>(
   if (useAuth && token) headers.Authorization = `Bearer ${token}`;
 
   const controller = new AbortController();
+  const requestStartedAt = Date.now();
+  const requestMethod = String(options.method || 'GET').toUpperCase();
 
   const timeoutId = setTimeout(() => {
     controller.abort();
@@ -1000,6 +1002,7 @@ async function request<T>(
 
     const errorName = String(error?.name || '').toLowerCase();
     const errorMessage = String(error?.message || '').toLowerCase();
+    const durationMs = Date.now() - requestStartedAt;
 
     if (
       errorName === 'aborterror' ||
@@ -1008,7 +1011,13 @@ async function request<T>(
       errorMessage.includes('canceled') ||
       errorMessage.includes('cancelled')
     ) {
-      trackApiFailure(path, undefined, 'REQUEST_TIMEOUT');
+      recordApiRequest({
+        path,
+        method: requestMethod,
+        durationMs,
+        success: false,
+        code: 'REQUEST_TIMEOUT',
+      });
 
       throw new GuardianApiError(
         getFriendlyErrorMessage(
@@ -1024,7 +1033,13 @@ async function request<T>(
       );
     }
 
-    trackApiFailure(path, undefined, 'NETWORK_UNREACHABLE');
+    recordApiRequest({
+      path,
+      method: requestMethod,
+      durationMs,
+      success: false,
+      code: 'NETWORK_UNREACHABLE',
+    });
 
     throw new GuardianApiError(
       getFriendlyErrorMessage(undefined, path, 'Network request failed'),
@@ -1072,7 +1087,14 @@ async function request<T>(
     );
 
     if (!quietOptional401) {
-      trackApiFailure(path, response.status, derivedCode || 'HTTP_ERROR');
+      recordApiRequest({
+        path,
+        method: requestMethod,
+        status: response.status,
+        durationMs: Date.now() - requestStartedAt,
+        success: false,
+        code: derivedCode || 'HTTP_ERROR',
+      });
     }
 
     if (derivedCode === 'PLAN_LIMIT_REACHED') {
@@ -1090,6 +1112,14 @@ async function request<T>(
       }
     );
   }
+
+  recordApiRequest({
+    path,
+    method: requestMethod,
+    status: response.status,
+    durationMs: Date.now() - requestStartedAt,
+    success: true,
+  });
 
   return data as T;
 }
@@ -1246,19 +1276,41 @@ async function downloadAuthenticatedFile(
   const deviceHeaders = await getGuardianDeviceHeaders();
   const safeFallbackName = sanitizeDownloadFileName(fallbackFileName);
   const destination = `${FileSystem.cacheDirectory}${Date.now()}-${safeFallbackName}`;
+  const downloadStartedAt = Date.now();
 
-  const result = await FileSystem.downloadAsync(
-    `${API_BASE_URL}${path}`,
-    destination,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        ...deviceHeaders,
-      },
-    }
-  );
+  let result: any;
+
+  try {
+    result = await FileSystem.downloadAsync(
+      `${API_BASE_URL}${path}`,
+      destination,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...deviceHeaders,
+        },
+      }
+    );
+  } catch (error) {
+    recordApiRequest({
+      path,
+      method: 'GET',
+      durationMs: Date.now() - downloadStartedAt,
+      success: false,
+      code: 'DOWNLOAD_NETWORK_ERROR',
+    });
+    throw error;
+  }
 
   if (result.status < 200 || result.status >= 300) {
+    recordApiRequest({
+      path,
+      method: 'GET',
+      status: result.status,
+      durationMs: Date.now() - downloadStartedAt,
+      success: false,
+      code: 'DOWNLOAD_HTTP_ERROR',
+    });
     try {
       await FileSystem.deleteAsync(result.uri, { idempotent: true });
     } catch {
@@ -1279,6 +1331,14 @@ async function downloadAuthenticatedFile(
   const contentType = getHeaderValue(result.headers, 'content-type') || fallbackMimeType;
   const fileNameFromHeader = getFileNameFromContentDisposition(contentDisposition);
   const info = await FileSystem.getInfoAsync(result.uri).catch(() => null as any);
+
+  recordApiRequest({
+    path,
+    method: 'GET',
+    status: result.status,
+    durationMs: Date.now() - downloadStartedAt,
+    success: true,
+  });
 
   return {
     uri: result.uri,
@@ -1327,15 +1387,22 @@ async function pingServer(timeoutMs = 2500): Promise<boolean> {
 export const api = {
   clearCache: () => clearCache(),
 
-  register: (body: { fullname: string; email: string; password: string }) =>
-    request<RegisterResponse>('/vault/auth/register', {
+  register: async (body: { fullname: string; email: string; password: string }) => {
+    const result = await request<RegisterResponse>('/vault/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         fullname: body.fullname.trim(),
         email: body.email.trim().toLowerCase(),
         password: body.password,
       }),
-    }, false, AUTH_REQUEST_TIMEOUT_MS),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
+
+    trackFeatureAction('AUTH', 'ACCOUNT_REGISTERED', {
+      verification_delivery_requested: true,
+    });
+
+    return result;
+  },
 
   login: (body: { email: string; password: string; forceReplaceDevice?: boolean }) =>
     request<LoginResponse>('/vault/auth/login', {
@@ -1356,14 +1423,18 @@ export const api = {
       }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
-  verifyEmail: (body: { email: string; code: string }) =>
-    request<{ message: string }>('/vault/auth/verify-email', {
+  verifyEmail: async (body: { email: string; code: string }) => {
+    const result = await request<{ message: string }>('/vault/auth/verify-email', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
         code: body.code.trim(),
       }),
-    }, false, AUTH_REQUEST_TIMEOUT_MS),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
+
+    trackFeatureAction('AUTH', 'EMAIL_VERIFIED');
+    return result;
+  },
 
   resendVerification: (body: { email: string }) =>
     request<{ message: string }>('/vault/auth/resend-verification', {
@@ -1377,15 +1448,19 @@ export const api = {
       body: JSON.stringify({ email: body.email.trim().toLowerCase() }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
-  resetPassword: (body: { email: string; code: string; newPassword: string }) =>
-    request<{ message: string }>('/vault/auth/reset-password', {
+  resetPassword: async (body: { email: string; code: string; newPassword: string }) => {
+    const result = await request<{ message: string }>('/vault/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
         code: body.code.trim(),
         newPassword: body.newPassword,
       }),
-    }, false, AUTH_REQUEST_TIMEOUT_MS),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
+
+    trackFeatureAction('AUTH', 'PASSWORD_RESET_COMPLETED');
+    return result;
+  },
 
   getRecoveryKitStatus: () =>
     cachedGet<RecoveryKitStatusResponse>('/vault/recovery-kit/status'),
@@ -1398,6 +1473,7 @@ export const api = {
     clearCache('GET:/vault/recovery-kit/status');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_KIT', 'GENERATED');
     return result;
   },
 
@@ -1408,28 +1484,37 @@ export const api = {
     clearCache('GET:/vault/recovery-kit/status');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_KIT', 'REVOKED');
     return result;
   },
 
-  recoverWithRecoveryKit: (body: RecoveryPasswordResetBody) =>
-    request<{ message: string }>('/vault/recovery-kit/reset-password', {
+  recoverWithRecoveryKit: async (body: RecoveryPasswordResetBody) => {
+    const result = await request<{ message: string }>('/vault/recovery-kit/reset-password', {
       method: 'POST',
       body: JSON.stringify({
         recoveryId: body.recoveryId.trim().toUpperCase(),
         recoveryKey: body.recoveryKey.trim(),
         newPassword: body.newPassword,
       }),
-    }, false, AUTH_REQUEST_TIMEOUT_MS),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
 
-  resetAccountAndEraseVault: (body: AccountResetEraseBody) =>
-    request<{ message: string }>('/vault/recovery-kit/reset-account', {
+    trackFeatureAction('RECOVERY_KIT', 'PASSWORD_RESET_COMPLETED');
+    return result;
+  },
+
+  resetAccountAndEraseVault: async (body: AccountResetEraseBody) => {
+    const result = await request<{ message: string }>('/vault/recovery-kit/reset-account', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
         resetCode: body.resetCode.trim(),
         newPassword: body.newPassword,
       }),
-    }, false, AUTH_REQUEST_TIMEOUT_MS),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
+
+    trackFeatureAction('ACCOUNT', 'RESET_AND_VAULT_ERASED');
+    return result;
+  },
 
   getSecuritySettings: () =>
     cachedGet<{ emailVerified: boolean; twoFactorEnabled: boolean }>('/vault/auth/me/security'),
@@ -1440,6 +1525,7 @@ export const api = {
       body: JSON.stringify({ enabled }),
     });
     clearCache('GET:/vault/auth/me/security');
+    trackFeatureAction('SECURITY', 'TWO_FACTOR_CHANGED', { enabled });
     return result;
   },
 
@@ -1483,6 +1569,17 @@ export const api = {
       method: 'POST',
     }, true, LONG_REQUEST_TIMEOUT_MS);
     clearCache('GET:/vault/backup/status');
+    trackFeatureAction('BACKUP', 'CREATED', {
+      item_count_bucket:
+        result.totalItemCount < 10
+          ? '<10'
+          : result.totalItemCount < 50
+            ? '10-49'
+            : result.totalItemCount < 200
+              ? '50-199'
+              : '200+',
+      size_bucket: getAnalyticsSizeBucket(result.backupSizeBytes),
+    });
     return result;
   },
 
@@ -1496,6 +1593,17 @@ export const api = {
     }, true, LONG_REQUEST_TIMEOUT_MS);
     clearVaultCaches();
     clearCache('GET:/vault/backup/status');
+    trackFeatureAction('BACKUP', 'RESTORED', {
+      replace_existing: Boolean(body.replaceExisting),
+      restored_count_bucket:
+        result.totalRestoredCount < 10
+          ? '<10'
+          : result.totalRestoredCount < 50
+            ? '10-49'
+            : result.totalRestoredCount < 200
+              ? '50-199'
+              : '200+',
+    });
     return result;
   },
 
@@ -1542,6 +1650,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'PASSWORD' });
     return result;
   },
 
@@ -1550,6 +1659,7 @@ export const api = {
       method: 'DELETE',
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'PASSWORD' });
     return result;
   },
 
@@ -1575,6 +1685,8 @@ export const api = {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
     const start = async () => new Promise<any>(async (resolve, reject) => {
+      const uploadStartedAt = Date.now();
+
       try {
         const deviceHeaders = await getGuardianDeviceHeaders();
         const formData = new FormData();
@@ -1606,6 +1718,13 @@ export const api = {
 
         timeoutId = setTimeout(() => {
           cancelled = true;
+          recordApiRequest({
+            path: '/vault/documents/upload',
+            method: 'POST',
+            durationMs: Date.now() - uploadStartedAt,
+            success: false,
+            code: 'UPLOAD_TIMEOUT',
+          });
           xhr?.abort();
         }, DOCUMENT_UPLOAD_TIMEOUT_MS);
 
@@ -1624,6 +1743,13 @@ export const api = {
           const status = xhr?.status || 0;
 
           if (status >= 200 && status < 300) {
+            recordApiRequest({
+              path: '/vault/documents/upload',
+              method: 'POST',
+              status,
+              durationMs: Date.now() - uploadStartedAt,
+              success: true,
+            });
             clearVaultCaches();
             void captureAnalyticsEvent('vault_item_created', {
               item_type: 'DOCUMENT',
@@ -1636,7 +1762,14 @@ export const api = {
 
           const serverMessage = getServerMessage(data, responseText);
           const uploadCode = String(data?.code || data?.errorCode || '').trim() || 'UPLOAD_HTTP_ERROR';
-          trackApiFailure('/vault/documents/upload', status, uploadCode);
+          recordApiRequest({
+            path: '/vault/documents/upload',
+            method: 'POST',
+            status,
+            durationMs: Date.now() - uploadStartedAt,
+            success: false,
+            code: uploadCode,
+          });
           if (uploadCode === 'PLAN_LIMIT_REACHED') {
             trackPlanLimitReached('/vault/documents/upload', status);
           }
@@ -1664,7 +1797,13 @@ export const api = {
             return;
           }
 
-          trackApiFailure('/vault/documents/upload', undefined, 'UPLOAD_FAILED');
+          recordApiRequest({
+            path: '/vault/documents/upload',
+            method: 'POST',
+            durationMs: Date.now() - uploadStartedAt,
+            success: false,
+            code: 'UPLOAD_FAILED',
+          });
 
           reject(new GuardianApiError(
             'The upload was interrupted. Please check your connection and try again.',
@@ -1685,7 +1824,13 @@ export const api = {
 
         xhr.ontimeout = () => {
           if (timeoutId) clearTimeout(timeoutId);
-          trackApiFailure('/vault/documents/upload', undefined, 'UPLOAD_TIMEOUT');
+          recordApiRequest({
+            path: '/vault/documents/upload',
+            method: 'POST',
+            durationMs: Date.now() - uploadStartedAt,
+            success: false,
+            code: 'UPLOAD_TIMEOUT',
+          });
 
           reject(new GuardianApiError(
             'The upload took too long and timed out. Try again on a stronger connection or choose a smaller file.',
@@ -1805,16 +1950,23 @@ export const api = {
       VAULT_LIST_TIMEOUT_MS
     ),
 
-  downloadDocumentToCache: (
+  downloadDocumentToCache: async (
     id: number | string,
     fileName = 'document',
     mimeType = 'application/octet-stream'
-  ) =>
-    downloadAuthenticatedFile(
+  ) => {
+    const result = await downloadAuthenticatedFile(
       `/vault/documents/${id}/download`,
       fileName,
       mimeType
-    ),
+    );
+    trackFeatureAction('DOCUMENT', 'DOWNLOADED', {
+      file_kind: getAnalyticsFileKind(mimeType),
+      size_bucket: getAnalyticsSizeBucket(result.sizeBytes),
+      access_source: 'OWN_VAULT',
+    });
+    return result;
+  },
 
   updateDocument: async (id: number | string, body: any) => {
     const result = await request(`/vault/documents/${id}`, {
@@ -1822,6 +1974,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'DOCUMENT' });
     return result;
   },
 
@@ -1830,6 +1983,7 @@ export const api = {
       method: 'DELETE',
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'DOCUMENT' });
     return result;
   },
 
@@ -1861,6 +2015,7 @@ export const api = {
       body: JSON.stringify(body),
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'CARD' });
     return result;
   },
 
@@ -1869,6 +2024,7 @@ export const api = {
       method: 'DELETE',
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'CARD' });
     return result;
   },
 
@@ -1905,6 +2061,10 @@ export const api = {
       }),
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_UPDATED', {
+      item_type: 'NOTE',
+      pinned: Boolean(body.pinned),
+    });
     return result;
   },
 
@@ -1913,6 +2073,7 @@ export const api = {
       method: 'DELETE',
     });
     clearVaultCaches();
+    trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'NOTE' });
     return result;
   },
 
@@ -1942,6 +2103,19 @@ export const api = {
       }),
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'CONTACT_ADDED', {
+      waiting_period_bucket:
+        (body.waitingPeriodHours || 72) <= 24
+          ? '24H'
+          : (body.waitingPeriodHours || 72) <= 48
+            ? '48H'
+            : '72H+',
+      permission_count:
+        Number(Boolean(body.allowPasswords)) +
+        Number(Boolean(body.allowCards)) +
+        Number(Boolean(body.allowDocuments)) +
+        Number(body.allowNotes !== false),
+    });
     return result;
   },
 
@@ -1962,6 +2136,14 @@ export const api = {
       }),
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'CONTACT_UPDATED', {
+      active: body.active !== false,
+      permission_count:
+        Number(Boolean(body.allowPasswords)) +
+        Number(Boolean(body.allowCards)) +
+        Number(Boolean(body.allowDocuments)) +
+        Number(body.allowNotes !== false),
+    });
     return result;
   },
 
@@ -1970,6 +2152,7 @@ export const api = {
       method: 'DELETE',
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'CONTACT_REMOVED');
     return result;
   },
 
@@ -1982,6 +2165,9 @@ export const api = {
       }),
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'REQUEST_SENT', {
+      has_optional_text: Boolean(body.message?.trim()),
+    });
     return result;
   },
 
@@ -1993,6 +2179,7 @@ export const api = {
       method: 'POST',
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'REQUEST_APPROVED');
     return result;
   },
 
@@ -2001,6 +2188,7 @@ export const api = {
       method: 'POST',
     });
     clearVaultCaches();
+    trackFeatureAction('EMERGENCY_ACCESS', 'REQUEST_DENIED');
     return result;
   },
 
@@ -2014,17 +2202,23 @@ export const api = {
   getEmergencyVaultItem: (requestId: number | string, itemType: string, itemId: number | string) =>
     cachedGet<EmergencyVaultItemResponse>(`/vault/emergency/requests/${requestId}/vault/${String(itemType).toUpperCase()}/${itemId}`),
 
-  downloadEmergencyDocumentToCache: (
+  downloadEmergencyDocumentToCache: async (
     requestId: number | string,
     itemId: number | string,
     fileName = 'emergency-document',
     mimeType = 'application/octet-stream'
-  ) =>
-    downloadAuthenticatedFile(
+  ) => {
+    const result = await downloadAuthenticatedFile(
       `/vault/emergency/requests/${requestId}/vault/DOCUMENT/${itemId}/download`,
       fileName,
       mimeType
-    ),
+    );
+    trackFeatureAction('EMERGENCY_ACCESS', 'DOCUMENT_DOWNLOADED', {
+      file_kind: getAnalyticsFileKind(mimeType),
+      size_bucket: getAnalyticsSizeBucket(result.sizeBytes),
+    });
+    return result;
+  },
 
 
   getFamilyOverview: () =>
@@ -2073,6 +2267,18 @@ export const api = {
     clearCache('GET:/vault/family/shared-items');
     clearCache('GET:/vault/family/member-password-risks');
     AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
+    trackFeatureAction('FAMILY', 'MEMBER_ADDED', {
+      permission_count:
+        Number(Boolean(permissions?.sharePasswords ?? passwordItemIds.length > 0)) +
+        Number(Boolean(permissions?.shareCards ?? cardItemIds.length > 0)) +
+        Number(Boolean(permissions?.shareDocuments ?? documentItemIds.length > 0)) +
+        Number(Boolean(permissions?.shareNotes ?? noteItemIds.length > 0)),
+      selected_item_count:
+        passwordItemIds.length +
+        cardItemIds.length +
+        documentItemIds.length +
+        noteItemIds.length,
+    });
     return result;
   },
 
@@ -2084,6 +2290,7 @@ export const api = {
     clearCache('GET:/vault/family/shared-items');
     clearCache('GET:/vault/family/member-password-risks');
     AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
+    trackFeatureAction('FAMILY', 'MEMBER_REMOVED');
     return result;
   },
 
@@ -2127,16 +2334,22 @@ export const api = {
       itemType: 'DOCUMENT',
     }) as SharedDocumentItem),
 
-  downloadSharedDocumentToCache: (
+  downloadSharedDocumentToCache: async (
     id: number | string,
     fileName = 'shared-document',
     mimeType = 'application/octet-stream'
-  ) =>
-    downloadAuthenticatedFile(
+  ) => {
+    const result = await downloadAuthenticatedFile(
       `/vault/family/shared-documents/${id}/download`,
       fileName,
       mimeType
-    ),
+    );
+    trackFeatureAction('FAMILY', 'SHARED_DOCUMENT_DOWNLOADED', {
+      file_kind: getAnalyticsFileKind(mimeType),
+      size_bucket: getAnalyticsSizeBucket(result.sizeBytes),
+    });
+    return result;
+  },
 
   getSharedNoteItems: () =>
     cachedGet<SharedNoteItem[]>('/vault/family/shared-notes', normalizeSharedNoteSummaries, VAULT_LIST_TIMEOUT_MS),
@@ -2244,6 +2457,7 @@ export const api = {
     clearCache('GET:/vault/sessions');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('DEVICE_SESSION', 'SESSION_REVOKED');
     return result;
   },
 
@@ -2254,6 +2468,7 @@ export const api = {
     clearCache('GET:/vault/sessions');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('DEVICE_SESSION', 'OTHER_DEVICES_LOGGED_OUT');
     return result;
   },
 
@@ -2262,6 +2477,7 @@ export const api = {
       method: 'POST',
     });
     clearCache();
+    trackFeatureAction('DEVICE_SESSION', 'ALL_DEVICES_LOGGED_OUT');
     return result;
   },
 
@@ -2273,6 +2489,7 @@ export const api = {
       }),
     });
     clearCache();
+    trackFeatureAction('ACCOUNT', 'ACCOUNT_DELETED');
     return result;
   },
 };
@@ -2350,10 +2567,10 @@ export async function saveLoginSession(data: LoginResponse) {
     plan: data.plan || 'UNKNOWN',
   });
 
-  trackLoginSuccess();
+  await trackLoginSuccess();
 }
 export async function logout() {
-  trackLogout();
+  await trackLogout();
   tokenCache = null;
 
   /**

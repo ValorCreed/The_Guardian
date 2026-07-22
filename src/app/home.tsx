@@ -1286,6 +1286,11 @@ const makeStyles = (C: any) =>
       alignItems: "center",
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     notificationBadge: {
@@ -1464,6 +1469,11 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     recoveryWarningIcon: {
       width: 46,
@@ -1498,6 +1508,11 @@ const makeStyles = (C: any) =>
       gap: 8,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     searchInput: {
@@ -1515,6 +1530,11 @@ const makeStyles = (C: any) =>
       padding: 14,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     sectionHeaderCompact: {
@@ -1579,6 +1599,11 @@ const makeStyles = (C: any) =>
       gap: 12,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     statIconCircle: {
@@ -1639,6 +1664,11 @@ const makeStyles = (C: any) =>
       gap: 9,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     actionBtn: {
@@ -1664,6 +1694,11 @@ const makeStyles = (C: any) =>
       overflow: "hidden",
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     recentCard: {
@@ -1718,6 +1753,11 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 2,
     },
 
     skeletonIcon: {
@@ -1764,6 +1804,11 @@ const makeStyles = (C: any) =>
       gap: 8,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     emptyText: {
@@ -1784,6 +1829,11 @@ const makeStyles = (C: any) =>
       gap: 12,
       borderWidth: 1,
       borderColor: C.securityScore,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
 
     upgradeIcon: {

@@ -79,7 +79,7 @@ export default function TermsOfServiceScreen() {
           activeOpacity={0.82}
           onPress={() => { hapticLight(); router.back(); }}
         >
-          <Text style={styles.buttonText}>Back to Settings</Text>
+          <Text style={styles.buttonText}>Done</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

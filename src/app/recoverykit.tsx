@@ -274,7 +274,7 @@ export default function RecoveryKitScreen() {
           <View style={styles.infoBox}>
             <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} />
             <Text style={styles.infoText}>
-              The Guardian stores only a protected hash of your recovery key. The raw key is shown once and cannot be recovered later.
+              The Guardian stores only a protected copy of your recovery key. The raw key is shown once and cannot be recovered later.
             </Text>
           </View>
         </ScrollView>
@@ -291,8 +291,18 @@ const makeStyles = (C: any) =>
     heroIcon: { width: 82, height: 82, borderRadius: 28, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
     title: { fontSize: 34, fontWeight: '900', color: C.text, marginBottom: 10 },
     subtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 22 },
-    card: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
-    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16 },
+    card: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16 
+     , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
+    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
     statusDot: { width: 10, height: 10, borderRadius: 5 },
     statusTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
@@ -302,18 +312,38 @@ const makeStyles = (C: any) =>
     warningTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     warningText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 14 },
     fieldLabel: { color: C.text, fontSize: 14, fontWeight: '900', marginBottom: 8, marginLeft: 4 },
-    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21 },
+    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21 
+      , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.background, borderRadius: 20, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
     passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 15, fontSize: 15 },
     eyeButton: { width: 52, height: 54, alignItems: 'center', justifyContent: 'center' },
-    primaryButton: { minHeight: 56, borderRadius: 999, backgroundColor: C.backgroundbutton || C.primary, alignItems: 'center', justifyContent: 'center' },
+    primaryButton: { minHeight: 56, borderRadius: 999, backgroundColor: C.backgroundbutton || C.primary, alignItems: 'center', justifyContent: 'center' 
+     , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
-    dangerButton: { marginTop: 12, minHeight: 52, borderRadius: 999, borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center' },
+    dangerButton: { marginTop: 12, minHeight: 52, borderRadius: 999, borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center' 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     dangerButtonText: { color: C.danger, fontSize: 15, fontWeight: '900' },
     disabled: { opacity: 0.65 },
     buttonRow: { flexDirection: 'row', gap: 12 },
     secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, minHeight: 50 },
     secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
-    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16 },
+    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16 
+      ,shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     infoText: { flex: 1, color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
   });

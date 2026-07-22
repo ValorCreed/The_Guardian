@@ -347,7 +347,12 @@ const makeStyles = (C: any) =>
       gap: 14,
       alignItems: 'center',
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     heroIcon: {
       width: 56,
@@ -378,7 +383,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     row: {
       flexDirection: 'row',
@@ -410,7 +420,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       gap: 12,
       marginBottom: 20,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     warningTitle: {
       color: C.warning,

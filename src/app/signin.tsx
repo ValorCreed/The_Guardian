@@ -415,7 +415,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     label: {
       fontSize: 13,
@@ -447,7 +452,12 @@ const makeStyles = (C: any) =>
       marginBottom: 10,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     passwordInput: {
       flex: 1,
@@ -488,7 +498,12 @@ const makeStyles = (C: any) =>
       borderRadius: 18,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     biometricText: {
       fontSize: 15,
@@ -504,7 +519,12 @@ const makeStyles = (C: any) =>
       justifyContent: "center",
       minHeight: 56,
       marginTop: 2,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     disabledButton: {
       opacity: 0.7,

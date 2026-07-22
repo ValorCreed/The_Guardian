@@ -370,13 +370,18 @@ export default function SecurityScreen() {
             <View style={styles.recoveryIcon}>
               <Ionicons name="warning-outline" size={24} color="#FFFFFF" />
             </View>
-            <View style={{ flex: 1 }}>
+            <View style={styles.flexibleTextBlock}>
               <Text style={styles.recoveryTitle}>Recovery kit missing</Text>
               <Text style={styles.recoveryText}>
                 This is a serious safety risk. Generate your recovery kit before you lose access to your vault.
               </Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
+            <Ionicons
+              name="chevron-forward"
+              size={20}
+              color="#FFFFFF"
+              style={styles.topAlignedChevron}
+            />
           </TouchableOpacity>
         )}
 
@@ -445,11 +450,16 @@ export default function SecurityScreen() {
                   <View style={[styles.issueIcon, { backgroundColor: `${color}22` }]}> 
                     <Ionicons name={issueIcon(issue.type) as any} size={19} color={color} />
                   </View>
-                  <View style={{ flex: 1 }}>
+                  <View style={styles.flexibleTextBlock}>
                     <Text style={styles.issueTitle}>{issue.title}</Text>
-                    <Text style={styles.issueSubtitle} numberOfLines={2}>{issue.subtitle}</Text>
+                    <Text style={styles.issueSubtitle}>{issue.subtitle}</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={18} color={C.textSecondary} />
+                  <Ionicons
+                    name="chevron-forward"
+                    size={18}
+                    color={C.textSecondary}
+                    style={styles.topAlignedChevron}
+                  />
                 </TouchableOpacity>
               );
             })
@@ -480,6 +490,11 @@ const inlineStyles = StyleSheet.create({
     height: SIZE,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   ringCenter: {
     position: 'absolute',
@@ -539,6 +554,11 @@ function makeStyles(C: any) {
       borderColor: C.border,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     heroCard: {
       backgroundColor: C.backgroundElement,
@@ -548,6 +568,11 @@ function makeStyles(C: any) {
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 16,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     heroGlow: {
       position: 'absolute',
@@ -595,9 +620,14 @@ function makeStyles(C: any) {
       borderRadius: 24,
       padding: 16,
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
       marginBottom: 16,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     recoveryIcon: {
       width: 48,
@@ -611,6 +641,7 @@ function makeStyles(C: any) {
       color: '#FFFFFF',
       fontSize: 16,
       fontWeight: '900',
+      flexWrap: 'wrap',
     },
     recoveryText: {
       color: 'rgba(255,255,255,0.88)',
@@ -618,10 +649,12 @@ function makeStyles(C: any) {
       lineHeight: 18,
       fontWeight: '700',
       marginTop: 3,
+      flexWrap: 'wrap',
     },
     statsGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
+      alignItems: 'flex-start',
       gap: 12,
       marginBottom: 20,
     },
@@ -632,6 +665,11 @@ function makeStyles(C: any) {
       padding: 15,
       borderWidth: 1,
       borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     statCardActive: {
       borderColor: C.primary,
@@ -657,10 +695,11 @@ function makeStyles(C: any) {
       fontSize: 13,
       fontWeight: '900',
       marginTop: 2,
+      flexWrap: 'wrap',
     },
     statDetailRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'space-between',
       gap: 4,
       marginTop: 3,
@@ -668,8 +707,11 @@ function makeStyles(C: any) {
     statDetail: {
       color: C.textSecondary,
       fontSize: 12,
+      lineHeight: 17,
       fontWeight: '800',
       flex: 1,
+      minWidth: 0,
+      flexWrap: 'wrap',
     },
     sectionHeader: {
       flexDirection: 'row',
@@ -704,8 +746,13 @@ function makeStyles(C: any) {
       borderWidth: 1,
       borderColor: C.border,
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       gap: 12,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     issueIcon: {
       width: 42,
@@ -714,10 +761,19 @@ function makeStyles(C: any) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    flexibleTextBlock: {
+      flex: 1,
+      minWidth: 0,
+    },
+    topAlignedChevron: {
+      marginTop: 3,
+      flexShrink: 0,
+    },
     issueTitle: {
       color: C.text,
       fontSize: 14,
       fontWeight: '900',
+      flexWrap: 'wrap',
     },
     issueSubtitle: {
       color: C.textSecondary,
@@ -725,6 +781,7 @@ function makeStyles(C: any) {
       lineHeight: 17,
       fontWeight: '600',
       marginTop: 3,
+      flexWrap: 'wrap',
     },
     emptyCard: {
       backgroundColor: C.backgroundElement,
@@ -733,6 +790,11 @@ function makeStyles(C: any) {
       borderWidth: 1,
       borderColor: C.border,
       alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     emptyTitle: {
       color: C.text,
@@ -750,16 +812,22 @@ function makeStyles(C: any) {
     },
     actionGrid: {
       flexDirection: 'row',
+      alignItems: 'flex-start',
       gap: 12,
     },
     actionCard: {
       flex: 1,
+      minWidth: 0,
       backgroundColor: C.backgroundElement,
       borderRadius: 22,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
-      minHeight: 130,
+      shadowColor: '#000',
+      shadowOpacity: 0.08,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
     },
     actionTitle: {
       color: C.text,

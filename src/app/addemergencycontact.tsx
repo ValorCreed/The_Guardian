@@ -21,6 +21,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
+import PulsingSkeleton from '../components/PulsingSkeleton';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -157,10 +158,36 @@ export default function AddEmergencyContactScreen() {
   if (loadingPlan) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.loadingBox}>
-          <ActivityIndicator color={C.primary} />
-          <Text style={styles.loadingText}>Checking your plan...</Text>
-        </View>
+        <ScrollView
+          contentContainerStyle={styles.loadingContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.loadingPlanPill}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonPlanPill} />
+          </View>
+
+          <PulsingSkeleton styles={styles} style={styles.skeletonEyebrow} />
+          <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
+          <PulsingSkeleton styles={styles} style={styles.skeletonSubtitle} />
+          <PulsingSkeleton styles={styles} style={styles.skeletonSubtitleShort} />
+
+          <View style={styles.infoCard}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonInfoIcon} />
+            <View style={{ flex: 1 }}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonInfoLine} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonInfoLineShort} />
+            </View>
+          </View>
+
+          {[1, 2].map((section) => (
+            <View key={`contact-skeleton-${section}`} style={styles.card}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonFieldLabel} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonField} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonFieldLabel} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonField} />
+            </View>
+          ))}
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -178,11 +205,11 @@ export default function AddEmergencyContactScreen() {
         >
           <View style={styles.headerRow}>
             <View style={styles.planPill}>
-              <Ionicons
+              {/* <Ionicons
                 name={isPaid ? 'shield-checkmark-outline' : 'lock-closed-outline'}
                 size={14}
                 color={isPaid ? C.primary : C.warning}
-              />
+              /> */}
               <Text style={[styles.planPillText, { color: isPaid ? C.primary : C.warning }]}>
                 {plan} plan
               </Text>
@@ -379,6 +406,73 @@ const makeStyles = (C: any) => StyleSheet.create({
     flex: 1,
     backgroundColor: C.background,
   },
+  skeletonBlock: {
+    backgroundColor: C.backgroundSelected,
+    borderRadius: 999,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+  },
+  loadingContent: {
+    paddingHorizontal: 18,
+    paddingTop: 22,
+    paddingBottom: 130,
+  },
+  loadingPlanPill: {
+    alignSelf: 'flex-end',
+    marginBottom: 22,
+  },
+  skeletonPlanPill: {
+    width: 96,
+    height: 34,
+  },
+  skeletonEyebrow: {
+    width: 112,
+    height: 12,
+    marginBottom: 8,
+  },
+  skeletonTitle: {
+    width: '82%',
+    height: 28,
+    marginBottom: 10,
+  },
+  skeletonSubtitle: {
+    width: '96%',
+    height: 13,
+    marginBottom: 8,
+  },
+  skeletonSubtitleShort: {
+    width: '68%',
+    height: 13,
+    marginBottom: 18,
+  },
+  skeletonInfoIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 15,
+  },
+  skeletonInfoLine: {
+    width: '92%',
+    height: 12,
+    marginBottom: 8,
+  },
+  skeletonInfoLineShort: {
+    width: '66%',
+    height: 12,
+  },
+  skeletonFieldLabel: {
+    width: 110,
+    height: 12,
+    marginBottom: 9,
+  },
+  skeletonField: {
+    width: '100%',
+    height: 48,
+    borderRadius: 16,
+    marginBottom: 15,
+  },
   loadingBox: {
     flex: 1,
     alignItems: 'center',
@@ -392,7 +486,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   content: {
     paddingHorizontal: 18,
-    paddingTop: 22,
+    paddingTop: 32,
     paddingBottom: 130,
   },
   headerRow: {
@@ -411,6 +505,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   planPillText: {
     fontSize: 12,
@@ -443,6 +542,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     marginBottom: 18,
     flexDirection: 'row',
     gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 3,
   },
   infoText: {
     flex: 1,
@@ -458,6 +562,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderColor: C.border,
     padding: 16,
     marginBottom: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
   },
   label: {
     color: C.text,
@@ -500,6 +609,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderColor: C.border,
     alignItems: 'center',
     paddingVertical: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   waitOptionActive: {
     backgroundColor: C.actionCard,
@@ -520,6 +634,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     alignItems: 'center',
     gap: 9,
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   lockedHintText: {
     color: C.warning,
@@ -539,6 +658,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     minHeight: 130,
     textAlignVertical: 'top',
     marginBottom: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
   saveButton: {
     backgroundColor: C.backgroundbutton,
@@ -548,6 +672,11 @@ const makeStyles = (C: any) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    shadowColor: C.primary,
+    shadowOpacity: 0.20,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
   },
   disabledButton: {
     opacity: 0.65,

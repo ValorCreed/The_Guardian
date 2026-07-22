@@ -668,7 +668,6 @@ function SharedDocumentDetails({
   const rawDocumentType = cleanSharedValue(item.documentType);
   const documentName = cleanSharedValue(item.documentName || item.title);
   const documentType = getFriendlyDocumentType(rawDocumentType, documentName);
-  const notes = cleanSharedValue(item.encryptedNotes || item.notes);
 
   return (
     <View style={styles.card}>
@@ -681,34 +680,25 @@ function SharedDocumentDetails({
         C={C}
       />
 
-      <View style={styles.divider} />
+      <View style={styles.fullDivider} />
 
-      <TouchableOpacity
-        style={[styles.documentDownloadButton, downloadingDocument && styles.disabledButton]}
-        onPress={downloadSharedDocument}
-        disabled={downloadingDocument}
-      >
-        {downloadingDocument ? (
-          <ActivityIndicator size="small" color="#fff" />
-        ) : (
-          <Download size={19} color="#fff" />
-        )}
-        <Text style={styles.documentDownloadText}>
-          {downloadingDocument ? 'Preparing document...' : 'Download / Share Document'}
-        </Text>
-      </TouchableOpacity>
-
-      <View style={styles.divider} />
-
-      <InfoRow
-        icon={<StickyNote size={19} color={C.primary} />}
-        label="Notes"
-        value={notes || 'No notes saved'}
-        onCopy={() => copyValue('Notes', notes)}
-        styles={styles}
-        C={C}
-        multiline
-      />
+      <View style={styles.documentActionArea}>
+        <TouchableOpacity
+          style={[styles.documentDownloadButton, downloadingDocument && styles.disabledButton]}
+          onPress={downloadSharedDocument}
+          disabled={downloadingDocument}
+          activeOpacity={0.85}
+        >
+          {downloadingDocument ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Download size={19} color="#fff" />
+          )}
+          <Text style={styles.documentDownloadText}>
+            {downloadingDocument ? 'Preparing document...' : 'Download / Share Document'}
+          </Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -840,7 +830,12 @@ function SecretRow({
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
-    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 
+     , shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     skeletonHeaderIcon: { width: 76, height: 76, borderRadius: 24, alignSelf: 'center', marginBottom: 18 },
     skeletonTitle: { width: '62%', height: 26, alignSelf: 'center', marginBottom: 10 },
     skeletonSubtitle: { width: '72%', height: 13, alignSelf: 'center', marginBottom: 22 },
@@ -882,7 +877,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     title: {
       fontSize: 30,
@@ -903,7 +903,12 @@ const makeStyles = (C: any) =>
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     infoRow: {
       flexDirection: 'row',
@@ -953,11 +958,25 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       backgroundColor: C.backgroundSelected,
       marginLeft: 8,
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
+
+    fullDivider: {
+      height: 1,
+      backgroundColor: C.border,
+    },
+
+    documentActionArea: {
+      padding: 14,
     },
 
     documentDownloadButton: {
-      marginHorizontal: 14,
-      marginVertical: 14,
+      width: '100%',
+      minHeight: 52,
       paddingVertical: 14,
       paddingHorizontal: 16,
       borderRadius: 16,
@@ -966,12 +985,19 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       gap: 10,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     documentDownloadText: {
+      flexShrink: 1,
       color: '#fff',
       fontSize: 15,
       fontWeight: '800',
+      textAlign: 'center',
     },
 
     disabledButton: {
@@ -985,7 +1011,12 @@ const makeStyles = (C: any) =>
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     readOnlyTitle: {
       color: C.text,

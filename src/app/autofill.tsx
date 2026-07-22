@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Linking,
   NativeModules,
   Platform,
   RefreshControl,
@@ -17,6 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Application from 'expo-application';
+import * as IntentLauncher from 'expo-intent-launcher';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { api, VaultItem } from '../services/api';
@@ -96,20 +97,41 @@ export default function AutofillScreen() {
   }, [loadState]);
 
   const openDeviceSettings = useCallback(async () => {
+    if (Platform.OS !== 'android') {
+      Alert.alert(
+        'Android only for now',
+        'System-wide autofill setup is currently available on Android only.'
+      );
+      return;
+    }
+
     try {
-      if (Platform.OS === 'android') {
-        await Linking.openURL('android.settings.REQUEST_SET_AUTOFILL_SERVICE');
-        return;
+      const applicationId = Application.applicationId;
+
+      if (!applicationId) {
+        throw new Error('The Android application ID is unavailable in this build.');
       }
 
-      await Linking.openSettings();
-    } catch {
+      await IntentLauncher.startActivityAsync(
+        'android.settings.REQUEST_SET_AUTOFILL_SERVICE',
+        {
+          data: `package:${applicationId}`,
+        }
+      );
+    } catch (error: any) {
       try {
-        await Linking.openSettings();
+        /*
+         * Some Android manufacturers do not implement the direct autofill
+         * selection intent correctly. This fallback opens the system's
+         * password/autofill settings instead of The Guardian's app-info page.
+         */
+        await IntentLauncher.startActivityAsync(
+          'android.settings.AUTOFILL_SETTINGS'
+        );
       } catch {
         Alert.alert(
-          'Could not open settings',
-          'Please open your phone settings manually and search for Autofill, Passwords, or Password manager.'
+          'Open Autofill settings manually',
+          'Open Settings and search for “Autofill”, “Passwords”, “Password manager”, or “Preferred service”, then choose The Guardian.'
         );
       }
     }
@@ -336,7 +358,7 @@ export default function AutofillScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.warningTitle}>Security note</Text>
             <Text style={styles.warningText}>
-              The native autofill cache is encrypted with Android Keystore and stored only on this device. Sync again whenever you add, edit, or delete a password.
+              The native autofill cache is encrypted and stored only on this device. Sync again whenever you add, edit, or delete a password.
             </Text>
           </View>
         </View>
@@ -390,7 +412,12 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
       borderWidth: 1,
       borderColor: C.border,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     iconCircle: {
       width: 58,
@@ -425,7 +452,12 @@ const makeStyles = (C: any) =>
       borderRadius: 999,
       paddingHorizontal: 12,
       paddingVertical: 8,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     statusPillText: {
       color: C.text,
@@ -440,7 +472,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       marginBottom: 16,
       overflow: 'hidden',
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     row: {
       flexDirection: 'row',
@@ -471,7 +508,12 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 9,
       marginBottom: 12,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     primaryButtonText: {
       color: '#FFFFFF',
@@ -490,7 +532,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 22,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -559,7 +606,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 16,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     warningTitle: {
       fontSize: 14,
@@ -584,7 +636,12 @@ const makeStyles = (C: any) =>
       borderColor: C.danger,
       borderRadius: 999,
       paddingVertical: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     clearButtonText: {
       color: C.danger,

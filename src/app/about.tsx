@@ -233,7 +233,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 26,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     versionIcon: {
       width: 44,
@@ -275,7 +280,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     featureRow: {
       flexDirection: 'row',
@@ -320,7 +330,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     companyIcon: {
       width: 48,

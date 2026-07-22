@@ -104,7 +104,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     infoText: { flex: 1, color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
     primaryButton: {
       minHeight: 56,
@@ -113,7 +118,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 12,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
     dangerButton: {
       minHeight: 56,
@@ -123,7 +133,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 10,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     dangerButtonText: { color: C.danger, fontSize: 15, fontWeight: '900' },
     backButton: { alignItems: 'center', paddingVertical: 16 },
     backButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '800' },

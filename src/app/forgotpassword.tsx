@@ -132,7 +132,12 @@ const makeStyles = (C: any) =>
       padding: 16,
       gap: 12,
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     dangerCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -143,7 +148,12 @@ const makeStyles = (C: any) =>
       padding: 16,
       gap: 12,
       marginBottom: 16,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     cardIcon: {
       width: 48,
       height: 48,
@@ -151,7 +161,12 @@ const makeStyles = (C: any) =>
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     dangerIcon: {
       width: 48,
       height: 48,
@@ -172,7 +187,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 15,
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
     warningText: {
       flex: 1,
       color: C.textSecondary,

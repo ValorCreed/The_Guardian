@@ -659,7 +659,12 @@ const makeStyles = (C: ThemeColors) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     skeletonEyebrow: {
       width: 140,
@@ -753,7 +758,12 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 20,
       padding: 14,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     warningTitle: {
       color: C.text,
@@ -788,7 +798,12 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 20,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     currentPlanIcon: {
       width: 44,
@@ -820,13 +835,23 @@ const makeStyles = (C: ThemeColors) =>
       borderColor: C.border,
       padding: 20,
       marginBottom: 20,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     premiumCard: {
       backgroundColor: C.securityScoreBg,
       borderColor: C.securityScore,
       paddingTop: 16,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     cardHeaderRow: {
       flexDirection: 'row',
@@ -911,7 +936,12 @@ const makeStyles = (C: ThemeColors) =>
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 52,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     upgradeButtonText: {
       fontSize: 16,
@@ -926,7 +956,12 @@ const makeStyles = (C: ThemeColors) =>
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 54,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     chooseFamilyButtonText: {
       fontSize: 16,
@@ -952,7 +987,12 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.danger,
       marginBottom: 18,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     disabledButton: {
       opacity: 0.65,

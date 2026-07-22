@@ -347,7 +347,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 24,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     infoIcon: {
       width: 42,
@@ -401,7 +406,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       marginTop: 4,
       marginBottom: 14,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     disabledButton: {
       opacity: 0.65,
@@ -410,7 +420,12 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    },
+    
+      shadowColor: '#000',
+      shadowOpacity: 0.065,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 3,},
 
     skeletonIconBox: {
       width: 96,
