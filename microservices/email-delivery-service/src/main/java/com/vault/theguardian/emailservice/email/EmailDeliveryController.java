@@ -15,6 +15,16 @@ public class EmailDeliveryController {
         this.emailDeliveryService = emailDeliveryService;
     }
 
+    @PostMapping("/registration-verification")
+    public EmailDeliveryResponse sendRegistrationVerification(
+            @Valid @RequestBody CodeEmailRequest request
+    ) {
+        return emailDeliveryService.sendRegistrationVerificationCode(
+                request.toEmail(),
+                request.code()
+        );
+    }
+
     @PostMapping("/verification")
     public EmailDeliveryResponse sendVerification(
             @Valid @RequestBody CodeEmailRequest request

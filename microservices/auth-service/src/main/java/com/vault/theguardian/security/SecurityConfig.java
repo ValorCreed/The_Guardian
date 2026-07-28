@@ -51,7 +51,10 @@ public class SecurityConfig {
                                 "/internal/users/**",
                                 "/internal/recovery/**",
                                 "/vault/auth/login",
+                                "/vault/auth/biometric/login",
                                 "/vault/auth/register",
+                                "/vault/auth/verify-registration",
+                                "/vault/auth/resend-registration-code",
                                 "/vault/auth/logout",
                                 "/vault/auth/verify-email",
                                 "/vault/auth/resend-verification",
@@ -140,6 +143,16 @@ public class SecurityConfig {
                         return;
                     }
 
+                    /*
+                     * Strict verification enforcement also applies to tokens
+                     * issued by older app versions. An unverified user can never
+                     * enter an authenticated controller, even with a valid JWT.
+                     */
+                    if (!user.isEmailVerified()) {
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        return;
+                    }
+
                     touchSessionIfNeeded(session);
 
                     UsernamePasswordAuthenticationToken authentication =
@@ -168,7 +181,10 @@ public class SecurityConfig {
                 || path.startsWith("/internal/users/")
                 || path.startsWith("/internal/recovery/")
                 || path.equals("/vault/auth/login")
+                || path.equals("/vault/auth/biometric/login")
                 || path.equals("/vault/auth/register")
+                || path.equals("/vault/auth/verify-registration")
+                || path.equals("/vault/auth/resend-registration-code")
                 || path.equals("/vault/auth/logout")
                 || path.equals("/vault/auth/verify-email")
                 || path.equals("/vault/auth/resend-verification")

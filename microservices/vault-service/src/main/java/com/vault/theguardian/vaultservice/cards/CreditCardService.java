@@ -31,7 +31,9 @@ public class CreditCardService {
                 .encryptedExpiryDate(cryptoService.encryptNullable(request.encryptedExpiryDate()))
                 .encryptedCvv(cryptoService.encryptNullable(request.encryptedCvv()))
                 .encryptedCardholderName(cryptoService.encryptNullable(request.encryptedCardholderName()))
+                .encryptedNotes(cryptoService.encryptNullable(request.encryptedNotes()))
                 .createdAt(LocalDateTime.now())
+                .updatedAt(LocalDateTime.now())
                 .build();
         CreditCardEntity saved = repository.save(card);
         notificationClient.notifyCardAdded(userId, saved.getCardName());
@@ -51,6 +53,8 @@ public class CreditCardService {
         card.setEncryptedExpiryDate(cryptoService.encryptNullable(request.encryptedExpiryDate()));
         card.setEncryptedCvv(cryptoService.encryptNullable(request.encryptedCvv()));
         card.setEncryptedCardholderName(cryptoService.encryptNullable(request.encryptedCardholderName()));
+        card.setEncryptedNotes(cryptoService.encryptNullable(request.encryptedNotes()));
+        card.setUpdatedAt(LocalDateTime.now());
         return toResponse(repository.save(card));
     }
 
@@ -74,6 +78,9 @@ public class CreditCardService {
                 cryptoService.decryptForResponse(card.getEncryptedCardNumber()),
                 cryptoService.decryptForResponse(card.getEncryptedExpiryDate()),
                 cryptoService.decryptForResponse(card.getEncryptedCvv()),
-                cryptoService.decryptForResponse(card.getEncryptedCardholderName()));
+                cryptoService.decryptForResponse(card.getEncryptedCardholderName()),
+                cryptoService.decryptForResponse(card.getEncryptedNotes()),
+                card.getCreatedAt(),
+                card.getUpdatedAt());
     }
 }

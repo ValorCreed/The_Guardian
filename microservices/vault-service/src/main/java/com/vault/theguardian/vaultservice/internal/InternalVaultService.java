@@ -270,7 +270,7 @@ public class InternalVaultService {
                 detail ? safeDecrypt(card.getEncryptedCardholderName()) : "",
                 null, null, null, null,
                 null, null, null,
-                card.getCreatedAt(), null
+                card.getCreatedAt(), card.getUpdatedAt()
         );
     }
 
@@ -349,7 +349,9 @@ public class InternalVaultService {
                 safe(card.getEncryptedExpiryDate()),
                 safe(card.getEncryptedCvv()),
                 safe(card.getEncryptedCardholderName()),
-                card.getCreatedAt()
+                safe(card.getEncryptedNotes()),
+                card.getCreatedAt(),
+                card.getUpdatedAt()
         );
     }
 
@@ -405,7 +407,11 @@ public class InternalVaultService {
                     .encryptedExpiryDate(item.encryptedExpiryDate())
                     .encryptedCvv(item.encryptedCvv())
                     .encryptedCardholderName(safe(item.encryptedCardholderName()))
+                    .encryptedNotes(safe(item.encryptedNotes()))
                     .createdAt(item.createdAt() == null ? LocalDateTime.now() : item.createdAt())
+                    .updatedAt(item.updatedAt() == null
+                            ? (item.createdAt() == null ? LocalDateTime.now() : item.createdAt())
+                            : item.updatedAt())
                     .build());
             restored++;
         }

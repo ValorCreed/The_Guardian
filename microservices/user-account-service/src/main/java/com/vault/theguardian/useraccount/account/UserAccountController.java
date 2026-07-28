@@ -15,6 +15,21 @@ public class UserAccountController {
         this.userAccountService = userAccountService;
     }
 
+    @GetMapping("/me")
+    public UserProfileResponse getMyProfile(
+            @AuthenticationPrincipal AuthenticatedUser user
+    ) {
+        return userAccountService.getMyProfile(user);
+    }
+
+    @PutMapping("/me/profile")
+    public UserProfileResponse updateMyProfile(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @Valid @RequestBody UpdateProfileRequest request
+    ) {
+        return userAccountService.updateMyProfile(user, request);
+    }
+
     @DeleteMapping("/me")
     public DeleteAccountResponse deleteMyAccount(
             @AuthenticationPrincipal AuthenticatedUser user,

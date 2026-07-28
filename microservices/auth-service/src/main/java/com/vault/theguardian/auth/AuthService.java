@@ -1,7 +1,13 @@
 package com.vault.theguardian.auth;
 
+import com.vault.theguardian.biometric.BiometricCredential;
+import com.vault.theguardian.biometric.BiometricCredentialRepository;
+import com.vault.theguardian.biometric.BiometricEnrollmentResponse;
+import com.vault.theguardian.biometric.BiometricLoginRequest;
 import com.vault.theguardian.email.EmailService;
 import com.vault.theguardian.integration.NotificationClient;
+import com.vault.theguardian.registration.PendingRegistration;
+import com.vault.theguardian.registration.PendingRegistrationRepository;
 import com.vault.theguardian.security.JwtService;
 import com.vault.theguardian.session.DeviceSessionService;
 import com.vault.theguardian.session.UserSession;
@@ -11,83 +17,179 @@ import com.vault.theguardian.subscription.SubscriptionRepository;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.HexFormat;
+import java.util.List;
 
 @Service
 public class AuthService {
     private static final int CODE_MIN = 100000;
     private static final int CODE_MAX = 999999;
+    private static final int REGISTRATION_CODE_EXPIRY_MINUTES = 15;
+    private static final int BIOMETRIC_CREDENTIAL_EXPIRY_DAYS = 180;
+    private static final String DEVICE_ID_HEADER = "X-Guardian-Device-Id";
 
     private final UserRepository userRepository;
+    private final PendingRegistrationRepository pendingRegistrationRepository;
     private final SubscriptionRepository subscriptionRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final EmailService emailService;
     private final NotificationClient notificationClient;
     private final DeviceSessionService deviceSessionService;
+    private final BiometricCredentialRepository biometricCredentialRepository;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(
             UserRepository userRepository,
+            PendingRegistrationRepository pendingRegistrationRepository,
             SubscriptionRepository subscriptionRepository,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
             EmailService emailService,
             NotificationClient notificationClient,
-            DeviceSessionService deviceSessionService
+            DeviceSessionService deviceSessionService,
+            BiometricCredentialRepository biometricCredentialRepository
     ) {
         this.userRepository = userRepository;
+        this.pendingRegistrationRepository = pendingRegistrationRepository;
         this.subscriptionRepository = subscriptionRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.emailService = emailService;
         this.notificationClient = notificationClient;
         this.deviceSessionService = deviceSessionService;
+        this.biometricCredentialRepository = biometricCredentialRepository;
     }
 
-    public AuthResponse register(RegisterRequest request, HttpServletRequest httpRequest) {
-        String cleanEmail = request.email().trim().toLowerCase();
+    /**
+     * Creates or refreshes a temporary registration only.
+     *
+     * Security properties:
+     * - no row is inserted into users;
+     * - no subscription, session, welcome notification, or JWT is created;
+     * - the master password is BCrypt-encoded before storage;
+     * - the email verification code is also BCrypt-hashed before storage.
+     */
+    public RegistrationStartResponse startRegistration(RegisterRequest request) {
+        String cleanEmail = normalizeEmail(request.email());
 
         if (userRepository.findByEmail(cleanEmail).isPresent()) {
-            throw new RuntimeException("Email already exists");
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "An account already exists with this email. Please sign in instead."
+            );
         }
 
-        String verificationCode = generateCode();
+        String code = generateCode();
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime expiresAt = now.plusMinutes(REGISTRATION_CODE_EXPIRY_MINUTES);
 
-        User user = User.builder()
-                .fullName(request.fullname().trim())
-                .email(cleanEmail)
-                .passwordHash(passwordEncoder.encode(request.password()))
-                .createdAt(LocalDateTime.now())
-                .emailVerified(false)
-                .emailVerificationCode(verificationCode)
-                .emailVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(15))
+        PendingRegistration pending = pendingRegistrationRepository
+                .findByEmail(cleanEmail)
+                .orElseGet(PendingRegistration::new);
+
+        if (pending.getCreatedAt() == null) {
+            pending.setCreatedAt(now);
+        }
+
+        pending.setFullName(request.fullname().trim());
+        pending.setEmail(cleanEmail);
+        pending.setPasswordHash(passwordEncoder.encode(request.password()));
+        pending.setVerificationCodeHash(passwordEncoder.encode(code));
+        pending.setVerificationCodeExpiresAt(expiresAt);
+        pending.setUpdatedAt(now);
+
+        pendingRegistrationRepository.save(pending);
+
+        sendRegistrationVerificationEmailOrThrow(cleanEmail, code);
+
+        return new RegistrationStartResponse(
+                cleanEmail,
+                "Verification code sent. Your account will be created after the code is confirmed.",
+                expiresAt,
+                true
+        );
+    }
+
+    /**
+     * Converts one locked pending-registration row into a real account.
+     * Everything database-related is committed atomically.
+     */
+    @Transactional
+    public AuthResponse verifyRegistration(
+            VerifyEmailRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String cleanEmail = normalizeEmail(request.email());
+
+        PendingRegistration pending = pendingRegistrationRepository
+                .findByEmailForUpdate(cleanEmail)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "No pending registration was found. Please return to Sign Up and start again."
+                ));
+
+        if (userRepository.findByEmail(cleanEmail).isPresent()) {
+            pendingRegistrationRepository.delete(pending);
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This account has already been created. Please sign in."
+            );
+        }
+
+        if (pending.getVerificationCodeExpiresAt() == null ||
+                LocalDateTime.now().isAfter(pending.getVerificationCodeExpiresAt())) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Verification code has expired. Please request a new code."
+            );
+        }
+
+        String cleanCode = request.code().trim();
+        if (!passwordEncoder.matches(cleanCode, pending.getVerificationCodeHash())) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Invalid verification code"
+            );
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+
+        User savedUser = userRepository.save(User.builder()
+                .fullName(pending.getFullName())
+                .email(pending.getEmail())
+                .passwordHash(pending.getPasswordHash())
+                .createdAt(now)
+                .emailVerified(true)
+                .emailVerificationCode(null)
+                .emailVerificationCodeExpiresAt(null)
                 .twoFactorEnabled(false)
                 .twoFactorCode(null)
                 .twoFactorCodeExpiresAt(null)
                 .passwordResetCode(null)
                 .passwordResetCodeExpiresAt(null)
-                .build();
+                .build());
 
-        User savedUser = userRepository.save(user);
-
-        Subscription subscription = Subscription.builder()
+        Subscription savedSubscription = subscriptionRepository.save(Subscription.builder()
                 .user(savedUser)
                 .plan(SubscriptionPlan.FREE)
                 .active(true)
-                .startedAt(LocalDateTime.now())
+                .startedAt(now)
                 .expiresAt(null)
-                .build();
+                .build());
 
-        Subscription savedSubscription = subscriptionRepository.save(subscription);
-
-        notificationClient.notifyWelcome(savedUser);
-
-        trySendVerificationEmail(savedUser.getEmail(), verificationCode);
+        pendingRegistrationRepository.delete(pending);
 
         UserSession session = deviceSessionService.createLoginSession(
                 savedUser,
@@ -98,19 +200,72 @@ public class AuthService {
 
         String token = jwtService.generateToken(savedUser.getEmail(), session.getTokenId());
 
+        /* NotificationClient publishes after this transaction commits. */
+        notificationClient.notifyWelcome(savedUser);
+
         return toAuthResponse(savedUser, savedSubscription, token, false);
     }
 
-    public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
-        String cleanEmail = request.email().trim().toLowerCase();
+    public MessageResponse resendRegistrationCode(ResendVerificationRequest request) {
+        String cleanEmail = normalizeEmail(request.email());
 
-        User user = userRepository.findByEmail(cleanEmail)
-                .orElseThrow(() -> new RuntimeException("Invalid email or password"));
+        if (userRepository.findByEmail(cleanEmail).isPresent()) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This account has already been created. Please sign in."
+            );
+        }
+
+        PendingRegistration pending = pendingRegistrationRepository
+                .findByEmail(cleanEmail)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "No pending registration was found. Please return to Sign Up and start again."
+                ));
+
+        String code = generateCode();
+        LocalDateTime now = LocalDateTime.now();
+
+        pending.setVerificationCodeHash(passwordEncoder.encode(code));
+        pending.setVerificationCodeExpiresAt(now.plusMinutes(REGISTRATION_CODE_EXPIRY_MINUTES));
+        pending.setUpdatedAt(now);
+        pendingRegistrationRepository.save(pending);
+
+        sendRegistrationVerificationEmailOrThrow(cleanEmail, code);
+
+        return new MessageResponse(
+                "A new registration verification code has been sent."
+        );
+    }
+
+    public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
+        String cleanEmail = normalizeEmail(request.email());
+
+        User user = userRepository.findByEmail(cleanEmail).orElse(null);
+
+        if (user == null) {
+            if (pendingRegistrationRepository.existsByEmail(cleanEmail)) {
+                throw new ResponseStatusException(
+                        HttpStatus.FORBIDDEN,
+                        "Finish email verification to complete your account before signing in."
+                );
+            }
+
+            throw new RuntimeException("Invalid email or password");
+        }
 
         boolean passwordMatches = passwordEncoder.matches(request.password(), user.getPasswordHash());
 
         if (!passwordMatches) {
             throw new RuntimeException("Invalid email or password");
+        }
+
+        /* Blocks legacy unverified accounts from all authenticated access. */
+        if (!user.isEmailVerified()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Verify your email before signing in."
+            );
         }
 
         Subscription subscription = subscriptionRepository.findByUser(user)
@@ -144,10 +299,17 @@ public class AuthService {
     }
 
     public AuthResponse verifyTwoFactor(VerifyTwoFactorRequest request, HttpServletRequest httpRequest) {
-        String cleanEmail = request.email().trim().toLowerCase();
+        String cleanEmail = normalizeEmail(request.email());
 
         User user = userRepository.findByEmail(cleanEmail)
                 .orElseThrow(() -> new RuntimeException("Invalid email or 2FA code"));
+
+        if (!user.isEmailVerified()) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Verify your email before signing in."
+            );
+        }
 
         if (!user.isTwoFactorEnabled()) {
             throw new RuntimeException("2FA is not enabled for this account");
@@ -187,6 +349,118 @@ public class AuthService {
         return toAuthResponse(user, subscription, token, false);
     }
 
+    @Transactional
+    public BiometricEnrollmentResponse enrollBiometricCredential(
+            User user,
+            HttpServletRequest httpRequest
+    ) {
+        String deviceIdHash = resolveDeviceIdHash(httpRequest);
+        LocalDateTime now = LocalDateTime.now();
+
+        revokeCredentials(
+                biometricCredentialRepository
+                        .findByUserAndDeviceIdHashAndRevokedAtIsNull(user, deviceIdHash),
+                now
+        );
+
+        byte[] tokenBytes = new byte[32];
+        secureRandom.nextBytes(tokenBytes);
+        String rawToken = Base64.getUrlEncoder().withoutPadding().encodeToString(tokenBytes);
+        LocalDateTime expiresAt = now.plusDays(BIOMETRIC_CREDENTIAL_EXPIRY_DAYS);
+
+        biometricCredentialRepository.save(BiometricCredential.builder()
+                .user(user)
+                .tokenHash(sha256(rawToken))
+                .deviceIdHash(deviceIdHash)
+                .createdAt(now)
+                .lastUsedAt(null)
+                .expiresAt(expiresAt)
+                .revokedAt(null)
+                .build());
+
+        return new BiometricEnrollmentResponse(rawToken, expiresAt);
+    }
+
+    @Transactional
+    public MessageResponse revokeBiometricCredential(
+            User user,
+            HttpServletRequest httpRequest
+    ) {
+        revokeCredentials(
+                biometricCredentialRepository.findByUserAndDeviceIdHashAndRevokedAtIsNull(
+                        user,
+                        resolveDeviceIdHash(httpRequest)
+                ),
+                LocalDateTime.now()
+        );
+
+        return new MessageResponse("Biometric sign-in has been disabled for this device.");
+    }
+
+    @Transactional
+    public AuthResponse biometricLogin(
+            BiometricLoginRequest request,
+            HttpServletRequest httpRequest
+    ) {
+        String cleanEmail = normalizeEmail(request.email());
+        User user = userRepository.findByEmail(cleanEmail)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Biometric sign-in is no longer available. Sign in with your password again."
+                ));
+
+        if (!user.isEmailVerified()) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Verify your email before signing in.");
+        }
+
+        BiometricCredential credential = biometricCredentialRepository
+                .findByTokenHashAndRevokedAtIsNull(sha256(request.credentialToken().trim()))
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Biometric sign-in is no longer available. Sign in with your password again."
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+        boolean wrongUser = credential.getUser() == null
+                || !credential.getUser().getId().equals(user.getId());
+        boolean wrongDevice = !credential.getDeviceIdHash().equals(resolveDeviceIdHash(httpRequest));
+        boolean expired = credential.getExpiresAt() == null || now.isAfter(credential.getExpiresAt());
+
+        if (wrongUser || wrongDevice || expired) {
+            credential.setRevokedAt(now);
+            biometricCredentialRepository.save(credential);
+            throw new ResponseStatusException(
+                    HttpStatus.UNAUTHORIZED,
+                    "Biometric sign-in is no longer available. Sign in with your password again."
+            );
+        }
+
+        credential.setLastUsedAt(now);
+        biometricCredentialRepository.save(credential);
+
+        Subscription subscription = subscriptionRepository.findByUser(user)
+                .orElseThrow(() -> new RuntimeException("Subscription not found"));
+        subscription = refreshExpiredSubscription(subscription);
+
+        if (user.isTwoFactorEnabled()) {
+            String code = generateCode();
+            user.setTwoFactorCode(code);
+            user.setTwoFactorCodeExpiresAt(now.plusMinutes(10));
+            userRepository.save(user);
+            trySendTwoFactorEmail(user.getEmail(), code);
+            return toAuthResponse(user, subscription, null, true);
+        }
+
+        UserSession session = deviceSessionService.createLoginSession(
+                user,
+                httpRequest,
+                hasMultipleDeviceAccess(subscription),
+                false
+        );
+        String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
+        return toAuthResponse(user, subscription, token, false);
+    }
+
     public SecuritySettingsResponse getSecuritySettings(User user) {
         return new SecuritySettingsResponse(
                 user.isEmailVerified(),
@@ -211,8 +485,9 @@ public class AuthService {
         );
     }
 
+    /** Legacy verification for accounts created before pending registrations. */
     public MessageResponse verifyEmail(VerifyEmailRequest request) {
-        String cleanEmail = request.email().trim().toLowerCase();
+        String cleanEmail = normalizeEmail(request.email());
 
         User user = userRepository.findByEmail(cleanEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -242,8 +517,9 @@ public class AuthService {
         return new MessageResponse("Email verified successfully");
     }
 
+    /** Legacy resend for accounts created before pending registrations. */
     public MessageResponse resendVerificationCode(ResendVerificationRequest request) {
-        String cleanEmail = request.email().trim().toLowerCase();
+        String cleanEmail = normalizeEmail(request.email());
 
         User user = userRepository.findByEmail(cleanEmail)
                 .orElseThrow(() -> new RuntimeException("User not found"));
@@ -265,7 +541,7 @@ public class AuthService {
     }
 
     public MessageResponse forgotPassword(ForgotPasswordRequest request) {
-        String cleanEmail = request.email().trim().toLowerCase();
+        String cleanEmail = normalizeEmail(request.email());
 
         User user = userRepository.findByEmail(cleanEmail).orElse(null);
 
@@ -284,11 +560,6 @@ public class AuthService {
 
         userRepository.save(user);
 
-        /*
-         * Important security rule:
-         * This email code is only for the Reset & Erase fallback.
-         * It must not be used to reset the password while keeping old vault data.
-         */
         trySendPasswordResetEmail(user.getEmail(), resetCode);
 
         return new MessageResponse("If this email exists and is verified, an account reset code has been sent.");
@@ -351,35 +622,88 @@ public class AuthService {
         return subscription;
     }
 
+    private String resolveDeviceIdHash(HttpServletRequest request) {
+        String rawDeviceId = request == null ? "" : request.getHeader(DEVICE_ID_HEADER);
+        if (rawDeviceId == null || rawDeviceId.isBlank()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "This device could not be identified. Restart the app and try again."
+            );
+        }
+        return sha256("guardian-device:" + rawDeviceId.trim());
+    }
+
+    private void revokeCredentials(List<BiometricCredential> credentials, LocalDateTime revokedAt) {
+        if (credentials == null || credentials.isEmpty()) return;
+        for (BiometricCredential credential : credentials) {
+            credential.setRevokedAt(revokedAt);
+        }
+        biometricCredentialRepository.saveAll(credentials);
+    }
+
+    private String sha256(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(hashed);
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not protect biometric credential.", error);
+        }
+    }
+
     private String generateCode() {
         return String.valueOf(
                 secureRandom.nextInt(CODE_MAX - CODE_MIN + 1) + CODE_MIN
         );
     }
 
+    private String normalizeEmail(String email) {
+        return email.trim().toLowerCase();
+    }
+
+    private void sendRegistrationVerificationEmailOrThrow(String email, String code) {
+        boolean sent = emailService.sendRegistrationVerificationCode(email, code);
+
+        if (!sent) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "We could not send the verification email. No account has been created. Please try again."
+            );
+        }
+    }
+
     private void trySendVerificationEmail(String email, String code) {
         try {
-            emailService.sendEmailVerificationCode(email, code);
+            boolean sent = emailService.sendEmailVerificationCode(email, code);
+            if (!sent) {
+                System.out.println("EMAIL SEND FAILED for legacy verification email: " + email);
+            }
         } catch (Exception e) {
-            System.out.println("EMAIL SEND FAILED. Verification code for " + email + " is: " + code);
+            System.out.println("EMAIL SEND FAILED for legacy verification email: " + email);
             System.out.println("Email error: " + e.getMessage());
         }
     }
 
     private void trySendTwoFactorEmail(String email, String code) {
         try {
-            emailService.sendTwoFactorCode(email, code);
+            boolean sent = emailService.sendTwoFactorCode(email, code);
+            if (!sent) {
+                System.out.println("EMAIL SEND FAILED for 2FA email: " + email);
+            }
         } catch (Exception e) {
-            System.out.println("EMAIL SEND FAILED. 2FA code for " + email + " is: " + code);
+            System.out.println("EMAIL SEND FAILED for 2FA email: " + email);
             System.out.println("Email error: " + e.getMessage());
         }
     }
 
     private void trySendPasswordResetEmail(String email, String code) {
         try {
-            emailService.sendPasswordResetCode(email, code);
+            boolean sent = emailService.sendPasswordResetCode(email, code);
+            if (!sent) {
+                System.out.println("EMAIL SEND FAILED for password reset email: " + email);
+            }
         } catch (Exception e) {
-            System.out.println("EMAIL SEND FAILED. Password reset code for " + email + " is: " + code);
+            System.out.println("EMAIL SEND FAILED for password reset email: " + email);
             System.out.println("Email error: " + e.getMessage());
         }
     }

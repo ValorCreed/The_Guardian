@@ -68,6 +68,15 @@ public class InternalAuthController {
             return TokenIntrospectionResponse.inactive();
         }
 
+        /*
+         * Every downstream microservice relies on this result. Returning an
+         * inactive token here prevents legacy unverified accounts from using an
+         * old session to reach Vault, Family, Subscription, or other services.
+         */
+        if (!user.isEmailVerified()) {
+            return TokenIntrospectionResponse.inactive();
+        }
+
         return new TokenIntrospectionResponse(true, user.getId(), user.getEmail());
     }
 

@@ -21,5 +21,7 @@ public class CreditCardEntity {
     @Column(columnDefinition = "TEXT") private String encryptedExpiryDate;
     @Column(columnDefinition = "TEXT") private String encryptedCvv;
     @Column(columnDefinition = "TEXT") private String encryptedCardholderName;
+    @Column(columnDefinition = "TEXT") private String encryptedNotes;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

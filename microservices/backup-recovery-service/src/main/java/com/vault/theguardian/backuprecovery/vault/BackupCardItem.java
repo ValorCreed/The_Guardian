@@ -9,5 +9,7 @@ public record BackupCardItem(
         String encryptedExpiryDate,
         String encryptedCvv,
         String encryptedCardholderName,
-        LocalDateTime createdAt
+        String encryptedNotes,
+        LocalDateTime createdAt,
+        LocalDateTime updatedAt
 ) {}

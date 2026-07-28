@@ -7,5 +7,6 @@ public record CreditCardRequest(
         @NotBlank String encryptedCardNumber,
         @NotBlank String encryptedExpiryDate,
         @NotBlank String encryptedCvv,
-        String encryptedCardholderName
+        String encryptedCardholderName,
+        String encryptedNotes
 ) {}

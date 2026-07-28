@@ -1,6 +1,7 @@
 package com.vault.theguardian.internal.user;
 
 import jakarta.transaction.Transactional;
+import jakarta.validation.Valid;
 import com.vault.theguardian.user.User;
 import com.vault.theguardian.user.UserRepository;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,6 +78,26 @@ public class InternalUserController {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @PutMapping("/{userId}/profile")
+    @Transactional
+    public InternalUserResponse updateProfile(
+            @RequestHeader(value = INTERNAL_KEY_HEADER, required = false) String suppliedKey,
+            @PathVariable Long userId,
+            @Valid @RequestBody InternalUpdateUserProfileRequest request
+    ) {
+        requireValidInternalKey(suppliedKey);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "User not found."
+                ));
+
+        String cleanFullName = request.fullName().trim().replaceAll("\\s+", " ");
+        user.setFullName(cleanFullName);
+
+        return toResponse(userRepository.save(user));
     }
 
     @DeleteMapping("/{userId}")

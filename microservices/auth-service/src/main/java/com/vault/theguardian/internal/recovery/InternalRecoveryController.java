@@ -1,5 +1,7 @@
 package com.vault.theguardian.internal.recovery;
 
+import com.vault.theguardian.biometric.BiometricCredential;
+import com.vault.theguardian.biometric.BiometricCredentialRepository;
 import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
@@ -27,12 +29,14 @@ public class InternalRecoveryController {
 
     private final UserRepository userRepository;
     private final UserSessionRepository userSessionRepository;
+    private final BiometricCredentialRepository biometricCredentialRepository;
     private final PasswordEncoder passwordEncoder;
     private final byte[] expectedInternalKey;
 
     public InternalRecoveryController(
             UserRepository userRepository,
             UserSessionRepository userSessionRepository,
+            BiometricCredentialRepository biometricCredentialRepository,
             PasswordEncoder passwordEncoder,
             @Value("${internal.service.key}") String internalServiceKey
     ) {
@@ -41,6 +45,7 @@ public class InternalRecoveryController {
         }
         this.userRepository = userRepository;
         this.userSessionRepository = userSessionRepository;
+        this.biometricCredentialRepository = biometricCredentialRepository;
         this.passwordEncoder = passwordEncoder;
         this.expectedInternalKey = internalServiceKey.getBytes(StandardCharsets.UTF_8);
     }
@@ -152,6 +157,15 @@ public class InternalRecoveryController {
         if (!activeSessions.isEmpty()) {
             userSessionRepository.saveAll(activeSessions);
             userSessionRepository.flush();
+        }
+
+        List<BiometricCredential> biometricCredentials =
+                biometricCredentialRepository.findByUserAndRevokedAtIsNull(user);
+        for (BiometricCredential credential : biometricCredentials) {
+            credential.setRevokedAt(now);
+        }
+        if (!biometricCredentials.isEmpty()) {
+            biometricCredentialRepository.saveAll(biometricCredentials);
         }
     }
 

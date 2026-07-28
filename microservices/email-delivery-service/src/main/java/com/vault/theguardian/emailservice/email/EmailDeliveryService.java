@@ -46,6 +46,22 @@ public class EmailDeliveryService {
         this.demoMode = demoMode;
     }
 
+    public EmailDeliveryResponse sendRegistrationVerificationCode(String toEmail, String code) {
+        String html = codeTemplate(
+                "Complete your Guardian registration",
+                "Use this code to verify your email and create your account:",
+                code,
+                "This code expires in 15 minutes. Your account does not exist until the code is confirmed.",
+                "If you did not start this registration, ignore this email. No account will be created."
+        );
+        return sendHtmlEmail(
+                toEmail,
+                "Complete Your Guardian Registration",
+                html,
+                code
+        );
+    }
+
     public EmailDeliveryResponse sendVerificationCode(String toEmail, String code) {
         String html = codeTemplate(
                 "Verify your email address",

@@ -1,5 +1,7 @@
 package com.vault.theguardian.session;
 
+import com.vault.theguardian.biometric.BiometricCredential;
+import com.vault.theguardian.biometric.BiometricCredentialRepository;
 import com.vault.theguardian.integration.NotificationClient;
 import com.vault.theguardian.security.JwtService;
 import com.vault.theguardian.user.User;
@@ -33,15 +35,18 @@ public class DeviceSessionService {
     private final UserSessionRepository userSessionRepository;
     private final JwtService jwtService;
     private final NotificationClient notificationClient;
+    private final BiometricCredentialRepository biometricCredentialRepository;
 
     public DeviceSessionService(
             UserSessionRepository userSessionRepository,
             JwtService jwtService,
-            NotificationClient notificationClient
+            NotificationClient notificationClient,
+            BiometricCredentialRepository biometricCredentialRepository
     ) {
         this.userSessionRepository = userSessionRepository;
         this.jwtService = jwtService;
         this.notificationClient = notificationClient;
+        this.biometricCredentialRepository = biometricCredentialRepository;
     }
 
     /*
@@ -166,6 +171,13 @@ public class DeviceSessionService {
 
         userSessionRepository.saveAll(sessions);
         userSessionRepository.flush();
+
+        sessions.stream()
+                .map(UserSession::getDeviceIdHash)
+                .filter(deviceIdHash -> deviceIdHash != null && !deviceIdHash.isBlank())
+                .distinct()
+                .forEach(deviceIdHash ->
+                        revokeBiometricCredentialsForDevice(user, deviceIdHash, now));
     }
 
     @Transactional
@@ -244,9 +256,11 @@ public class DeviceSessionService {
 
         if (!session.isActive()) return;
 
+        LocalDateTime now = LocalDateTime.now();
         session.setActive(false);
-        session.setRevokedAt(LocalDateTime.now());
+        session.setRevokedAt(now);
         userSessionRepository.saveAndFlush(session);
+        revokeBiometricCredentialsForDevice(user, session.getDeviceIdHash(), now);
         notificationClient.notifySessionRevoked(user, session.getDeviceName());
     }
 
@@ -266,6 +280,12 @@ public class DeviceSessionService {
 
         userSessionRepository.saveAll(sessions);
         userSessionRepository.flush();
+
+        sessions.stream()
+                .filter(session -> !session.getTokenId().equals(currentTokenId))
+                .map(UserSession::getDeviceIdHash)
+                .distinct()
+                .forEach(deviceIdHash -> revokeBiometricCredentialsForDevice(user, deviceIdHash, now));
     }
 
     @Transactional
@@ -280,6 +300,35 @@ public class DeviceSessionService {
 
         userSessionRepository.saveAll(sessions);
         userSessionRepository.flush();
+
+        List<BiometricCredential> credentials =
+                biometricCredentialRepository.findByUserAndRevokedAtIsNull(user);
+        for (BiometricCredential credential : credentials) {
+            credential.setRevokedAt(now);
+        }
+        if (!credentials.isEmpty()) {
+            biometricCredentialRepository.saveAll(credentials);
+        }
+    }
+
+    private void revokeBiometricCredentialsForDevice(
+            User user,
+            String deviceIdHash,
+            LocalDateTime now
+    ) {
+        if (deviceIdHash == null || deviceIdHash.isBlank()) return;
+
+        List<BiometricCredential> credentials =
+                biometricCredentialRepository.findByUserAndDeviceIdHashAndRevokedAtIsNull(
+                        user,
+                        deviceIdHash
+                );
+        for (BiometricCredential credential : credentials) {
+            credential.setRevokedAt(now);
+        }
+        if (!credentials.isEmpty()) {
+            biometricCredentialRepository.saveAll(credentials);
+        }
     }
 
     private DeviceSessionResponse toResponse(UserSession session, String currentTokenId) {

@@ -207,6 +207,38 @@ public class FamilyService {
         return toMemberResponse(saved, target);
     }
 
+    public FamilyMemberAccessResponse getMemberAccess(
+            AuthenticatedUser admin,
+            Long membershipId
+    ) {
+        FamilyMember member = requireOwnedMembership(admin.id(), membershipId);
+        InternalUserResponse target = authClient.requireById(member.getUserId());
+        return toMemberAccessResponse(member, target);
+    }
+
+    @Transactional
+    public FamilyMemberAccessResponse updateMemberAccess(
+            AuthenticatedUser admin,
+            Long membershipId,
+            UpdateFamilyMemberAccessRequest request
+    ) {
+        requireFamilyPlan(admin.id());
+
+        FamilyMember member = requireOwnedMembership(admin.id(), membershipId);
+        SelectionPlan selections = resolveSelections(admin.id(), request);
+
+        if (selections.isEmpty()) {
+            throw badRequest("Select at least one specific vault item to share.");
+        }
+
+        applyPermissions(member, selections);
+        FamilyMember saved = memberRepository.save(member);
+        replaceSelections(saved, selections);
+
+        InternalUserResponse target = authClient.requireById(saved.getUserId());
+        return toMemberAccessResponse(saved, target);
+    }
+
     @Transactional
     public void removeMember(AuthenticatedUser admin, Long membershipId) {
         FamilyGroup group = groupRepository.findByAdminId(admin.id())
@@ -418,6 +450,18 @@ public class FamilyService {
         }
     }
 
+    private FamilyMember requireOwnedMembership(Long adminId, Long membershipId) {
+        FamilyGroup group = groupRepository.findByAdminId(adminId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "You do not have a family group yet."
+                ));
+
+        return memberRepository.findByIdAndGroup(membershipId, group)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "Family member not found."
+                ));
+    }
+
     private void applyPermissions(FamilyMember member, SelectionPlan selections) {
         member.setSharePasswords(!selections.passwordIds().isEmpty());
         member.setShareCards(!selections.cardIds().isEmpty());
@@ -426,6 +470,15 @@ public class FamilyService {
     }
 
     private SelectionPlan resolveSelections(Long ownerId, AddFamilyMemberRequest request) {
+        return new SelectionPlan(
+                resolveSelectedIds(ownerId, "passwords", request.sharePasswords(), request.passwordItemIds()),
+                resolveSelectedIds(ownerId, "cards", request.shareCards(), request.cardItemIds()),
+                resolveSelectedIds(ownerId, "documents", request.shareDocuments(), request.documentItemIds()),
+                resolveSelectedIds(ownerId, "notes", request.shareNotes(), request.noteItemIds())
+        );
+    }
+
+    private SelectionPlan resolveSelections(Long ownerId, UpdateFamilyMemberAccessRequest request) {
         return new SelectionPlan(
                 resolveSelectedIds(ownerId, "passwords", request.sharePasswords(), request.passwordItemIds()),
                 resolveSelectedIds(ownerId, "cards", request.shareCards(), request.cardItemIds()),
@@ -466,7 +519,13 @@ public class FamilyService {
     }
 
     private void replaceSelections(FamilyMember membership, SelectionPlan selections) {
-        sharedItemRepository.deleteByMembership_Id(membership.getId());
+        /*
+         * The unique constraint includes membership_id, item_type and item_id.
+         * Perform a JPQL bulk delete first so the old rows are physically gone
+         * before Hibernate queues the replacement inserts. Without this, an
+         * unchanged selection can be inserted before its old row is deleted.
+         */
+        sharedItemRepository.deleteAllByMembershipId(membership.getId());
 
         List<FamilySharedItem> items = new ArrayList<>();
         addSelections(items, membership, "PASSWORD", selections.passwordIds());
@@ -475,7 +534,7 @@ public class FamilyService {
         addSelections(items, membership, "NOTE", selections.noteIds());
 
         if (!items.isEmpty()) {
-            sharedItemRepository.saveAll(items);
+            sharedItemRepository.saveAllAndFlush(items);
         }
     }
 
@@ -505,6 +564,33 @@ public class FamilyService {
             case "NOTE", "NOTES" -> "NOTE";
             default -> throw badRequest("Unknown vault item type.");
         };
+    }
+
+    private FamilyMemberAccessResponse toMemberAccessResponse(
+            FamilyMember member,
+            InternalUserResponse user
+    ) {
+        return new FamilyMemberAccessResponse(
+                member.getId(),
+                member.getUserId(),
+                user == null ? "" : safe(user.fullName()),
+                user == null ? "" : safe(user.email()),
+                selectedItemIds(member.getId(), "PASSWORD"),
+                selectedItemIds(member.getId(), "CARD"),
+                selectedItemIds(member.getId(), "DOCUMENT"),
+                selectedItemIds(member.getId(), "NOTE")
+        );
+    }
+
+    private List<Long> selectedItemIds(Long membershipId, String itemType) {
+        return sharedItemRepository
+                .findByMembership_IdAndItemType(membershipId, itemType)
+                .stream()
+                .map(FamilySharedItem::getItemId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .sorted()
+                .toList();
     }
 
     private FamilyMemberResponse toMemberResponse(

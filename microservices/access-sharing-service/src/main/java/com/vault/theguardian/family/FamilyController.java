@@ -45,6 +45,23 @@ public class FamilyController {
         return familyService.addMember(user, request);
     }
 
+    @GetMapping("/members/{membershipId}/access")
+    public FamilyMemberAccessResponse getMemberAccess(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long membershipId
+    ) {
+        return familyService.getMemberAccess(user, membershipId);
+    }
+
+    @PutMapping("/members/{membershipId}/access")
+    public FamilyMemberAccessResponse updateMemberAccess(
+            @AuthenticationPrincipal AuthenticatedUser user,
+            @PathVariable Long membershipId,
+            @RequestBody UpdateFamilyMemberAccessRequest request
+    ) {
+        return familyService.updateMemberAccess(user, membershipId, request);
+    }
+
     @DeleteMapping("/members/{membershipId}")
     public void removeMember(
             @AuthenticationPrincipal AuthenticatedUser user,

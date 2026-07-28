@@ -44,6 +44,69 @@ public class AuthClient {
         }
     }
 
+    public AuthUserProfileResponse getUserProfile(Long userId) {
+        try {
+            AuthUserProfileResponse response = restClient.get()
+                    .uri("/internal/users/{userId}", userId)
+                    .header(INTERNAL_KEY_HEADER, internalServiceKey)
+                    .retrieve()
+                    .body(AuthUserProfileResponse.class);
+
+            if (response == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Auth Service returned an empty user profile."
+                );
+            }
+
+            return response;
+        } catch (RestClientResponseException exception) {
+            throw new ResponseStatusException(
+                    exception.getStatusCode(),
+                    "Auth Service could not load the user profile.",
+                    exception
+            );
+        } catch (RestClientException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Auth Service is temporarily unavailable.",
+                    exception
+            );
+        }
+    }
+
+    public AuthUserProfileResponse updateUserProfile(Long userId, String fullName) {
+        try {
+            AuthUserProfileResponse response = restClient.put()
+                    .uri("/internal/users/{userId}/profile", userId)
+                    .header(INTERNAL_KEY_HEADER, internalServiceKey)
+                    .body(new UpdateUserProfileRequest(fullName))
+                    .retrieve()
+                    .body(AuthUserProfileResponse.class);
+
+            if (response == null) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_GATEWAY,
+                        "Auth Service returned an empty user profile."
+                );
+            }
+
+            return response;
+        } catch (RestClientResponseException exception) {
+            throw new ResponseStatusException(
+                    exception.getStatusCode(),
+                    "Auth Service could not update the user profile.",
+                    exception
+            );
+        } catch (RestClientException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Auth Service is temporarily unavailable.",
+                    exception
+            );
+        }
+    }
+
     public boolean verifyPassword(Long userId, String password) {
         try {
             PasswordVerificationResponse response = restClient.post()
@@ -91,4 +154,6 @@ public class AuthClient {
     }
 
     private record VerifyPasswordRequest(String password) {}
+
+    private record UpdateUserProfileRequest(String fullName) {}
 }

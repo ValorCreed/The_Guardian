@@ -2,6 +2,7 @@ package com.vault.theguardian.useraccount.account;
 
 import com.vault.theguardian.useraccount.auth.AuthClient;
 import com.vault.theguardian.useraccount.auth.AuthenticatedUser;
+import com.vault.theguardian.useraccount.auth.AuthUserProfileResponse;
 import com.vault.theguardian.useraccount.cleanup.AccountCleanupClient;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,20 @@ public class UserAccountService {
     ) {
         this.authClient = authClient;
         this.cleanupClient = cleanupClient;
+    }
+
+    public UserProfileResponse getMyProfile(AuthenticatedUser user) {
+        return toProfileResponse(authClient.getUserProfile(user.userId()));
+    }
+
+    public UserProfileResponse updateMyProfile(
+            AuthenticatedUser user,
+            UpdateProfileRequest request
+    ) {
+        String cleanFullName = request.fullName().trim().replaceAll("\\s+", " ");
+        return toProfileResponse(
+                authClient.updateUserProfile(user.userId(), cleanFullName)
+        );
     }
 
     public DeleteAccountResponse deleteMyAccount(
@@ -46,6 +61,14 @@ public class UserAccountService {
 
         return new DeleteAccountResponse(
                 "Your account and vault data have been deleted."
+        );
+    }
+
+    private UserProfileResponse toProfileResponse(AuthUserProfileResponse profile) {
+        return new UserProfileResponse(
+                profile.id(),
+                profile.fullName(),
+                profile.email()
         );
     }
 }

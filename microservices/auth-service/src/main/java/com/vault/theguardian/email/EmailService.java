@@ -32,6 +32,10 @@ public class EmailService {
         this.internalServiceKey = internalServiceKey;
     }
 
+    public boolean sendRegistrationVerificationCode(String toEmail, String code) {
+        return sendCode("/internal/emails/registration-verification", toEmail, code);
+    }
+
     public boolean sendEmailVerificationCode(String toEmail, String code) {
         return sendCode("/internal/emails/verification", toEmail, code);
     }
