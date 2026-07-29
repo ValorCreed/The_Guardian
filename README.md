@@ -44,17 +44,18 @@ mobile/
 ## Core features
 
 - Authentication: register, sign in, email verification, password reset, 2FA challenge.
+- Autofill: autofill passwords and credit cards outside the app.
 - Protected navigation: route guard, vault lock, logout/back-navigation protection.
 - Vault: passwords, documents, cards, and secure notes.
 - Plan gates: free-plan limits and upgrade prompts for paid features.
 - Documents: encrypted document upload/download flow through backend API.
 - Security center: security score, account security actions, recovery kit reminders.
-- Family sharing: member lookup, permission-based sharing, shared vault item details.
+- Family sharing: member lookup, permission-based sharing, shared vault item details, edit share access.
 - Emergency access: trusted contacts, emergency requests, approval/denial, emergency vault viewing.
 - Backup and recovery: backup status, create backup, restore backup, recovery kit.
-- Offline vault metadata snapshots.
+- Offline vault metadata and secure data snapshots.
 - Secure clipboard clearing helper.
-- Light, Dark, and OLED themes.
+- Light, Dark, and OLED themes. Also included system based themes for dynamic theming
 - Haptic feedback toggle and centralized haptic helpers.
 - Legal: Privacy Policy and Terms of Service screens.
 - Support: authenticated bug report submission.
@@ -90,7 +91,7 @@ The frontend talks to the Guardian backend through `services/api.ts`.
 For production, use an Expo public environment variable instead of a hardcoded LAN IP:
 
 ```bash
-EXPO_PUBLIC_API_BASE_URL='your-api-bas-url'
+EXPO_PUBLIC_API_BASE_URL='your-api-base-url'
 ```
 
 Recommended `api.ts` pattern:
