@@ -14,6 +14,7 @@ import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useBlurTarget } from '../context/BlurTargetContext';
 import {
   WHATS_NEW_FOOTER_MESSAGE,
   WHATS_NEW_ITEMS,
@@ -28,8 +29,9 @@ type WhatsNewModalProps = {
 };
 
 export default function WhatsNewModal({ visible, onClose }: WhatsNewModalProps) {
-  const { colors: C, isDark } = useAppTheme();
-  const styles = makeStyles(C, isDark);
+  const { colors: C, isDark, isOled } = useAppTheme();
+  const blurTarget = useBlurTarget();
+  const styles = makeStyles(C, isDark, isOled);
 
   return (
     <Modal
@@ -40,11 +42,24 @@ export default function WhatsNewModal({ visible, onClose }: WhatsNewModalProps) 
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <BlurView
-          intensity={isDark ? 28 : 18}
-          tint={isDark ? 'dark' : 'light'}
-          style={StyleSheet.absoluteFill}
-        />
+        {blurTarget?.targetRef ? (
+          <BlurView
+            blurTarget={blurTarget.targetRef}
+            blurMethod={
+              Platform.OS === 'android'
+                ? ('dimezisBlurViewSdk31Plus' as any)
+                : undefined
+            }
+            blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
+            intensity={Platform.OS === 'android' ? 22 : 32}
+            tint={isDark ? 'dark' : 'light'}
+            style={StyleSheet.absoluteFill}
+          />
+        ) : (
+          <View style={styles.fallbackBlur} />
+        )}
+
+        <View pointerEvents="none" style={styles.backdrop} />
 
         <View style={styles.modalCard}>
           <ImageBackground
@@ -120,15 +135,32 @@ export default function WhatsNewModal({ visible, onClose }: WhatsNewModalProps) 
   );
 }
 
-const makeStyles = (C: any, isDark: boolean) =>
+const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
   StyleSheet.create({
     overlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.62)',
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: 18,
       paddingVertical: 28,
+    },
+
+    fallbackBlur: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: isOled
+        ? 'rgba(0,0,0,0.84)'
+        : isDark
+          ? 'rgba(2,6,23,0.74)'
+          : 'rgba(15,23,42,0.24)',
+    },
+
+    backdrop: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: isOled
+        ? 'rgba(0,0,0,0.48)'
+        : isDark
+          ? 'rgba(0,0,0,0.35)'
+          : 'rgba(0,0,0,0.18)',
     },
 
     modalCard: {

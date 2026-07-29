@@ -21,8 +21,10 @@ import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import { hapticLight, hapticMedium, hapticWarning, hapticDelete } from '../utils/haptics';
 import { api, RecoveryKitResponse, RecoveryKitStatusResponse } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not created yet';
@@ -32,8 +34,11 @@ const formatDate = (value?: string | null) => {
 };
 
 export default function RecoveryKitScreen() {
+  const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  useSensitiveScreenProtection(true);
 
   const [status, setStatus] = useState<RecoveryKitStatusResponse | null>(null);
   const [generatedKit, setGeneratedKit] = useState<RecoveryKitResponse | null>(null);
@@ -46,9 +51,10 @@ export default function RecoveryKitScreen() {
   const loadStatus = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await api.getRecoveryKitStatus();
+      const data = await requestApi.getRecoveryKitStatus();
       setStatus(data);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not load recovery kit', error.message || 'Please try again.');
     } finally {
       setLoading(false);
@@ -110,6 +116,7 @@ export default function RecoveryKitScreen() {
         Alert.alert('Recovery kit saved', `Saved inside app documents as ${fileName}`);
       }
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not save', error.message || 'Please copy the recovery kit instead.');
     }
   };
@@ -132,11 +139,12 @@ export default function RecoveryKitScreen() {
           onPress: async () => {
             try {
               setGenerating(true);
-              const kit = await api.generateRecoveryKit({ password });
+              const kit = await requestApi.generateRecoveryKit({ password });
               setGeneratedKit(kit);
               setPassword('');
               await loadStatus();
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Could not generate recovery kit', error.message || 'Please check your password and try again.');
             } finally {
               setGenerating(false);
@@ -161,11 +169,12 @@ export default function RecoveryKitScreen() {
           onPress: async () => {
             try {
               setRevoking(true);
-              await api.revokeRecoveryKit();
+              await requestApi.revokeRecoveryKit();
               setGeneratedKit(null);
               await loadStatus();
               Alert.alert('Recovery kit revoked', 'Your recovery kit is no longer active.');
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Could not revoke', error.message || 'Please try again.');
             } finally {
               setRevoking(false);
@@ -180,15 +189,25 @@ export default function RecoveryKitScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} backgroundColor={C.background} />
 
-      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.heroIcon}>
             <Ionicons name="key-outline" size={36} color="#FFFFFF" />
           </View>
 
           <Text style={styles.title}>Recovery kit</Text>
           <Text style={styles.subtitle}>
-            Generate an offline recovery key that can help you regain access if you forget your password.
+            Create an offline key for account recovery.
           </Text>
 
           {loading ? (
@@ -291,18 +310,18 @@ const makeStyles = (C: any) =>
     heroIcon: { width: 82, height: 82, borderRadius: 28, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
     title: { fontSize: 34, fontWeight: '900', color: C.text, marginBottom: 10 },
     subtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 22 },
-    card: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16 
+    card: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16
      , shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
-    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16 
+      elevation: 2,},
+    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
     statusDot: { width: 10, height: 10, borderRadius: 5 },
     statusTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
@@ -312,38 +331,38 @@ const makeStyles = (C: any) =>
     warningTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     warningText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 14 },
     fieldLabel: { color: C.text, fontSize: 14, fontWeight: '900', marginBottom: 8, marginLeft: 4 },
-    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21 
+    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21
       , shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.background, borderRadius: 20, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
     passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 15, fontSize: 15 },
     eyeButton: { width: 52, height: 54, alignItems: 'center', justifyContent: 'center' },
-    primaryButton: { minHeight: 56, borderRadius: 999, backgroundColor: C.backgroundbutton || C.primary, alignItems: 'center', justifyContent: 'center' 
+    primaryButton: { minHeight: 56, borderRadius: 999, backgroundColor: C.backgroundbutton || C.primary, alignItems: 'center', justifyContent: 'center'
      , shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
-    dangerButton: { marginTop: 12, minHeight: 52, borderRadius: 999, borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center' 
+    dangerButton: { marginTop: 12, minHeight: 52, borderRadius: 999, borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center'
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerButtonText: { color: C.danger, fontSize: 15, fontWeight: '900' },
     disabled: { opacity: 0.65 },
     buttonRow: { flexDirection: 'row', gap: 12 },
     secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, minHeight: 50 },
     secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
-    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16 
+    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     infoText: { flex: 1, color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
   });

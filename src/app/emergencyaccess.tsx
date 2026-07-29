@@ -17,6 +17,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyAccessRequestResponse, EmergencyContactResponse, EmergencyOverviewResponse } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not set';
@@ -37,6 +38,7 @@ const statusColor = (status: string, C: any) => {
 };
 
 export default function EmergencyAccessScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -48,9 +50,10 @@ export default function EmergencyAccessScreen() {
   const loadOverview = useCallback(async (showLoader = false) => {
     try {
       if (showLoader) setLoading(true);
-      const data = await api.getEmergencyOverview();
+      const data = await requestApi.getEmergencyOverview();
       setOverview(data);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not load emergency access', error.message || 'Please try again.');
     } finally {
       setLoading(false);
@@ -96,10 +99,11 @@ export default function EmergencyAccessScreen() {
           onPress: async () => {
             try {
               setWorkingRequestId(request.id);
-              const updatedRequest = await api.approveEmergencyRequest(request.id);
+              const updatedRequest = await requestApi.approveEmergencyRequest(request.id);
               updateReceivedRequest(updatedRequest);
               await loadOverview(false);
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Approval failed', error.message || 'Could not approve this request.');
             } finally {
               setWorkingRequestId(null);
@@ -122,10 +126,11 @@ export default function EmergencyAccessScreen() {
           onPress: async () => {
             try {
               setWorkingRequestId(request.id);
-              const updatedRequest = await api.denyEmergencyRequest(request.id);
+              const updatedRequest = await requestApi.denyEmergencyRequest(request.id);
               updateReceivedRequest(updatedRequest);
               await loadOverview(false);
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Deny failed', error.message || 'Could not deny this request.');
             } finally {
               setWorkingRequestId(null);
@@ -144,37 +149,42 @@ export default function EmergencyAccessScreen() {
 
   const renderEmergencySkeleton = () => (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <PulsingSkeleton styles={styles} style={styles.skeletonEyebrow} />
       <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
       <PulsingSkeleton styles={styles} style={styles.skeletonSubtitle} />
-      <PulsingSkeleton styles={styles} style={styles.skeletonSubtitleShort} />
 
-      <View style={styles.heroCard}>
-        <PulsingSkeleton styles={styles} style={styles.skeletonHeroIcon} />
-        <View style={{ flex: 1 }}>
-          <PulsingSkeleton styles={styles} style={styles.skeletonHeroTitle} />
-          <PulsingSkeleton styles={styles} style={styles.skeletonHeroSub} />
+      <View style={styles.heroCardShell}>
+        <View style={styles.heroCard}>
+          <PulsingSkeleton styles={styles} style={styles.skeletonHeroIcon} />
+          <View style={{ flex: 1 }}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonHeroTitle} />
+            <PulsingSkeleton styles={styles} style={styles.skeletonHeroSub} />
+          </View>
         </View>
       </View>
 
       <View style={styles.actionRow}>
-        <PulsingSkeleton styles={styles} style={styles.skeletonActionButton} />
-        <PulsingSkeleton styles={styles} style={styles.skeletonActionButton} />
+        {[1, 2].map((item) => (
+          <View key={`emergency-action-skeleton-${item}`} style={styles.skeletonActionShell}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonActionButton} />
+          </View>
+        ))}
       </View>
 
-      {[1, 2, 3].map((section) => (
+      {[1, 2, 3, 4].map((section) => (
         <View key={`emergency-section-skeleton-${section}`}>
           <PulsingSkeleton styles={styles} style={styles.skeletonSectionHeader} />
-          <View style={styles.card}>
-            {[1, 2].map((row, index) => (
-              <View key={`emergency-row-skeleton-${section}-${row}`} style={[styles.row, index !== 1 && styles.divider]}>
-                <PulsingSkeleton styles={styles} style={styles.skeletonSmallIcon} />
-                <View style={{ flex: 1 }}>
-                  <PulsingSkeleton styles={styles} style={styles.skeletonRowTitle} />
-                  <PulsingSkeleton styles={styles} style={styles.skeletonRowSub} />
+          <View style={styles.cardShell}>
+            <View style={styles.card}>
+              {[1, 2].map((row, index) => (
+                <View key={`emergency-row-skeleton-${section}-${row}`} style={[styles.row, index !== 1 && styles.divider]}>
+                  <PulsingSkeleton styles={styles} style={styles.skeletonSmallIcon} />
+                  <View style={{ flex: 1 }}>
+                    <PulsingSkeleton styles={styles} style={styles.skeletonRowTitle} />
+                    <PulsingSkeleton styles={styles} style={styles.skeletonRowSub} />
+                  </View>
                 </View>
-              </View>
-            ))}
+              ))}
+            </View>
           </View>
         </View>
       ))}
@@ -199,21 +209,22 @@ export default function EmergencyAccessScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} tintColor={C.primary} colors={[C.primary]} />}
       >
-        <Text style={styles.eyebrow}>Trusted recovery</Text>
-        <Text style={styles.title}>Emergency Access</Text>
+        <Text style={styles.title}>Emergency access</Text>
         <Text style={styles.subtitle}>
-          Add trusted contacts who can request access if you are unavailable. You can approve, deny, or let the waiting period decide.
+          Manage trusted contacts and access requests.
         </Text>
 
-        <View style={styles.heroCard}>
-          <View style={styles.heroIcon}>
-            <Ionicons name="shield-checkmark-outline" size={28} color={C.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroTitle}>{overview?.plan || 'FREE'} emergency protection</Text>
-            <Text style={styles.heroSub}>
-              {overview?.contactCount || 0}/{overview?.contactLimit || 1} emergency contacts used
-            </Text>
+        <View style={styles.heroCardShell}>
+          <View style={styles.heroCard}>
+            <View style={styles.heroIcon}>
+              <Ionicons name="shield-checkmark-outline" size={28} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroTitle}>Emergency protection</Text>
+              <Text style={styles.heroSub}>
+                {overview?.contactCount || 0}/{overview?.contactLimit || 1} emergency contacts used
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -241,56 +252,64 @@ export default function EmergencyAccessScreen() {
         )}
 
         <SectionTitle title="Your emergency contacts" count={contacts.length} C={C} />
-        <View style={styles.card}>
-          {contacts.length === 0 ? (
-            <EmptyRow icon="people-outline" title="No emergency contacts yet" subtitle="Add a trusted contact to prepare for emergencies." C={C} styles={styles} />
-          ) : contacts.map((contact, index) => (
-            <ContactRow key={contact.id} contact={contact} index={index} total={contacts.length} C={C} styles={styles} />
-          ))}
+        <View style={styles.cardShell}>
+          <View style={styles.card}>
+            {contacts.length === 0 ? (
+              <EmptyRow icon="people-outline" title="No emergency contacts yet" subtitle="Add a trusted contact to prepare for emergencies." C={C} styles={styles} />
+            ) : contacts.map((contact, index) => (
+              <ContactRow key={contact.id} contact={contact} index={index} total={contacts.length} C={C} styles={styles} />
+            ))}
+          </View>
         </View>
 
         <SectionTitle title="Requests to your vault" count={receivedRequests.length} C={C} />
-        <View style={styles.card}>
-          {receivedRequests.length === 0 ? (
-            <EmptyRow icon="mail-open-outline" title="No requests" subtitle="Emergency requests from your contacts will appear here." C={C} styles={styles} />
-          ) : receivedRequests.map((request, index) => (
-            <RequestRow
-              key={request.id}
-              request={request}
-              index={index}
-              total={receivedRequests.length}
-              C={C}
-              styles={styles}
-              working={workingRequestId === request.id}
-              onApprove={() => approveRequest(request)}
-              onDeny={() => denyRequest(request)}
-            />
-          ))}
+        <View style={styles.cardShell}>
+          <View style={styles.card}>
+            {receivedRequests.length === 0 ? (
+              <EmptyRow icon="mail-open-outline" title="No requests" subtitle="Emergency requests from your contacts will appear here." C={C} styles={styles} />
+            ) : receivedRequests.map((request, index) => (
+              <RequestRow
+                key={request.id}
+                request={request}
+                index={index}
+                total={receivedRequests.length}
+                C={C}
+                styles={styles}
+                working={workingRequestId === request.id}
+                onApprove={() => approveRequest(request)}
+                onDeny={() => denyRequest(request)}
+              />
+            ))}
+          </View>
         </View>
 
         <SectionTitle title="Your sent requests" count={sentRequests.length} C={C} />
-        <View style={styles.card}>
-          {sentRequests.length === 0 ? (
-            <EmptyRow icon="send-outline" title="No sent requests" subtitle="Requests you send to other vault owners will appear here." C={C} styles={styles} />
-          ) : sentRequests.map((request, index) => (
-            <SentRequestRow key={request.id} request={request} index={index} total={sentRequests.length} C={C} styles={styles} />
-          ))}
+        <View style={styles.cardShell}>
+          <View style={styles.card}>
+            {sentRequests.length === 0 ? (
+              <EmptyRow icon="send-outline" title="No sent requests" subtitle="Requests you send to other vault owners will appear here." C={C} styles={styles} />
+            ) : sentRequests.map((request, index) => (
+              <SentRequestRow key={request.id} request={request} index={index} total={sentRequests.length} C={C} styles={styles} />
+            ))}
+          </View>
         </View>
 
         <SectionTitle title="Recent emergency activity" count={auditLogs.length} C={C} />
-        <View style={styles.card}>
-          {auditLogs.length === 0 ? (
-            <EmptyRow icon="time-outline" title="No emergency activity yet" subtitle="Contact changes and emergency requests will be logged here." C={C} styles={styles} />
-          ) : auditLogs.slice(0, 8).map((log, index) => (
-            <View key={log.id} style={[styles.auditRow, index !== Math.min(auditLogs.length, 8) - 1 && styles.divider]}>
-              <View style={styles.smallIcon}><Ionicons name="time-outline" size={16} color={C.primary} /></View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowTitle}>{log.title}</Text>
-                <Text style={styles.rowSub}>{log.message || log.action}</Text>
-                <Text style={styles.timeText}>{formatDate(log.createdAt)}</Text>
+        <View style={styles.cardShell}>
+          <View style={styles.card}>
+            {auditLogs.length === 0 ? (
+              <EmptyRow icon="time-outline" title="No emergency activity yet" subtitle="Contact changes and emergency requests will be logged here." C={C} styles={styles} />
+            ) : auditLogs.slice(0, 8).map((log, index) => (
+              <View key={log.id} style={[styles.auditRow, index !== Math.min(auditLogs.length, 8) - 1 && styles.divider]}>
+                <View style={styles.smallIcon}><Ionicons name="time-outline" size={16} color={C.primary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle}>{log.title}</Text>
+                  <Text style={styles.rowSub}>{log.message || log.action}</Text>
+                  <Text style={styles.timeText}>{formatDate(log.createdAt)}</Text>
+                </View>
               </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </View>
 
         <View style={{ height: 90 }} />
@@ -348,7 +367,7 @@ function RequestRow({ request, index, total, C, styles, working, onApprove, onDe
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{request.requesterEmail}</Text>
         <Text style={styles.rowSub}>{request.message || 'Emergency access requested.'}</Text>
-        <Text style={[styles.statusText, { color }]}>{request.status} · available {formatDate(request.availableAt)}</Text>
+        <Text style={[styles.statusText, { color }]}>{request.status}    {formatDate(request.availableAt)}</Text>
         {canAct && (
           <View style={styles.requestActions}>
             <TouchableOpacity style={styles.approveMini} onPress={onApprove} disabled={working}>
@@ -405,19 +424,27 @@ const makeStyles = (C: any) => StyleSheet.create({
     backgroundColor: C.backgroundSelected,
     borderRadius: 999,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    elevation: 4,
   },
-  skeletonEyebrow: { width: 118, height: 12, marginBottom: 8 },
   skeletonTitle: { width: 230, height: 30, marginBottom: 10 },
-  skeletonSubtitle: { width: '92%', height: 13, marginBottom: 8 },
-  skeletonSubtitleShort: { width: '65%', height: 13, marginBottom: 18 },
+  skeletonSubtitle: { width: '86%', height: 13, marginBottom: 18 },
   skeletonHeroIcon: { width: 56, height: 56, borderRadius: 18 },
   skeletonHeroTitle: { width: '70%', height: 17, marginBottom: 9 },
   skeletonHeroSub: { width: '50%', height: 12 },
-  skeletonActionButton: { flex: 1, height: 50, borderRadius: 999 },
+  skeletonActionShell: {
+    flex: 1,
+    height: 50,
+    borderRadius: 999,
+    shadowColor: '#000',
+    shadowOpacity: 0.10,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 5,
+  },
+  skeletonActionButton: { width: '100%', height: 50, borderRadius: 999 },
   skeletonSectionHeader: { width: 190, height: 18, marginTop: 10, marginBottom: 10 },
   skeletonSmallIcon: { width: 38, height: 38, borderRadius: 14 },
   skeletonRowTitle: { width: '66%', height: 14, marginBottom: 8 },
@@ -429,6 +456,15 @@ const makeStyles = (C: any) => StyleSheet.create({
   eyebrow: { color: C.textSecondary, fontSize: 13, fontWeight: '800' },
   title: { color: C.text, fontSize: 30, fontWeight: '900', marginTop: 2 },
   subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 18 },
+  heroCardShell: {
+    borderRadius: 24,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 7,
+  },
   heroCard: {
     backgroundColor: C.backgroundElement,
     borderRadius: 24,
@@ -438,14 +474,21 @@ const makeStyles = (C: any) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
-    marginBottom: 14,
-    shadowColor: '#000',
-    shadowOpacity: 0.09,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
+    overflow: 'hidden',
+  },
+  heroIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: C.actionCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: C.primary,
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 7 },
     elevation: 4,
   },
-  heroIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
   heroTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
   heroSub: { color: C.textSecondary, fontSize: 13, marginTop: 4 },
   actionRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
@@ -459,10 +502,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     shadowColor: C.primary,
-    shadowOpacity: 0.18,
+    shadowOpacity: 0.10,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 7 },
-    elevation: 4,
+    elevation: 2,
   },
   disabledAction: { opacity: 0.55 },
   actionButtonText: { color: '#fff', fontSize: 14, fontWeight: '900' },
@@ -481,7 +524,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 2,
   },
   secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
   upgradeCard: {
@@ -498,21 +541,24 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 2,
   },
   upgradeText: { color: C.warning, flex: 1, fontSize: 13, fontWeight: '800', lineHeight: 18 },
+  cardShell: {
+    borderRadius: 20,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.11,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 6,
+  },
   card: {
     backgroundColor: C.backgroundElement,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: C.border,
     overflow: 'hidden',
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
   requestRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 15 },
@@ -545,7 +591,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOpacity: 0.17,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 2,
   },
   openVaultButtonText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   waitingText: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8, fontWeight: '700' },

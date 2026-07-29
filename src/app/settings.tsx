@@ -42,8 +42,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme, type ThemeMode } from '../context/ThemeContext';
+import type { ThemePalette } from '../constants/theme';
 import { useBlurTarget } from '../context/BlurTargetContext';
 import { api, logout } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import {
   clearOfflineVaultSnapshot,
   formatOfflineSavedAt,
@@ -52,7 +54,7 @@ import {
 import type { OfflineVaultStatus } from '../services/offlineVault';
 import {
   clearBiometricCredentials,
-  hasBiometricCredentials,
+  saveBiometricCredentials,
   setBiometricEnabled,
 } from '../utils/secureAuth';
 import {
@@ -75,33 +77,26 @@ const TIMEOUT_OPTIONS = [
   { label: '5 minutes', value: 300000 },
 ];
 
-const getAutoLockDescription = (option: { label: string; value: number }) => {
-  if (option.value === AUTO_LOCK_ON_APP_CLOSE) {
-    return 'Locks as soon as the app closes or goes to the background';
-  }
-
-  return `Locks after leaving app for ${option.label}`;
-};
 
 const THEME_OPTIONS: Array<{
   label: string;
   value: ThemeMode;
-  description: string;
 }> = [
+  {
+    label: 'System',
+    value: 'system',
+  },
   {
     label: 'Light',
     value: 'light',
-    description: 'Bright and clean',
   },
   {
     label: 'Dark',
     value: 'dark',
-    description: 'Comfortable low-light mode',
   },
   {
     label: 'OLED',
     value: 'oled',
-    description: 'Pure black for OLED screens',
   },
 ];
 
@@ -126,7 +121,7 @@ function PlanBadge({
 }: {
   plan: SubscriptionPlan;
   loading: boolean;
-  C: any;
+  C: ThemePalette;
   isDark: boolean;
 }) {
   const blurTarget = useBlurTarget();
@@ -290,8 +285,11 @@ function PlanBadge({
 }
 
 export default function SettingsScreen() {
-  const { mode, isDark, setThemeMode, colors: C } = useAppTheme();
-  const styles = makeStyles(C);
+  const requestApi = useCancelableApi(api);
+  const runCancelable = useCancelableRequest();
+  const blurTarget = useBlurTarget();
+  const { mode, isDark, isOled, setThemeMode, colors: C } = useAppTheme();
+  const styles = makeStyles(C, isDark, isOled);
 
   const [fullName, setFullName] = useState('User');
   const [email, setEmail] = useState('');
@@ -301,6 +299,7 @@ export default function SettingsScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [selectedTimeout, setSelectedTimeout] = useState(TIMEOUT_OPTIONS[1]);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
+  const [lockingVault, setLockingVault] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteConfirmText, setDeleteConfirmText] = useState('');
@@ -339,14 +338,15 @@ export default function SettingsScreen() {
 
     try {
       setOfflineStatus(await getOfflineVaultStatus());
-    } catch {
+    } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
       setOfflineStatus(null);
     }
 
     try {
       setPlanLoading(true);
 
-      const subscription = await api.getSubscription();
+      const subscription = await requestApi.getSubscription();
       const loadedPlan = subscription.plan || 'FREE';
 
       if (
@@ -358,7 +358,8 @@ export default function SettingsScreen() {
       } else {
         setPlan('FREE');
       }
-    } catch {
+    } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
       setPlan('FREE');
     } finally {
       setPlanLoading(false);
@@ -372,10 +373,24 @@ export default function SettingsScreen() {
   );
 
   const lockVault = useCallback(async () => {
-    await AsyncStorage.setItem('vaultLocked', 'true');
-    await logout();
-    router.replace('/signin');
-  }, []);
+    if (lockingVault) return;
+
+    try {
+      setLockingVault(true);
+      await AsyncStorage.setItem('vaultLocked', 'true');
+      await runCancelable(() => logout());
+      router.replace('/signin');
+    } catch (error: any) {
+      if (isScreenRequestCancelled(error)) return;
+
+      Alert.alert(
+        'Could not lock vault',
+        error?.message || 'Please try again.'
+      );
+    } finally {
+      setLockingVault(false);
+    }
+  }, [lockingVault, runCancelable]);
 
   const handleBiometricToggle = async (value: boolean) => {
     if (!value) {
@@ -394,16 +409,6 @@ export default function SettingsScreen() {
       return;
     }
 
-    const hasCredentials = await hasBiometricCredentials();
-
-    if (!hasCredentials) {
-      Alert.alert(
-        'Sign in required',
-        'Perform a manual login with your email and password. Then come back and enable this toggle.'
-      );
-      return;
-    }
-
     const result = await LocalAuthentication.authenticateAsync({
       promptMessage: 'Confirm your identity',
       cancelLabel: 'Cancel',
@@ -415,12 +420,22 @@ export default function SettingsScreen() {
       return;
     }
 
-    hapticToggleOn();
-    setBiometricUnlock(true);
-    await setBiometricEnabled(true);
+    try {
+      await saveBiometricCredentials(email);
+      hapticToggleOn();
+      setBiometricUnlock(true);
+      await setBiometricEnabled(true);
+    } catch (error: any) {
+      Alert.alert(
+        'Could not enable biometrics',
+        error?.message || 'Please try again while this device is online.'
+      );
+    }
   };
 
   const handleLockNow = () => {
+    if (lockingVault) return;
+
     Alert.alert(
       'Lock Vault',
       'This will log you out and require sign in again. Continue?',
@@ -443,6 +458,7 @@ export default function SettingsScreen() {
     setHapticsEnabled(false);
     await setHapticsEnabledPreference(false);
   };
+
 
   const handleThemeSelect = async (nextMode: ThemeMode) => {
     if (nextMode === mode) {
@@ -490,7 +506,7 @@ export default function SettingsScreen() {
             try {
               setDeleteAccountLoading(true);
 
-              await api.deleteAccount({ password: cleanPassword });
+              await requestApi.deleteAccount({ password: cleanPassword });
 
               await clearBiometricCredentials();
               await setBiometricEnabled(false);
@@ -506,7 +522,7 @@ export default function SettingsScreen() {
                 'autoLockTimeout',
               ]);
 
-              await logout();
+              await runCancelable(() => logout());
 
               setDeleteModalVisible(false);
               setDeletePassword('');
@@ -523,6 +539,7 @@ export default function SettingsScreen() {
                 ]
               );
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert(
                 'Could not delete account',
                 error.message || 'Something went wrong. Please try again.'
@@ -544,7 +561,7 @@ export default function SettingsScreen() {
 
     Alert.alert(
       'Clear offline vault?',
-      'This removes the saved offline copy from this device only. Your online vault will not be deleted.',
+      'This removes the encrypted offline copy of passwords, card details, SecureNote contents, and document metadata from this device only. Your online vault will not be deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -553,7 +570,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             await clearOfflineVaultSnapshot();
             setOfflineStatus(await getOfflineVaultStatus());
-            Alert.alert('Offline vault cleared', 'The saved offline vault snapshot was removed from this device.');
+            Alert.alert('Offline vault cleared', 'The encrypted offline vault copy was removed from this device.');
           },
         },
       ]
@@ -624,9 +641,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Auto-lock timeout</Text>
-                <Text style={styles.rowSub}>
-                  {getAutoLockDescription(selectedTimeout)}
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -639,9 +653,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Biometric unlock</Text>
-                <Text style={styles.rowSub}>
-                  Uses saved login credentials after biometric approval
-                </Text>
               </View>
 
               <Switch
@@ -664,9 +675,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Two-factor authentication</Text>
-                <Text style={styles.rowSub}>
-                  Adds extra verification during sign in
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -683,9 +691,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Recovery kit</Text>
-                <Text style={styles.rowSub}>
-                  Generate an offline recovery key for account recovery
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -702,9 +707,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Auto-fill</Text>
-                <Text style={styles.rowSub}>
-                  Sync saved logins and enable Android Autofill
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -721,9 +723,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Trusted devices</Text>
-                <Text style={styles.rowSub}>
-                  Review active sessions and log out devices you do not recognize
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -740,9 +739,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Emergency access</Text>
-                <Text style={styles.rowSub}>
-                  Add trusted contacts and manage emergency vault requests
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -760,9 +756,6 @@ export default function SettingsScreen() {
 
                 <View style={{ flex: 1 }}>
                   <Text style={styles.rowLabel}>Appearance</Text>
-                  <Text style={styles.rowSub}>
-                    Choose Light, Dark, or OLED black mode
-                  </Text>
                 </View>
               </View>
 
@@ -779,6 +772,9 @@ export default function SettingsScreen() {
                       ]}
                       activeOpacity={0.82}
                       onPress={() => handleThemeSelect(option.value)}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`${option.label} appearance`}
+                      accessibilityState={{ selected }}
                     >
                       <Text
                         style={[
@@ -787,14 +783,6 @@ export default function SettingsScreen() {
                         ]}
                       >
                         {option.label}
-                      </Text>
-                      <Text
-                        style={[
-                          styles.themeOptionSub,
-                          selected && styles.themeOptionSubSelected,
-                        ]}
-                      >
-                        {option.description}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -809,9 +797,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Haptic feedback</Text>
-                <Text style={styles.rowSub}>
-                  Feel subtle taps for important vault actions
-                </Text>
               </View>
 
               <Switch
@@ -834,9 +819,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Notifications</Text>
-                <Text style={styles.rowSub}>
-                  Subscription, backup, vault, and family alerts
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -857,9 +839,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Backup</Text>
-                <Text style={styles.rowSub}>
-                  Encrypted vault export for Premium and Family accounts
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -876,11 +855,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Offline vault</Text>
-                <Text style={styles.rowSub}>
-                  {offlineStatus?.hasSnapshot
-                    ? `${offlineStatus.totalCount} items saved · ${formatOfflineSavedAt(offlineStatus.savedAt)}`
-                    : 'No offline snapshot saved yet'}
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -915,9 +889,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>About The Guardian</Text>
-                <Text style={styles.rowSub}>
-                  App version, developers, and company information
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -938,9 +909,6 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Privacy Policy</Text>
-                <Text style={styles.rowSub}>
-                  How The Guardian handles vault, device, and support data
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -957,14 +925,38 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Terms of Service</Text>
-                <Text style={styles.rowSub}>
-                  Rules for using The Guardian and its vault features
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
           </View>
+
+          {/* TEMP ONBOARDING PREVIEW BUTTON
+              Keep this block enabled while reviewing the onboarding experience.
+              Comment out or delete this entire block before release. */}
+          <Text style={styles.sectionLabel}>ONBOARDING PREVIEW</Text>
+
+          <View style={styles.card}>
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.6}
+              onPress={() => {
+                hapticLight();
+                router.push('/verification?from=settings&preview=1');
+              }}
+            >
+              <View style={styles.iconCircle}>
+                <Ionicons name="shield-checkmark-outline" size={20} color={iconColor} />
+              </View>
+
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rowLabel}>{`Preview onboarding \n(For Beta testers)`}</Text>
+              </View>
+
+              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
+          {/* END TEMP ONBOARDING PREVIEW BUTTON */}
 
           <Text style={styles.sectionLabel}>SUPPORT</Text>
 
@@ -980,41 +972,11 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Report a bug</Text>
-                <Text style={styles.rowSub}>
-                  Send a safe bug report without including vault secrets
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
           </View>
-
-          {/* TEMP VERIFICATION TEST BUTTON
-              Keep this while testing the post-signup verification screen.
-              Before production release, comment out or delete this entire block. */}
-          {/* <Text style={styles.sectionLabel}>TESTING</Text>
-
-          <View style={styles.card}>
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.6}
-              onPress={() => { hapticLight(); router.push('/verification?from=settings'); }}
-            >
-              <View style={styles.iconCircle}>
-                <Ionicons name="shield-checkmark-outline" size={20} color={iconColor} />
-              </View>
-
-              <View style={{ flex: 1 }}>
-                <Text style={styles.rowLabel}>Open verification page</Text>
-                <Text style={styles.rowSub}>
-                  Temporary shortcut for testing the legal acceptance screen
-                </Text>
-              </View>
-
-              <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
-            </TouchableOpacity>
-          </View> */}
-          {/* END TEMP VERIFICATION TEST BUTTON */}
 
           <Text style={styles.sectionLabel}>DANGER ZONE</Text>
 
@@ -1023,19 +985,28 @@ export default function SettingsScreen() {
               style={[styles.row, styles.dangerRowDivider]}
               activeOpacity={0.6}
               onPress={() => { hapticWarning(); handleLockNow(); }}
+              disabled={lockingVault}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: lockingVault, busy: lockingVault }}
+              accessibilityLabel={lockingVault ? 'Locking vault' : 'Lock vault now'}
             >
               <View style={styles.dangerIconCircle}>
-                <LockKeyhole size={20} color={C.danger} />
+                {lockingVault ? (
+                  <ActivityIndicator size="small" color={C.danger} />
+                ) : (
+                  <LockKeyhole size={20} color={C.danger} />
+                )}
               </View>
 
               <View style={{ flex: 1 }}>
-                <Text style={styles.dangerRowLabel}>Lock vault now</Text>
-                <Text style={styles.dangerRowSub}>
-                  Logs you out and requires sign in again
+                <Text style={styles.dangerRowLabel}>
+                  {lockingVault ? 'Locking vault...' : 'Lock vault now'}
                 </Text>
               </View>
 
-              <ChevronRight size={20} color={C.danger} style={{ marginLeft: 4 }} />
+              {!lockingVault && (
+                <ChevronRight size={20} color={C.danger} style={{ marginLeft: 4 }} />
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -1056,9 +1027,6 @@ export default function SettingsScreen() {
                 <Text style={styles.dangerRowLabel}>
                   {deleteAccountLoading ? 'Deleting account...' : 'Delete account'}
                 </Text>
-                <Text style={styles.dangerRowSub}>
-                  Permanently removes your account and vault data
-                </Text>
               </View>
 
               <ChevronRight size={20} color={C.danger} style={{ marginLeft: 4 }} />
@@ -1071,13 +1039,36 @@ export default function SettingsScreen() {
         visible={deleteModalVisible}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={closeDeleteModal}
       >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.modalOverlay}
-        >
-          <View style={styles.deleteModalCard}>
+        <View style={styles.modalOverlay}>
+          {blurTarget?.targetRef ? (
+            <BlurView
+              blurTarget={blurTarget.targetRef}
+              blurMethod={
+                Platform.OS === 'android'
+                  ? ('dimezisBlurViewSdk31Plus' as any)
+                  : undefined
+              }
+              blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
+              intensity={Platform.OS === 'android' ? 12 : 22}
+              tint={isDark ? 'dark' : 'light'}
+              pointerEvents="none"
+              style={StyleSheet.absoluteFill}
+            />
+          ) : (
+            <View pointerEvents="none" style={styles.modalFallbackBlur} />
+          )}
+
+          <View pointerEvents="none" style={styles.modalBackdrop} />
+
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+            style={styles.modalKeyboard}
+          >
+            <View style={styles.deleteModalCard}>
             <View style={styles.deleteModalIcon}>
               <Trash2 size={26} color={C.danger} />
             </View>
@@ -1137,8 +1128,9 @@ export default function SettingsScreen() {
             >
               <Text style={styles.deleteCancelButtonText}>Cancel</Text>
             </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1188,13 +1180,13 @@ const localStyles = StyleSheet.create({
   },
 });
 
-const makeStyles = (C: any) =>
+const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
     scrollContent: {
       marginTop: 35,
       paddingHorizontal: 18,
-      paddingTop: 16,
+      paddingTop: 0,
       paddingBottom: 175,
     },
     title: {
@@ -1210,14 +1202,14 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundElement,
       borderRadius: 28,
       padding: 16,
-      marginBottom: 26,
+      marginBottom: 18,
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.06,
+      shadowOpacity: 0.035,
       shadowRadius: 18,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      elevation: 2,
     },
     avatar: {
       width: 50,
@@ -1249,24 +1241,39 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.045,
+      shadowOpacity: 0.025,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
       elevation: 2,
     },
-    row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 16 },
+    row: {
+      minHeight: 64,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 11,
+      paddingHorizontal: 16,
+    },
     rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     iconCircle: {
       width: 42,
       height: 42,
       borderRadius: 17,
-      backgroundColor: C.actionCard || C.backgroundSelected,
+      backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
       marginRight: 14,
     },
-    rowLabel: { flex: 1, fontSize: 15, color: C.text, fontWeight: '900' },
-    rowSub: { fontSize: 12, color: C.textSecondary, marginTop: 3, lineHeight: 17, fontWeight: '600' },
+    rowHelper: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
+        rowLabel: {
+      flex: 1,
+      fontSize: 15,
+      lineHeight: 20,
+      color: C.text,
+      fontWeight: '900',
+      textAlign: 'left',
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+    },
     preferenceBlock: { paddingVertical: 16, paddingHorizontal: 16 },
     preferenceHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 14 },
     themePicker: {
@@ -1285,12 +1292,12 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 8,
       alignItems: 'center',
       justifyContent: 'center',
-      minHeight: 58,
+      minHeight: 44,
     },
     themeOptionSelected: {
       backgroundColor: C.primary,
       shadowColor: C.primary,
-      shadowOpacity: 0.18,
+      shadowOpacity: 0.10,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
       elevation: 2,
@@ -1301,27 +1308,32 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
     },
     themeOptionLabelSelected: { color: '#FFFFFF' },
-    themeOptionSub: {
-      color: C.textSecondary,
-      fontSize: 10,
-      fontWeight: '700',
-      textAlign: 'center',
-      marginTop: 3,
-      lineHeight: 13,
-    },
-    themeOptionSubSelected: { color: 'rgba(255,255,255,0.86)' },
     modalOverlay: {
       flex: 1,
-      backgroundColor: 'rgba(0,0,0,0.66)',
+    },
+    modalFallbackBlur: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: isOled
+        ? 'rgba(0,0,0,0.82)'
+        : isDark
+          ? 'rgba(2,6,23,0.72)'
+          : 'rgba(15,23,42,0.24)',
+    },
+    modalBackdrop: {
+      ...StyleSheet.absoluteFill,
+      backgroundColor: isOled
+        ? 'rgba(0,0,0,0.48)'
+        : isDark
+          ? 'rgba(0,0,0,0.35)'
+          : 'rgba(0,0,0,0.18)',
+    },
+    modalKeyboard: {
+      flex: 1,
+      width: '100%',
       alignItems: 'center',
       justifyContent: 'center',
       padding: 22,
-    
-      shadowColor: '#000',
-      shadowOpacity: 0.065,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+    },
     deleteModalCard: {
       width: '100%',
       backgroundColor: C.backgroundElement,
@@ -1329,12 +1341,12 @@ const makeStyles = (C: any) =>
       padding: 22,
       borderWidth: 1,
       borderColor: C.danger,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     deleteModalIcon: {
       width: 56,
       height: 56,
@@ -1343,12 +1355,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: 14,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     deleteModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', marginBottom: 8 },
     deleteModalText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 18, fontWeight: '600' },
     deleteInputLabel: { color: C.text, fontSize: 13, fontWeight: '900', marginBottom: 8 },
@@ -1372,12 +1384,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       gap: 9,
       marginTop: 4,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     deleteDisabledButton: { opacity: 0.65 },
     deleteConfirmButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '900' },
     deleteCancelButton: { alignItems: 'center', paddingVertical: 13, marginTop: 8 },
@@ -1389,12 +1401,12 @@ const makeStyles = (C: any) =>
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: C.danger,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerRowDivider: { borderBottomWidth: 1, borderBottomColor: C.danger },
     dangerIconCircle: {
       width: 42,
@@ -1405,6 +1417,14 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       marginRight: 14,
     },
-    dangerRowLabel: { fontSize: 15, color: C.danger, fontWeight: '900' },
-    dangerRowSub: { fontSize: 12, color: C.danger, marginTop: 3, lineHeight: 17, opacity: 0.9, fontWeight: '700' },
+    dangerRowLabel: {
+      flex: 1,
+      fontSize: 15,
+      lineHeight: 20,
+      color: C.danger,
+      fontWeight: '900',
+      textAlign: 'left',
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+    },
   });

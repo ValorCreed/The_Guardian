@@ -16,6 +16,7 @@ import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyVaultItemResponse } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 
 const getTitle = (item: EmergencyVaultItemResponse) =>
   item.title || item.documentName || item.fileName || 'Emergency vault item';
@@ -46,7 +47,7 @@ const getSubtitle = (item: EmergencyVaultItemResponse) => {
   if (item.itemType === 'PASSWORD') return item.usernameValue || item.website || 'Password login';
   if (item.itemType === 'CARD') return item.usernameValue || 'Saved payment card';
   if (item.itemType === 'DOCUMENT') return getFriendlyDocumentType(item.documentType || item.mimeType, item.documentName || item.fileName || item.title);
-  if (item.itemType === 'NOTE') return item.category || 'Secure note';
+  if (item.itemType === 'NOTE') return item.category || 'SecureNote';
   return 'Emergency vault item';
 };
 
@@ -59,6 +60,7 @@ const getIcon = (itemType: string) => {
 };
 
 export default function EmergencyVaultScreen() {
+  const requestApi = useCancelableApi(api);
   const { requestId, ownerName, ownerEmail } = useLocalSearchParams<{
     requestId: string;
     ownerName?: string;
@@ -82,7 +84,7 @@ export default function EmergencyVaultScreen() {
 
     try {
       if (showLoader) setLoading(true);
-      const data = await api.getEmergencyVaultItems(requestId);
+      const data = await requestApi.getEmergencyVaultItems(requestId);
       setPasswords(data.passwords || []);
       setCards(data.cards || []);
       setDocuments(data.documents || []);
@@ -90,6 +92,7 @@ export default function EmergencyVaultScreen() {
       setVaultOwnerName(data.ownerName || ownerName || 'Vault owner');
       setVaultOwnerEmail(data.ownerEmail || ownerEmail || '');
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not open emergency vault', error.message || 'Please try again.');
       router.back();
     } finally {
@@ -175,8 +178,8 @@ export default function EmergencyVaultScreen() {
         showsVerticalScrollIndicator={false}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} colors={[C.primary]} />}
       >
-        <Text style={styles.eyebrow}>Read-only access</Text>
-        <Text style={styles.title}>Emergency Vault</Text>
+        <Text style={styles.eyebrow}></Text>
+        <Text style={styles.title}>Emergency vault</Text>
         <Text style={styles.subtitle}>
           You can view only the item types the vault owner released to you. Every view is recorded in the audit log.
         </Text>
@@ -197,7 +200,7 @@ export default function EmergencyVaultScreen() {
         <Section title="Passwords" count={passwords.length} items={passwords} C={C} styles={styles} onOpen={openItem} />
         <Section title="Cards" count={cards.length} items={cards} C={C} styles={styles} onOpen={openItem} />
         <Section title="Documents" count={documents.length} items={documents} C={C} styles={styles} onOpen={openItem} />
-        <Section title="Secure Notes" count={notes.length} items={notes} C={C} styles={styles} onOpen={openItem} />
+        <Section title="SecureNotes" count={notes.length} items={notes} C={C} styles={styles} onOpen={openItem} />
 
         {totalItems === 0 && (
           <View style={styles.emptyBox}>

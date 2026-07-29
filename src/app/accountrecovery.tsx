@@ -17,17 +17,22 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
 type RecoveryMode = 'kit' | 'erase';
 
 export default function AccountRecoveryScreen() {
+  const requestApi = useCancelableApi(api);
   const params = useLocalSearchParams<{ mode?: string; email?: string }>();
   const initialMode: RecoveryMode = params.mode === 'erase' ? 'erase' : 'kit';
 
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  useSensitiveScreenProtection(true);
 
   const [mode, setMode] = useState<RecoveryMode>(initialMode);
   const [email, setEmail] = useState(String(params.email || ''));
@@ -64,12 +69,13 @@ export default function AccountRecoveryScreen() {
 
     try {
       setSendingCode(true);
-      await api.forgotPassword({ email: cleanEmail });
+      await requestApi.forgotPassword({ email: cleanEmail });
       Alert.alert(
         'Account reset code sent',
         'If this email belongs to a verified account, an account reset code has been sent. This code is only for Reset & Erase.'
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not send reset code', error.message || 'Please try again.');
     } finally {
       setSendingCode(false);
@@ -90,7 +96,7 @@ export default function AccountRecoveryScreen() {
     try {
       setLoading(true);
 
-      await api.recoverWithRecoveryKit({
+      await requestApi.recoverWithRecoveryKit({
         recoveryId: cleanRecoveryId,
         recoveryKey: cleanRecoveryKey,
         newPassword,
@@ -102,6 +108,7 @@ export default function AccountRecoveryScreen() {
         [{ text: 'Go to sign in', onPress: () => router.replace('/signin') }]
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Recovery failed', error.message || 'The recovery kit details are invalid or expired.');
     } finally {
       setLoading(false);
@@ -118,7 +125,7 @@ export default function AccountRecoveryScreen() {
 
     Alert.alert(
       'Erase vault and reset account?',
-      'Without your password or recovery kit, The Guardian cannot decrypt your existing vault. This will permanently delete your saved passwords, cards, documents, and secure notes, then reset your account password.',
+      'Without your password or recovery kit, The Guardian cannot decrypt your existing vault. This will permanently delete your saved passwords, cards, documents, and SecureNotes, then reset your account password.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -134,7 +141,7 @@ export default function AccountRecoveryScreen() {
     try {
       setLoading(true);
 
-      await api.resetAccountAndEraseVault({
+      await requestApi.resetAccountAndEraseVault({
         email: cleanEmail,
         resetCode: resetCode.trim(),
         newPassword,
@@ -146,6 +153,7 @@ export default function AccountRecoveryScreen() {
         [{ text: 'Go to sign in', onPress: () => router.replace('/signin') }]
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Account reset failed', error.message || 'The reset code is invalid or expired.');
     } finally {
       setLoading(false);
@@ -211,7 +219,7 @@ export default function AccountRecoveryScreen() {
         >
           <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.logoBox} />
 
-          <Text style={styles.title}>Account recovery</Text>
+          <Text style={styles.title}>Recover account</Text>
           <Text style={styles.subtitle}>
             {mode === 'kit'
               ? 'Use your Recovery ID and Recovery Key to reset your password without erasing your vault.'
@@ -251,7 +259,7 @@ export default function AccountRecoveryScreen() {
             <View style={styles.dangerCard}>
               <Ionicons name="alert-circle-outline" size={22} color={C.danger} />
               <Text style={styles.dangerText}>
-                Email recovery is only for Reset & Erase. It cannot keep your old passwords, cards, documents, or notes.
+                Email recovery is only for Reset & Erase. It cannot keep your old passwords, cards, documents, or SecureNotes.
               </Text>
             </View>
           )}
@@ -390,24 +398,24 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     modeButtonActive: { backgroundColor: C.primary, borderColor: C.primary ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     modeButtonDangerActive: { backgroundColor: C.danger, borderColor: C.danger ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     modeButtonText: { color: C.text, fontSize: 13, fontWeight: '900' },
     modeButtonTextActive: { color: '#FFFFFF' },
     infoCard: {
@@ -419,12 +427,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 15,
       marginBottom: 16,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     infoText: { flex: 1, color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
     dangerCard: {
       flexDirection: 'row',
@@ -435,12 +443,12 @@ const makeStyles = (C: any) =>
       borderColor: C.danger,
       padding: 15,
       marginBottom: 16,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerText: { flex: 1, color: C.danger, fontSize: 13, lineHeight: 20, fontWeight: '800' },
     formCard: {
       backgroundColor: C.backgroundElement,
@@ -448,12 +456,12 @@ const makeStyles = (C: any) =>
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     label: { fontSize: 13, color: C.text, fontWeight: '800', marginBottom: 8, marginLeft: 4 },
     input: {
       backgroundColor: C.background,
@@ -484,12 +492,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: 2,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerButton: {
       minHeight: 56,
       borderRadius: 999,
@@ -497,12 +505,12 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: 2,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
     secondaryAction: {
       minHeight: 50,

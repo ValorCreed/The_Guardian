@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { API_BASE_URL } from '../services/api';
+import { checkApiReachability } from '../services/api';
 
 export type NetworkStatus = {
   online: boolean;
@@ -12,40 +12,41 @@ export type NetworkStatus = {
 export function useNetworkStatus(): NetworkStatus {
   const [online, setOnline] = useState(true);
   const [checking, setChecking] = useState(false);
+  const inFlightRef = useRef<Promise<boolean> | null>(null);
 
   const checkNow = useCallback(async () => {
+    if (inFlightRef.current) return inFlightRef.current;
+
     setChecking(true);
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 2200);
-
-    try {
-      await fetch(API_BASE_URL, {
-        method: 'GET',
-        signal: controller.signal,
+    const check = checkApiReachability()
+      .then((reachable) => {
+        setOnline(reachable);
+        return reachable;
+      })
+      .finally(() => {
+        inFlightRef.current = null;
+        setChecking(false);
       });
 
-      setOnline(true);
-      return true;
-    } catch {
-      setOnline(false);
-      return false;
-    } finally {
-      clearTimeout(timeout);
-      setChecking(false);
-    }
+    inFlightRef.current = check;
+    return check;
   }, []);
 
   useEffect(() => {
-    checkNow();
+    void checkNow();
 
-    const interval = setInterval(checkNow, 20000);
+    /*
+     * Do not run a permanent 20-second raw-fetch interval. It creates
+     * unnecessary overlapping network probes and can race with authentication
+     * immediately after Android resumes the app. A launch/foreground check and
+     * the public checkNow() method are enough for the current offline UI.
+     */
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state === 'active') checkNow();
+      if (state === 'active') void checkNow();
     });
 
     return () => {
-      clearInterval(interval);
       subscription.remove();
     };
   }, [checkNow]);

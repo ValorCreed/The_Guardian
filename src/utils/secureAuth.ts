@@ -5,7 +5,15 @@ import { api } from '../services/api';
 
 const BIOMETRIC_ENABLED_KEY = 'biometricUnlock';
 const BIOMETRIC_EMAIL_KEY = 'biometricEmail';
-const BIOMETRIC_PASSWORD_KEY = 'biometricPassword';
+const BIOMETRIC_TOKEN_KEY = 'guardian.biometric-credential';
+const BIOMETRIC_TOKEN_PRESENT_KEY = 'guardian.biometric-credential-present';
+const LEGACY_BIOMETRIC_PASSWORD_KEY = 'biometricPassword';
+
+const BIOMETRIC_SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
+  keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  requireAuthentication: true,
+  authenticationPrompt: 'Unlock The Guardian',
+};
 
 export const setBiometricEnabled = async (enabled: boolean) => {
   await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, String(enabled));
@@ -15,20 +23,60 @@ export const isBiometricEnabled = async () => {
   return (await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY)) === 'true';
 };
 
-export const saveBiometricCredentials = async (email: string, password: string) => {
-  await SecureStore.setItemAsync(BIOMETRIC_EMAIL_KEY, email.trim().toLowerCase());
-  await SecureStore.setItemAsync(BIOMETRIC_PASSWORD_KEY, password);
+/**
+ * Enrolls a revocable, device-bound server credential after a successful
+ * password login. The password parameter is retained only for compatibility
+ * with existing call sites and is intentionally never stored or used.
+ */
+export const saveBiometricCredentials = async (
+  email: string,
+  _password?: string
+) => {
+  const cleanEmail = email.trim().toLowerCase();
+  const enrollment = await api.enrollBiometricCredential();
+
+  if (!enrollment?.credentialToken) {
+    throw new Error('Biometric sign-in could not be prepared on this device.');
+  }
+
+  await SecureStore.setItemAsync(BIOMETRIC_EMAIL_KEY, cleanEmail, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+  await SecureStore.setItemAsync(
+    BIOMETRIC_TOKEN_KEY,
+    enrollment.credentialToken,
+    BIOMETRIC_SECURE_OPTIONS
+  );
+  await AsyncStorage.setItem(BIOMETRIC_TOKEN_PRESENT_KEY, 'true');
+
+  // Remove credentials created by older app versions that stored the password.
+  await SecureStore.deleteItemAsync(LEGACY_BIOMETRIC_PASSWORD_KEY).catch(
+    () => undefined
+  );
+};
+
+const clearLocalBiometricCredential = async () => {
+  await Promise.allSettled([
+    SecureStore.deleteItemAsync(BIOMETRIC_EMAIL_KEY),
+    SecureStore.deleteItemAsync(BIOMETRIC_TOKEN_KEY),
+    SecureStore.deleteItemAsync(LEGACY_BIOMETRIC_PASSWORD_KEY),
+    AsyncStorage.removeItem(BIOMETRIC_TOKEN_PRESENT_KEY),
+  ]);
 };
 
 export const clearBiometricCredentials = async () => {
-  await SecureStore.deleteItemAsync(BIOMETRIC_EMAIL_KEY);
-  await SecureStore.deleteItemAsync(BIOMETRIC_PASSWORD_KEY);
+  // Revoke the device-bound credential while the authenticated session exists.
+  await api.revokeBiometricCredential?.().catch(() => undefined);
+  await clearLocalBiometricCredential();
 };
 
 export const hasBiometricCredentials = async () => {
-  const email = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
-  const password = await SecureStore.getItemAsync(BIOMETRIC_PASSWORD_KEY);
-  return Boolean(email && password);
+  const [email, present] = await Promise.all([
+    SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY),
+    AsyncStorage.getItem(BIOMETRIC_TOKEN_PRESENT_KEY),
+  ]);
+
+  return Boolean(email && present === 'true');
 };
 
 export const biometricLogin = async () => {
@@ -45,24 +93,34 @@ export const biometricLogin = async () => {
   }
 
   const email = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
-  const password = await SecureStore.getItemAsync(BIOMETRIC_PASSWORD_KEY);
-
-  if (!email || !password) {
-    throw new Error('No saved login credentials found. Please sign in with your email and password once.');
+  if (!email) {
+    throw new Error('Biometric sign-in needs to be set up again. Sign in with your password once.');
   }
 
-  const result = await LocalAuthentication.authenticateAsync({
-    promptMessage: 'Unlock The Guardian',
-    cancelLabel: 'Cancel',
-    disableDeviceFallback: false,
-  });
+  let credentialToken: string | null = null;
 
-  if (!result.success) {
+  try {
+    // Authentication is enforced by the operating system before the token is released.
+    credentialToken = await SecureStore.getItemAsync(
+      BIOMETRIC_TOKEN_KEY,
+      BIOMETRIC_SECURE_OPTIONS
+    );
+  } catch {
     throw new Error('Biometric authentication was cancelled or failed.');
   }
 
-  // Do not save the session here.
-  // If the account has 2FA enabled, the backend returns requiresTwoFactor=true and no token yet.
-  // The sign-in screen must route to /twofactor first.
-  return api.login({ email, password });
+  if (!credentialToken) {
+    await AsyncStorage.removeItem(BIOMETRIC_TOKEN_PRESENT_KEY);
+    throw new Error('Biometric sign-in needs to be set up again. Sign in with your password once.');
+  }
+
+  try {
+    return await api.biometricLogin({ email, credentialToken });
+  } catch (error: any) {
+    if (Number(error?.status) === 401) {
+      await clearLocalBiometricCredential();
+      await setBiometricEnabled(false);
+    }
+    throw error;
+  }
 };

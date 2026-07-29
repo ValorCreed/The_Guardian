@@ -53,7 +53,7 @@ export default function ResetPasswordScreen() {
         >
           <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.logoBox} />
 
-          <Text style={styles.title}>Password recovery changed</Text>
+          <Text style={styles.title}>Reset your password</Text>
           <Text style={styles.subtitle}>
             Email-only password reset is no longer allowed because it could let someone reset the account while keeping encrypted vault data they cannot safely unlock.
           </Text>
@@ -106,10 +106,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     infoText: { flex: 1, color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '700' },
     primaryButton: {
       minHeight: 56,
@@ -120,10 +120,10 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     primaryButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900' },
     dangerButton: {
       minHeight: 56,
@@ -135,10 +135,10 @@ const makeStyles = (C: any) =>
       marginBottom: 10,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerButtonText: { color: C.danger, fontSize: 15, fontWeight: '900' },
     backButton: { alignItems: 'center', paddingVertical: 16 },
     backButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '800' },

@@ -7,17 +7,22 @@ import React, {
   useState,
 } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { usePathname } from 'expo-router';
+import { useColorScheme } from 'react-native';
 
-import { Colors } from '../constants/theme';
+import { Colors, type ThemePalette } from '../constants/theme';
+import { setAnalyticsEnabledPreference } from '../services/analytics';
 
-export type ThemeMode = 'light' | 'dark' | 'oled';
+export type ThemeMode = 'system' | 'light' | 'dark' | 'oled';
+type ResolvedThemeMode = 'light' | 'dark' | 'oled';
 
 type ThemeContextType = {
+  /** The user's saved preference. */
   mode: ThemeMode;
+  /** The concrete palette currently rendered after resolving System mode. */
+  resolvedMode: ResolvedThemeMode;
   isDark: boolean;
   isOled: boolean;
-  colors: any;
+  colors: ThemePalette;
   toggleTheme: () => void;
   setThemeMode: (mode: ThemeMode) => Promise<void>;
   resetThemeForNewAccount: (email?: string) => Promise<void>;
@@ -32,31 +37,21 @@ const LAST_THEME_USER_EMAIL_KEY = 'lastThemeUserEmail';
 const getUserThemeKey = (email: string) =>
   `themeMode:user:${email.trim().toLowerCase()}`;
 
-const FORCE_LIGHT_ROUTES = ['/signup'];
-
-function shouldForceLight(pathname: string) {
-  return FORCE_LIGHT_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`)
-  );
-}
-
 function isThemeMode(value: string | null): value is ThemeMode {
-  return value === 'light' || value === 'dark' || value === 'oled';
+  return value === 'system' || value === 'light' || value === 'dark' || value === 'oled';
 }
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const systemColorScheme = useColorScheme();
+  const [mode, setMode] = useState<ThemeMode>('system');
 
-  const [mode, setMode] = useState<ThemeMode>('light');
-
-  const forceLight = shouldForceLight(pathname || '');
+  useEffect(() => {
+    // Analytics is a required, privacy-safe reliability feature for this build.
+    // Reset legacy opt-out values once when the app provider starts.
+    void setAnalyticsEnabledPreference(true);
+  }, []);
 
   const reloadTheme = useCallback(async () => {
-    if (forceLight) {
-      setMode('light');
-      return;
-    }
-
     const activeUserEmail = await AsyncStorage.getItem('userEmail');
     const lastThemeUserEmail = await AsyncStorage.getItem(
       LAST_THEME_USER_EMAIL_KEY
@@ -83,12 +78,12 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    setMode('light');
-  }, [forceLight]);
+    setMode('system');
+  }, []);
 
   useEffect(() => {
-    reloadTheme();
-  }, [pathname, reloadTheme]);
+    void reloadTheme();
+  }, [reloadTheme]);
 
   const setThemeMode = useCallback(async (newMode: ThemeMode) => {
     setMode(newMode);
@@ -108,45 +103,62 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const resetThemeForNewAccount = useCallback(async (email?: string) => {
     const cleanEmail = String(email || '').trim().toLowerCase();
 
-    setMode('light');
-
-    await AsyncStorage.setItem(GLOBAL_THEME_KEY, 'light');
+    setMode('system');
+    await AsyncStorage.setItem(GLOBAL_THEME_KEY, 'system');
 
     if (cleanEmail) {
       await AsyncStorage.setItem(LAST_THEME_USER_EMAIL_KEY, cleanEmail);
-      await AsyncStorage.setItem(getUserThemeKey(cleanEmail), 'light');
+      await AsyncStorage.setItem(getUserThemeKey(cleanEmail), 'system');
     }
   }, []);
 
   const toggleTheme = useCallback(() => {
-    const nextMode: ThemeMode = mode === 'light' ? 'dark' : 'light';
-    setThemeMode(nextMode);
-  }, [mode, setThemeMode]);
+    const currentlyDark =
+      mode === 'dark' ||
+      mode === 'oled' ||
+      (mode === 'system' && systemColorScheme === 'dark');
 
-  const effectiveMode: ThemeMode = forceLight ? 'light' : mode;
-  const isDark = effectiveMode === 'dark' || effectiveMode === 'oled';
-  const isOled = effectiveMode === 'oled';
+    void setThemeMode(currentlyDark ? 'light' : 'dark');
+  }, [mode, setThemeMode, systemColorScheme]);
 
-  const colors = useMemo(() => {
-    return Colors[effectiveMode];
-  }, [effectiveMode]);
+  const resolvedMode: ResolvedThemeMode =
+    mode === 'system'
+      ? systemColorScheme === 'dark'
+        ? 'dark'
+        : 'light'
+      : mode;
 
-  return (
-    <ThemeContext.Provider
-      value={{
-        mode: effectiveMode,
-        isDark,
-        isOled,
-        colors,
-        toggleTheme,
-        setThemeMode,
-        resetThemeForNewAccount,
-        reloadTheme,
-      }}
-    >
-      {children}
-    </ThemeContext.Provider>
+  const isDark = resolvedMode === 'dark' || resolvedMode === 'oled';
+  const isOled = resolvedMode === 'oled';
+
+  const colors = useMemo(() => Colors[resolvedMode], [resolvedMode]);
+
+  const value = useMemo<ThemeContextType>(
+    () => ({
+      mode,
+      resolvedMode,
+      isDark,
+      isOled,
+      colors,
+      toggleTheme,
+      setThemeMode,
+      resetThemeForNewAccount,
+      reloadTheme,
+    }),
+    [
+      colors,
+      isDark,
+      isOled,
+      mode,
+      reloadTheme,
+      resetThemeForNewAccount,
+      resolvedMode,
+      setThemeMode,
+      toggleTheme,
+    ]
   );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 export function useAppTheme() {

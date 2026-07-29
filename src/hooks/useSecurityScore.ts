@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from 'expo-router';
 
@@ -12,6 +12,12 @@ import {
 } from '../services/api';
 import { decryptPassword } from '../utils/vaultcrypto';
 import { checkPwnedPassword } from '../utils/pwnedPasswords';
+import {
+  getSecurityScoreChangeVersion,
+  scheduleIdleTask,
+  SECURITY_SCORE_NEEDS_SYNC_KEY,
+  subscribeSecurityScoreChanges,
+} from '../services/securityScoreSync';
 
 type VaultPasswordItem = {
   id: number | string;
@@ -714,7 +720,43 @@ async function calculateSecurityReport(
 }
 
 const SECURITY_REPORT_CACHE_PREFIX = 'theguardian.security.report.v4';
-const SECURITY_SCORE_INITIAL_SYNC_KEY = 'securityScoreNeedsInitialSync';
+const SECURITY_SCORE_INITIAL_SYNC_KEY = SECURITY_SCORE_NEEDS_SYNC_KEY;
+
+/**
+ * Silent scans frequently produce the same report object with new references.
+ * Comparing the visible score data prevents unnecessary Home rerenders when
+ * nothing actually changed.
+ */
+const getReportSignature = (report?: SecurityReport | null) => {
+  if (!report) return '';
+
+  return [
+    report.score,
+    report.totalPasswords,
+    report.totalSharedPasswords,
+    report.totalFamilyMemberPasswords,
+    report.weakCount,
+    report.mediumCount,
+    report.strongCount,
+    report.reusedCount,
+    report.oldCount,
+    report.missingInfoCount,
+    report.breachedCount,
+    report.breachCheckFailed,
+    report.recoveryKitCreated ? 1 : 0,
+    report.emailVerified ? 1 : 0,
+    report.twoFactorEnabled ? 1 : 0,
+    report.plan,
+    report.issues
+      .map((issue) => `${issue.id}:${issue.type}:${issue.severity}`)
+      .join(','),
+  ].join('|');
+};
+
+const reportsMatch = (
+  first?: SecurityReport | null,
+  second?: SecurityReport | null
+) => getReportSignature(first) === getReportSignature(second);
 
 let memoryReport: SecurityReport | null = null;
 let memoryEmail = '';
@@ -758,10 +800,14 @@ const saveCachedReport = async (email: string, report: SecurityReport) => {
 
 async function loadReportFromServer(force = false) {
   if (force) {
-    inFlight = null;
     api.clearCache?.();
   }
 
+  /*
+   * Every mounted score surface subscribes to the same change event. Reuse the
+   * active calculation so Home, Security, and Security Health do not launch
+   * duplicate network scans for one mutation.
+   */
   if (inFlight) {
     return inFlight;
   }
@@ -847,12 +893,21 @@ async function maybeReportSecurityAlert(email: string, report: SecurityReport) {
 export const useSecurityScore = () => {
   const [report, setReport] = useState<SecurityReport>(memoryReport || emptyReport);
   const [loading, setLoading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncPending, setSyncPending] = useState(false);
+  const refreshPromiseRef = useRef<Promise<SecurityReport> | null>(null);
+
+  const applyReport = useCallback((nextReport: SecurityReport) => {
+    setReport((currentReport) =>
+      reportsMatch(currentReport, nextReport) ? currentReport : nextReport
+    );
+  }, []);
 
   const hydrateCachedReport = useCallback(async () => {
     const email = await getActiveEmail();
 
     if (memoryReport && memoryEmail === email) {
-      setReport(memoryReport);
+      applyReport(memoryReport);
       return memoryReport;
     }
 
@@ -861,79 +916,203 @@ export const useSecurityScore = () => {
     if (cached) {
       memoryEmail = email;
       memoryReport = cached;
-      setReport(cached);
+      applyReport(cached);
       return cached;
     }
 
-    setReport(emptyReport);
+    applyReport(emptyReport);
     return null;
-  }, []);
+  }, [applyReport]);
 
-  const refreshFromServer = useCallback(async () => {
-    const email = await getActiveEmail();
+  const refreshFromServer = useCallback(
+    async (options: { silent?: boolean } = {}) => {
+      const silent = Boolean(options.silent);
 
-    try {
-      setLoading(true);
-
-      const calculated = await loadReportFromServer(true);
-
-      memoryEmail = email;
-      memoryReport = calculated;
-      initialSyncDoneForEmail = email;
-
-      await saveCachedReport(email, calculated);
-      await maybeReportSecurityAlert(email, calculated);
-      await AsyncStorage.removeItem(SECURITY_SCORE_INITIAL_SYNC_KEY);
-
-      setReport(calculated);
-      return calculated;
-    } catch (error) {
-      console.log('SECURITY SCORE ERROR:', error);
-
-      const cached = await readCachedReport(email);
-      if (cached) {
-        memoryEmail = email;
-        memoryReport = cached;
-        setReport(cached);
-        return cached;
+      if (silent) {
+        setSyncPending(true);
       }
 
-      setReport(emptyReport);
-      return emptyReport;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      /*
+       * Home can request a refresh from both its focus handler and the global
+       * mutation event. Reuse the same hook-level task so those paths do not
+       * repeat cache writes, state commits, or loading transitions.
+       */
+      if (refreshPromiseRef.current) {
+        return refreshPromiseRef.current;
+      }
+
+      const refreshTask = (async () => {
+        const email = await getActiveEmail();
+        const changeVersionAtStart = getSecurityScoreChangeVersion();
+
+        try {
+          if (silent) {
+            setSyncing(true);
+          } else {
+            setLoading(true);
+          }
+
+          const calculated = await loadReportFromServer(true);
+          const previousMemoryReport =
+            memoryEmail === email ? memoryReport : null;
+          const reportChanged = !reportsMatch(
+            previousMemoryReport,
+            calculated
+          );
+          const nextReport =
+            !reportChanged && previousMemoryReport
+              ? previousMemoryReport
+              : calculated;
+
+          memoryEmail = email;
+          memoryReport = nextReport;
+          initialSyncDoneForEmail = email;
+
+          if (reportChanged) {
+            await saveCachedReport(email, nextReport);
+            await maybeReportSecurityAlert(email, nextReport);
+          }
+
+          const latestChangeVersion = getSecurityScoreChangeVersion();
+
+          if (latestChangeVersion === changeVersionAtStart) {
+            await AsyncStorage.removeItem(SECURITY_SCORE_INITIAL_SYNC_KEY);
+            setSyncPending(false);
+          } else {
+            setSyncPending(true);
+            /*
+             * A second mutation landed while this calculation was running.
+             * Keep the dirty marker and queue one trailing silent scan so no
+             * password, 2FA, recovery, backup, family, or plan change is lost.
+             */
+            setTimeout(() => {
+              void refreshFromServer({ silent: true });
+            }, 0);
+          }
+
+          applyReport(nextReport);
+          return nextReport;
+        } catch (error) {
+          setSyncPending(false);
+          console.log('SECURITY SCORE ERROR:', error);
+
+          const cached = await readCachedReport(email);
+          if (cached) {
+            memoryEmail = email;
+            memoryReport = cached;
+            applyReport(cached);
+            return cached;
+          }
+
+          applyReport(emptyReport);
+          return emptyReport;
+        } finally {
+          if (silent) {
+            setSyncing(false);
+          } else {
+            setLoading(false);
+          }
+        }
+      })();
+
+      refreshPromiseRef.current = refreshTask;
+
+      try {
+        return await refreshTask;
+      } finally {
+        if (refreshPromiseRef.current === refreshTask) {
+          refreshPromiseRef.current = null;
+        }
+      }
+    },
+    [applyReport]
+  );
 
   const loadSecurityScore = useCallback(async () => {
     const email = await getActiveEmail();
-    const needsInitialSync = await AsyncStorage.getItem(SECURITY_SCORE_INITIAL_SYNC_KEY);
-
-    if (needsInitialSync === 'true' || initialSyncDoneForEmail !== email) {
-      await refreshFromServer();
-      return;
-    }
-
+    const needsInitialSync = await AsyncStorage.getItem(
+      SECURITY_SCORE_INITIAL_SYNC_KEY
+    );
     const cached = await hydrateCachedReport();
 
-    if (!cached) {
-      await refreshFromServer();
+    if (needsInitialSync === 'true') {
+      setSyncPending(true);
+    }
+
+    if (
+      needsInitialSync === 'true' ||
+      initialSyncDoneForEmail !== email ||
+      !cached
+    ) {
+      /*
+       * Keep an already-rendered score visible while refreshing stale data.
+       * The loading indicator is reserved for the first load and manual pulls.
+       */
+      await refreshFromServer({ silent: Boolean(cached) });
     }
   }, [hydrateCachedReport, refreshFromServer]);
 
   useFocusEffect(
     useCallback(() => {
-      loadSecurityScore();
+      /*
+       * Keep cached score data visible immediately, then let the route and ring
+       * entrance animation run before starting password decryption, family-risk
+       * loading, or breach checks.
+       */
+      const task = scheduleIdleTask(
+        () => {
+          void loadSecurityScore();
+        },
+        {
+          delayMs: 980,
+          timeoutMs: 1500,
+        }
+      );
+
+      return () => {
+        task.cancel();
+      };
     }, [loadSecurityScore])
   );
 
   useEffect(() => {
-    hydrateCachedReport();
+    let active = true;
+
+    void AsyncStorage.getItem(SECURITY_SCORE_INITIAL_SYNC_KEY).then((value) => {
+      if (active && value === 'true') {
+        setSyncPending(true);
+      }
+    });
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    void hydrateCachedReport();
   }, [hydrateCachedReport]);
+
+  useEffect(() => {
+    return subscribeSecurityScoreChanges(() => {
+      setSyncPending(true);
+
+      /*
+       * Mutations emit only after the server accepts them. Refresh immediately
+       * in the background without showing a spinner or replacing the current
+       * score with an empty state.
+       */
+      void refreshFromServer({ silent: true });
+    });
+  }, [refreshFromServer]);
 
   return {
     report,
     loading,
-    reload: refreshFromServer,
+    syncing,
+    pendingSync: syncPending,
+    updating: loading || syncing || syncPending,
+    reload: () => refreshFromServer({ silent: false }),
+    reloadSilently: () => refreshFromServer({ silent: true }),
   };
 };

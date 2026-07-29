@@ -1,5 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Image,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -7,458 +9,628 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
-import { hapticLight, hapticMedium, hapticWarning } from '../utils/haptics';
+import { logout } from '../services/api';
+import {
+  getLegalConsentRecord,
+  saveLegalConsentAcceptance,
+} from '../services/legalConsent';
+import {
+  hapticLight,
+  hapticMedium,
+  hapticSuccess,
+  hapticWarning,
+} from '../utils/haptics';
 
-type FeatureCard = {
-  icon: keyof typeof Ionicons.glyphMap;
+type ConsentItemProps = {
+  accepted: boolean;
   title: string;
-  description: string;
+  linkLabel: string;
+  onToggle: () => void;
+  onOpenDocument: () => void;
+  styles: ReturnType<typeof makeStyles>;
+  C: any;
 };
+
+function ConsentItem({
+  accepted,
+  title,
+  linkLabel,
+  onToggle,
+  onOpenDocument,
+  styles,
+  C,
+}: ConsentItemProps) {
+  return (
+    <View style={styles.consentItem}>
+      <TouchableOpacity
+        style={styles.consentMain}
+        activeOpacity={0.78}
+        onPress={onToggle}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: accepted }}
+        accessibilityLabel={`Accept ${title}`}
+      >
+        <View style={[styles.checkbox, accepted && styles.checkboxAccepted]}>
+          {accepted ? (
+            <Ionicons name="checkmark" size={18} color="#FFFFFF" />
+          ) : null}
+        </View>
+
+        <Text style={styles.consentTitle}>{title}</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        activeOpacity={0.72}
+        onPress={onOpenDocument}
+        style={styles.documentLinkButton}
+        accessibilityRole="link"
+        accessibilityLabel={linkLabel}
+      >
+        <Text style={styles.documentLink}>{linkLabel}</Text>
+        <Ionicons name="open-outline" size={14} color={C.primary} />
+      </TouchableOpacity>
+    </View>
+  );
+}
 
 export default function VerificationScreen() {
   const { colors: C, isDark } = useAppTheme();
-  const styles = useMemo(() => makeStyles(C, isDark), [C, isDark]);
-  const params = useLocalSearchParams<{ from?: string }>();
-  const fromSettings = params.from === 'settings';
+  const styles = useMemo(() => makeStyles(C), [C]);
+  const params = useLocalSearchParams<{ from?: string; preview?: string }>();
+  const fromSettings = params.from === 'settings' || params.preview === '1';
 
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [loadingConsent, setLoadingConsent] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [declining, setDeclining] = useState(false);
 
-  const features: FeatureCard[] = [
-    {
-      icon: 'shield-checkmark-outline',
-      title: 'Encrypted vault protection',
-      description: 'Passwords, cards, secure notes, and documents are protected with strong encryption before storage.',
-    },
-    {
-      icon: 'eye-off-outline',
-      title: 'Private by design',
-      description: 'The Guardian is built to keep sensitive vault contents away from support reports, logs, and unnecessary exposure.',
-    },
-    {
-      icon: 'medkit-outline',
-      title: 'Recovery matters',
-      description: 'Save your recovery kit safely. It helps you regain access when you need it most.',
-    },
-  ];
+  const fullyAccepted = privacyAccepted && termsAccepted;
+  const acceptedCount = Number(privacyAccepted) + Number(termsAccepted);
 
-  const handleToggleTerms = () => {
-    setAcceptedTerms((current) => {
-      const next = !current;
-      if (next) {
-        hapticLight();
-      } else {
-        hapticWarning();
+  useEffect(() => {
+    let mounted = true;
+
+    const loadConsent = async () => {
+      try {
+        const record = await getLegalConsentRecord();
+
+        if (!mounted) return;
+
+        if (record) {
+          setPrivacyAccepted(true);
+          setTermsAccepted(true);
+        }
+      } finally {
+        if (mounted) setLoadingConsent(false);
       }
+    };
+
+    void loadConsent();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const togglePrivacy = () => {
+    setPrivacyAccepted((current) => {
+      const next = !current;
+      next ? hapticLight() : hapticWarning();
       return next;
     });
   };
 
-  const handleContinue = () => {
-    if (!acceptedTerms) return;
+  const toggleTerms = () => {
+    setTermsAccepted((current) => {
+      const next = !current;
+      next ? hapticLight() : hapticWarning();
+      return next;
+    });
+  };
 
-    hapticMedium();
+  const handleContinue = async () => {
+    if (!fullyAccepted || saving) return;
+
+    try {
+      setSaving(true);
+      hapticMedium();
+
+      await saveLegalConsentAcceptance();
+      hapticSuccess();
+
+      if (fromSettings) {
+        router.back();
+        return;
+      }
+
+      router.replace('/home');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDecline = async () => {
+    if (declining || saving) return;
 
     if (fromSettings) {
+      hapticLight();
       router.back();
       return;
     }
 
-    router.replace('/home');
-  };
+    try {
+      setDeclining(true);
+      hapticWarning();
 
-  const goBack = () => {
-    hapticLight();
-    router.back();
-  };
-
-  const openPrivacy = () => {
-    hapticLight();
-    router.push('/privacy');
-  };
-
-  const openTerms = () => {
-    hapticLight();
-    router.push('/terms');
+      await logout();
+      await AsyncStorage.removeItem('vaultLocked');
+      router.replace('/login');
+    } finally {
+      setDeclining(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      {fromSettings ? (
-        <TouchableOpacity style={styles.backButton} activeOpacity={0.78} onPress={goBack}>
-          <Ionicons name="chevron-back" size={23} color={C.text} />
-        </TouchableOpacity>
-      ) : null}
-
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: fromSettings ? 96 : 28 },
+        ]}
       >
-        <View style={styles.heroIconWrap}>
-          <View style={styles.heroIconGlow} />
-          <View style={styles.heroIconCircle}>
-            <Ionicons name="shield-checkmark" size={36} color="#FFFFFF" />
-          </View>
-        </View>
+        <View style={styles.heroCard}>
+          <View style={styles.heroGlowLarge} />
+          <View style={styles.heroGlowSmall} />
 
-        <Text style={styles.kicker}>THE GUARDIAN</Text>
-        <Text style={styles.title}>Your vault is almost ready</Text>
-        <Text style={styles.subtitle}>
-          Before you continue, review how The Guardian protects your vault and accept the legal terms for using the app.
-        </Text>
-
-        <View style={styles.statusCard}>
-          <View style={styles.statusIconCircle}>
-            <Ionicons name="lock-closed-outline" size={22} color={C.primary} />
+          <View style={styles.logoSurface}>
+            <Image
+              source={require('../assets/ForegroundIconGuardianTrans.png')}
+              style={styles.logo}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
           </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.statusTitle}>Secure vault verification</Text>
-            <Text style={styles.statusBody}>
-              Your vault experience includes encrypted storage, device-based security, recovery tools, privacy controls, and safe support reporting.
-            </Text>
-          </View>
-        </View>
 
-        <View style={styles.cardsSection}>
-          {features.map((feature) => (
-            <View key={feature.title} style={styles.card}>
-              <View style={styles.cardIconCircle}>
-                <Ionicons name={feature.icon} size={22} color={C.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.cardTitle}>{feature.title}</Text>
-                <Text style={styles.cardSubtitle}>{feature.description}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.warningBox}>
-          <View style={styles.warningIconCircle}>
-            <Ionicons name="information-circle-outline" size={20} color={C.warning} />
-          </View>
-          <Text style={styles.warningText}>
-            Keep your recovery kit somewhere safe. The Guardian can help protect your vault, but you are responsible for keeping your account, device, and recovery information secure.
+          <Text style={styles.kicker}>WELCOME TO THE GUARDIAN</Text>
+          <Text style={styles.title}>Your private vault starts here.</Text>
+          <Text style={styles.subtitle}>
+            Accept the Privacy Policy and Terms of Service to continue.
           </Text>
         </View>
 
-        <View style={styles.legalCard}>
-          <TouchableOpacity
-            style={styles.checkboxRow}
-            activeOpacity={0.8}
-            onPress={handleToggleTerms}
-          >
-            <View style={[styles.checkbox, acceptedTerms && styles.checkboxAccepted]}>
-              {acceptedTerms ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : null}
-            </View>
-
-            <Text style={styles.checkboxText}>
-              I have read and agree to The Guardian&apos;s Privacy Policy and Terms of Service.
-            </Text>
-          </TouchableOpacity>
-
-          <View style={styles.legalLinksRow}>
-            <TouchableOpacity activeOpacity={0.75} onPress={openPrivacy}>
-              <Text style={styles.legalLink}>Privacy Policy</Text>
-            </TouchableOpacity>
-            <Text style={styles.legalDot}>•</Text>
-            <TouchableOpacity activeOpacity={0.75} onPress={openTerms}>
-              <Text style={styles.legalLink}>Terms of Service</Text>
-            </TouchableOpacity>
+        <View style={styles.trustStrip}>
+          <View style={styles.trustItem}>
+            <Ionicons name="lock-closed" size={16} color={C.primary} />
+            <Text style={styles.trustText}>Encrypted</Text>
+          </View>
+          <View style={styles.trustDivider} />
+          <View style={styles.trustItem}>
+            <Ionicons name="eye-off" size={16} color={C.primary} />
+            <Text style={styles.trustText}>Private</Text>
+          </View>
+          <View style={styles.trustDivider} />
+          <View style={styles.trustItem}>
+            <Ionicons name="shield-checkmark" size={16} color={C.primary} />
+            <Text style={styles.trustText}>Protected</Text>
           </View>
         </View>
+
+        <View style={styles.legalHeaderRow}>
+          <Text style={styles.legalTitle}>Review and accept</Text>
+
+          <View style={[styles.progressPill, fullyAccepted && styles.progressPillComplete]}>
+            <Ionicons
+              name={fullyAccepted ? 'checkmark-circle' : 'document-text-outline'}
+              size={15}
+              color={fullyAccepted ? '#FFFFFF' : C.primary}
+            />
+            <Text style={[styles.progressText, fullyAccepted && styles.progressTextComplete]}>
+              {acceptedCount}/2
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.legalCard}>
+          {loadingConsent ? (
+            <View style={styles.legalLoading}>
+              <ActivityIndicator size="small" color={C.primary} />
+              <Text style={styles.legalLoadingText}>Checking acceptance…</Text>
+            </View>
+          ) : (
+            <>
+              <ConsentItem
+                accepted={privacyAccepted}
+                title="Privacy Policy"
+                linkLabel="Read policy"
+                onToggle={togglePrivacy}
+                onOpenDocument={() => {
+                  hapticLight();
+                  router.push('/privacy');
+                }}
+                styles={styles}
+                C={C}
+              />
+
+              <View style={styles.legalDivider} />
+
+              <ConsentItem
+                accepted={termsAccepted}
+                title="Terms of Service"
+                linkLabel="Read terms"
+                onToggle={toggleTerms}
+                onOpenDocument={() => {
+                  hapticLight();
+                  router.push('/terms');
+                }}
+                styles={styles}
+                C={C}
+              />
+            </>
+          )}
+        </View>
+
+        <Text style={styles.versionText}>© 2026 The Guardian LLC</Text>
       </ScrollView>
 
       <View style={styles.bottomBar}>
         <TouchableOpacity
-          style={[styles.continueButton, !acceptedTerms && styles.continueButtonDisabled]}
-          activeOpacity={acceptedTerms ? 0.85 : 1}
-          disabled={!acceptedTerms}
+          style={[
+            styles.continueButton,
+            (!fullyAccepted || loadingConsent) && styles.continueButtonDisabled,
+          ]}
+          activeOpacity={fullyAccepted ? 0.86 : 1}
+          disabled={!fullyAccepted || loadingConsent || saving || declining}
           onPress={handleContinue}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: !fullyAccepted || loadingConsent }}
         >
-          <Ionicons
-            name={acceptedTerms ? 'checkmark-circle-outline' : 'lock-closed-outline'}
-            size={22}
-            color={acceptedTerms ? '#FFFFFF' : C.textSecondary}
-          />
-          <Text style={[styles.continueButtonText, !acceptedTerms && styles.continueButtonTextDisabled]}>
-            {fromSettings ? 'Done reviewing' : 'Accept and continue'}
+          {saving ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Ionicons
+              name={fullyAccepted ? 'shield-checkmark' : 'lock-closed-outline'}
+              size={21}
+              color={fullyAccepted ? '#FFFFFF' : C.textSecondary}
+            />
+          )}
+
+          <Text
+            style={[
+              styles.continueButtonText,
+              (!fullyAccepted || loadingConsent) && styles.continueButtonTextDisabled,
+            ]}
+          >
+            {saving
+              ? 'Saving…'
+              : fromSettings
+                ? 'Done'
+                : 'Accept and continue'}
           </Text>
         </TouchableOpacity>
 
-        {!acceptedTerms ? (
-          <Text style={styles.disabledHint}>Accept the Privacy Policy and Terms of Service to continue.</Text>
-        ) : null}
+        <TouchableOpacity
+          style={styles.declineButton}
+          activeOpacity={0.72}
+          disabled={saving || declining}
+          onPress={handleDecline}
+        >
+          {declining ? (
+            <ActivityIndicator size="small" color={C.textSecondary} />
+          ) : null}
+          <Text style={styles.declineText}>
+            {fromSettings ? 'Return without changes' : 'Decline and sign out'}
+          </Text>
+        </TouchableOpacity>
       </View>
     </SafeAreaView>
   );
 }
 
-const makeStyles = (C: any, isDark: boolean) => StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: C.background,
-  },
-  backButton: {
-    position: 'absolute',
-    top: 58,
-    left: 20,
-    zIndex: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.backgroundElement,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 34,
-    paddingBottom: 190,
-  },
-  heroIconWrap: {
-    width: 94,
-    height: 94,
-    alignSelf: 'center',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-    marginBottom: 22,
-  },
-  heroIconGlow: {
-    position: 'absolute',
-    width: 94,
-    height: 94,
-    borderRadius: 47,
-    backgroundColor: C.primary,
-    opacity: isDark ? 0.18 : 0.12,
-  },
-  heroIconCircle: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.primary,
-    borderWidth: 1,
-    borderColor: isDark ? 'rgba(255,255,255,0.14)' : 'rgba(255,255,255,0.7)',
-  },
-  kicker: {
-    color: C.primary,
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.4,
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  title: {
-    color: C.text,
-    fontSize: 34,
-    fontWeight: '900',
-    letterSpacing: -0.8,
-    textAlign: 'center',
-    lineHeight: 39,
-  },
-  subtitle: {
-    color: C.textSecondary,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 22,
-    textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 22,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.backgroundElement,
-    borderRadius: 26,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 16,
-    marginBottom: 16,
-  },
-  statusIconCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.actionCard || C.backgroundSelected,
-    marginRight: 14,
-  },
-  statusTitle: {
-    color: C.text,
-    fontSize: 16,
-    fontWeight: '900',
-    marginBottom: 4,
-  },
-  statusBody: {
-    color: C.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  cardsSection: {
-    gap: 12,
-    marginBottom: 16,
-  },
-  card: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.backgroundElement,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 15,
-  },
-  cardIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.actionCard || C.backgroundSelected,
-    marginRight: 14,
-  },
-  cardTitle: {
-    color: C.text,
-    fontSize: 15,
-    fontWeight: '900',
-    marginBottom: 4,
-  },
-  cardSubtitle: {
-    color: C.textSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 19,
-  },
-  warningBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: C.alertWarningBg || (isDark ? 'rgba(245, 158, 11, 0.12)' : '#FFF7E8'),
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: isDark ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.26)',
-    padding: 15,
-    marginBottom: 16,
-  },
-  warningIconCircle: {
-    width: 34,
-    height: 34,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: isDark ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.10)',
-    marginRight: 12,
-  },
-  warningText: {
-    flex: 1,
-    color: C.text,
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  legalCard: {
-    backgroundColor: C.backgroundElement,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 16,
-  },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  checkbox: {
-    width: 25,
-    height: 25,
-    borderRadius: 9,
-    borderWidth: 2,
-    borderColor: C.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: C.background,
-    marginRight: 12,
-    marginTop: 1,
-  },
-  checkboxAccepted: {
-    backgroundColor: C.primary,
-    borderColor: C.primary,
-  },
-  checkboxText: {
-    flex: 1,
-    color: C.text,
-    fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 21,
-  },
-  legalLinksRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    paddingLeft: 37,
-    marginTop: 12,
-  },
-  legalLink: {
-    color: C.primary,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  legalDot: {
-    color: C.textSecondary,
-    fontSize: 16,
-    fontWeight: '900',
-    marginHorizontal: 10,
-  },
-  bottomBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 24,
-    backgroundColor: C.background,
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-  },
-  continueButton: {
-    minHeight: 58,
-    borderRadius: 22,
-    backgroundColor: C.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 10,
-  },
-  continueButtonDisabled: {
-    backgroundColor: C.backgroundSelected,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  continueButtonTextDisabled: {
-    color: C.textSecondary,
-  },
-  disabledHint: {
-    color: C.textSecondary,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 17,
-    textAlign: 'center',
-    marginTop: 9,
-  },
-});
+const makeStyles = (C: any) =>
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: C.background,
+    },
+    scrollContent: {
+      paddingHorizontal: 20,
+      paddingBottom: 190,
+    },
+    heroCard: {
+      minHeight: 292,
+      borderRadius: 34,
+      backgroundColor: C.primary,
+      paddingHorizontal: 22,
+      paddingVertical: 24,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.16)',
+      shadowColor: C.primary,
+      shadowOpacity: 0.2,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 6,
+    },
+    heroGlowLarge: {
+      position: 'absolute',
+      width: 280,
+      height: 280,
+      borderRadius: 140,
+      top: -150,
+      right: -100,
+      backgroundColor: 'rgba(255,255,255,0.10)',
+    },
+    heroGlowSmall: {
+      position: 'absolute',
+      width: 170,
+      height: 170,
+      borderRadius: 85,
+      bottom: -105,
+      left: -65,
+      backgroundColor: 'rgba(255,255,255,0.07)',
+    },
+    logoSurface: {
+      width: 104,
+      height: 104,
+      borderRadius: 32,
+      backgroundColor: '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.75)',
+      shadowColor: '#000',
+      shadowOpacity: 0.16,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 5,
+      marginBottom: 18,
+    },
+    logo: {
+      width: 90,
+      height: 90,
+    },
+    kicker: {
+      color: 'rgba(255,255,255,0.74)',
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 1.25,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    title: {
+      color: '#FFFFFF',
+      fontSize: 29,
+      fontWeight: '900',
+      letterSpacing: -0.75,
+      lineHeight: 35,
+      textAlign: 'center',
+    },
+    subtitle: {
+      color: 'rgba(255,255,255,0.78)',
+      fontSize: 13,
+      fontWeight: '600',
+      lineHeight: 19,
+      textAlign: 'center',
+      marginTop: 9,
+      maxWidth: 300,
+    },
+    trustStrip: {
+      minHeight: 58,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-evenly',
+      marginTop: 14,
+      marginBottom: 24,
+      paddingHorizontal: 10,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    trustItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      flex: 1,
+    },
+    trustText: {
+      color: C.text,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    trustDivider: {
+      width: 1,
+      height: 24,
+      backgroundColor: C.border,
+    },
+    legalHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginBottom: 12,
+    },
+    legalTitle: {
+      color: C.text,
+      fontSize: 24,
+      fontWeight: '900',
+      letterSpacing: -0.4,
+    },
+    progressPill: {
+      minWidth: 66,
+      minHeight: 34,
+      borderRadius: 17,
+      paddingHorizontal: 11,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+      backgroundColor: C.actionCard || C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    progressPillComplete: {
+      backgroundColor: C.primary,
+      borderColor: C.primary,
+    },
+    progressText: {
+      color: C.primary,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    progressTextComplete: {
+      color: '#FFFFFF',
+    },
+    legalCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 26,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 16,
+      overflow: 'hidden',
+    },
+    legalLoading: {
+      minHeight: 110,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+    },
+    legalLoadingText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      fontWeight: '700',
+    },
+    consentItem: {
+      minHeight: 76,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      paddingVertical: 14,
+    },
+    consentMain: {
+      flex: 1,
+      minWidth: 0,
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    checkbox: {
+      width: 29,
+      height: 29,
+      borderRadius: 10,
+      borderWidth: 2,
+      borderColor: C.border,
+      backgroundColor: C.background,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+      flexShrink: 0,
+    },
+    checkboxAccepted: {
+      backgroundColor: C.primary,
+      borderColor: C.primary,
+    },
+    consentTitle: {
+      flex: 1,
+      color: C.text,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    documentLinkButton: {
+      minHeight: 38,
+      borderRadius: 16,
+      paddingHorizontal: 10,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+      backgroundColor: C.actionCard || C.backgroundSelected,
+    },
+    documentLink: {
+      color: C.primary,
+      fontSize: 11,
+      fontWeight: '900',
+    },
+    legalDivider: {
+      height: 1,
+      backgroundColor: C.border,
+      marginLeft: 41,
+    },
+    versionText: {
+      color: C.textSecondary,
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: '600',
+      textAlign: 'center',
+      marginTop: 13,
+    },
+    bottomBar: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      paddingHorizontal: 20,
+      paddingTop: 14,
+      paddingBottom: 20,
+      backgroundColor: C.background,
+      borderTopWidth: 1,
+      borderTopColor: C.border,
+    },
+    continueButton: {
+      minHeight: 58,
+      borderRadius: 21,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexDirection: 'row',
+      gap: 10,
+      shadowColor: C.primary,
+      shadowOpacity: 0.18,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 9 },
+      elevation: 4,
+    },
+    continueButtonDisabled: {
+      backgroundColor: C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowOpacity: 0,
+      elevation: 0,
+    },
+    continueButtonText: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    continueButtonTextDisabled: {
+      color: C.textSecondary,
+    },
+    declineButton: {
+      minHeight: 39,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+      marginTop: 4,
+    },
+    declineText: {
+      color: C.textSecondary,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+  });

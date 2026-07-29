@@ -2,7 +2,7 @@
   "expo": {
     "name": "The Guardian",
     "slug": "guardian",
-    "version": "3.0.1(Beta)",
+    "version": "3.5(Beta)",
     "orientation": "portrait",
     "scheme": "theguardian",
     "userInterfaceStyle": "automatic",
@@ -10,18 +10,21 @@
       "icon": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
       "runtimeVersion": {
         "policy": "appVersion"
+      },
+      "config": {
+        "usesNonExemptEncryption": false
       }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#061A12",
-        "backgroundImage": "./src/assets/BackgroundImage.png",
         "foregroundImage": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
         "monochromeImage": "./src/assets/GuardianMonochrome_safe_55.png"
       },
       "predictiveBackGestureEnabled": true,
       "package": "com.vault.theguardian",
-      "runtimeVersion": "1.0.0"
+      "runtimeVersion": "1.0.0",
+      "allowBackup": false
     },
     "web": {
       "output": "static",
@@ -32,13 +35,29 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#154B2D",
+          "backgroundColor": "#F8FAF9",
           "image": "./src/assets/GuardianSplashNativeIcon.png",
-          "imageWidth": 220
+          "imageWidth": 220,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#000000",
+            "image": "./src/assets/GuardianSplashNativeIcon.png"
+          }
         }
       ],
       "expo-font",
-      "expo-secure-store"
+      [
+        "expo-secure-store",
+        {
+          "configureAndroidBackup": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow The Guardian to use Face ID for secure biometric sign-in."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

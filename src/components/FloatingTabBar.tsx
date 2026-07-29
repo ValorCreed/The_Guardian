@@ -1,6 +1,15 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
+  AccessibilityInfo,
   Animated,
+  AppState,
   Easing,
   Platform,
   Pressable,
@@ -41,6 +50,29 @@ const tabs = [
 
 type TabItem = (typeof tabs)[number];
 
+type RgbColor = {
+  r: number;
+  g: number;
+  b: number;
+};
+
+type AdaptiveTabBarPalette = {
+  activeContent: string;
+  activeShadow: string;
+  barBorder: string;
+  barSurface: string;
+  blurIntensity: number;
+  inactiveContent: string;
+  inactiveShadow: string;
+  pillBackground: string;
+  pillBorder: string;
+  pillHighlight: string;
+  reduceTransparency: boolean;
+  scrim: string;
+  shadowOpacity: number;
+  tint: 'light' | 'dark';
+};
+
 const BAR_RADIUS = 50;
 const BAR_VERTICAL_PADDING = 8;
 const BAR_HORIZONTAL_PADDING = 8;
@@ -50,18 +82,6 @@ const PILL_HEIGHT = 65;
 const PILL_WIDTH_RATIO = 0.99;
 const PILL_RADIUS = 50;
 
-/**
- * BOUNCINESS CONTROLS
- *
- * TAB_SWITCH_SPRING:
- * Controls pill movement when user taps a different tab.
- * Higher friction = less bounce.
- * Lower friction = more bounce.
- * Higher tension = faster movement.
- *
- * STATIONARY_TAP_BOUNCE:
- * Controls bounce when user taps the already-active tab.
- */
 const TAB_SWITCH_SPRING = {
   friction: 14,
   tension: 190,
@@ -75,6 +95,253 @@ const STATIONARY_TAP_BOUNCE = {
   releaseTension: 220,
 };
 
+const clampChannel = (value: number) =>
+  Math.max(0, Math.min(255, Math.round(value)));
+
+function parseHexColor(value?: string | null): RgbColor | null {
+  const clean = String(value || '').trim().replace('#', '');
+
+  if (/^[0-9a-f]{3}$/i.test(clean)) {
+    return {
+      r: parseInt(clean[0] + clean[0], 16),
+      g: parseInt(clean[1] + clean[1], 16),
+      b: parseInt(clean[2] + clean[2], 16),
+    };
+  }
+
+  if (/^[0-9a-f]{6}$/i.test(clean) || /^[0-9a-f]{8}$/i.test(clean)) {
+    return {
+      r: parseInt(clean.slice(0, 2), 16),
+      g: parseInt(clean.slice(2, 4), 16),
+      b: parseInt(clean.slice(4, 6), 16),
+    };
+  }
+
+  return null;
+}
+
+function rgbToHex(color: RgbColor) {
+  const value = [color.r, color.g, color.b]
+    .map((channel) => clampChannel(channel).toString(16).padStart(2, '0'))
+    .join('');
+
+  return `#${value}`;
+}
+
+function rgba(value: string, alpha: number) {
+  const color = parseHexColor(value) || { r: 0, g: 0, b: 0 };
+  const safeAlpha = Math.max(0, Math.min(1, alpha));
+
+  return `rgba(${color.r}, ${color.g}, ${color.b}, ${safeAlpha})`;
+}
+
+function blendColors(
+  foreground: string,
+  background: string,
+  foregroundAlpha: number
+) {
+  const front = parseHexColor(foreground) || { r: 0, g: 0, b: 0 };
+  const back = parseHexColor(background) || { r: 255, g: 255, b: 255 };
+  const alpha = Math.max(0, Math.min(1, foregroundAlpha));
+
+  return rgbToHex({
+    r: front.r * alpha + back.r * (1 - alpha),
+    g: front.g * alpha + back.g * (1 - alpha),
+    b: front.b * alpha + back.b * (1 - alpha),
+  });
+}
+
+function linearizeChannel(channel: number) {
+  const value = channel / 255;
+  return value <= 0.03928
+    ? value / 12.92
+    : Math.pow((value + 0.055) / 1.055, 2.4);
+}
+
+function getRelativeLuminance(value: string) {
+  const color = parseHexColor(value) || { r: 0, g: 0, b: 0 };
+
+  return (
+    0.2126 * linearizeChannel(color.r) +
+    0.7152 * linearizeChannel(color.g) +
+    0.0722 * linearizeChannel(color.b)
+  );
+}
+
+function getContrastRatio(first: string, second: string) {
+  const firstLuminance = getRelativeLuminance(first);
+  const secondLuminance = getRelativeLuminance(second);
+  const lighter = Math.max(firstLuminance, secondLuminance);
+  const darker = Math.min(firstLuminance, secondLuminance);
+
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function pickMostReadableColor(
+  background: string,
+  darkCandidate = '#07120E',
+  lightCandidate = '#FFFFFF'
+) {
+  return getContrastRatio(background, darkCandidate) >=
+    getContrastRatio(background, lightCandidate)
+    ? darkCandidate
+    : lightCandidate;
+}
+
+function useAdaptiveTabBarPalette(): AdaptiveTabBarPalette {
+  const { isDark, isOled, colors } = useAppTheme();
+
+  const [highTextContrast, setHighTextContrast] = useState(false);
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  const refreshAccessibilityPreferences = useCallback(async () => {
+    try {
+      const highContrastMethod = (AccessibilityInfo as any)
+        .isHighTextContrastEnabled;
+      const reduceTransparencyMethod = (AccessibilityInfo as any)
+        .isReduceTransparencyEnabled;
+
+      const [highContrastResult, reduceTransparencyResult] =
+        await Promise.allSettled([
+          Platform.OS === 'android' && typeof highContrastMethod === 'function'
+            ? highContrastMethod.call(AccessibilityInfo)
+            : Promise.resolve(false),
+          Platform.OS === 'ios' &&
+          typeof reduceTransparencyMethod === 'function'
+            ? reduceTransparencyMethod.call(AccessibilityInfo)
+            : Promise.resolve(false),
+        ]);
+
+      if (highContrastResult.status === 'fulfilled') {
+        setHighTextContrast(Boolean(highContrastResult.value));
+      }
+
+      if (reduceTransparencyResult.status === 'fulfilled') {
+        setReduceTransparency(Boolean(reduceTransparencyResult.value));
+      }
+    } catch {
+      // Accessibility preference checks must never prevent navigation.
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAccessibilityPreferences();
+
+    const appStateSubscription = AppState.addEventListener(
+      'change',
+      (nextState) => {
+        if (nextState === 'active') {
+          void refreshAccessibilityPreferences();
+        }
+      }
+    );
+
+    const reduceTransparencySubscription =
+      Platform.OS === 'ios'
+        ? AccessibilityInfo.addEventListener(
+            'reduceTransparencyChanged',
+            setReduceTransparency
+          )
+        : null;
+
+    return () => {
+      appStateSubscription.remove();
+      reduceTransparencySubscription?.remove();
+    };
+  }, [refreshAccessibilityPreferences]);
+
+  return useMemo(() => {
+    /*
+     * BlurView renders the live screen content behind the bar. Instead of
+     * attempting expensive screenshot/pixel sampling, the bar adds an adaptive
+     * material layer strong enough to control the final luminance. Icon colors
+     * are then selected from the calculated luminance of that rendered surface.
+     *
+     * This keeps the icons readable even when a bright card, dark card, image,
+     * or OLED-black section scrolls behind the navigation bar.
+     */
+    const backdrop = colors.background || (isDark ? '#0A0F14' : '#F8FAF9');
+    const materialBase = isDark
+      ? colors.backgroundElement || '#111827'
+      : colors.surface || '#FFFFFF';
+
+    const materialAlpha = reduceTransparency
+      ? 1
+      : highTextContrast
+        ? 0.95
+        : isOled
+          ? 0.9
+          : isDark
+            ? 0.87
+            : 0.84;
+
+    const estimatedSurface = blendColors(
+      materialBase,
+      backdrop,
+      materialAlpha
+    );
+
+    const inactiveContent = pickMostReadableColor(
+      estimatedSurface,
+      '#111827',
+      '#F8FAFC'
+    );
+
+    const pillBase = isDark
+      ? colors.primaryDark || colors.primary || '#064737'
+      : colors.primaryDark || colors.primary || '#065F46';
+
+    const activeContent = pickMostReadableColor(
+      pillBase,
+      '#06110D',
+      '#FFFFFF'
+    );
+
+    const inactiveIsLight = getRelativeLuminance(inactiveContent) > 0.55;
+    const activeIsLight = getRelativeLuminance(activeContent) > 0.55;
+
+    return {
+      activeContent,
+      activeShadow: activeIsLight
+        ? 'rgba(0,0,0,0.36)'
+        : 'rgba(255,255,255,0.24)',
+      barBorder: highTextContrast
+        ? rgba(inactiveContent, 0.4)
+        : rgba(inactiveContent, isDark ? 0.22 : 0.15),
+      barSurface: rgba(materialBase, materialAlpha),
+      blurIntensity: reduceTransparency
+        ? 1
+        : Platform.OS === 'android'
+          ? 45
+          : 62,
+      inactiveContent,
+      inactiveShadow: inactiveIsLight
+        ? 'rgba(0,0,0,0.52)'
+        : 'rgba(255,255,255,0.36)',
+      pillBackground: rgba(pillBase, highTextContrast ? 1 : 0.97),
+      pillBorder: rgba(activeContent, highTextContrast ? 0.42 : 0.22),
+      pillHighlight: rgba(activeContent, activeIsLight ? 0.11 : 0.08),
+      reduceTransparency,
+      scrim: isDark
+        ? 'rgba(0,0,0,0.10)'
+        : 'rgba(255,255,255,0.08)',
+      shadowOpacity: highTextContrast ? 0.3 : isDark ? 0.3 : 0.2,
+      tint: isDark ? 'dark' : 'light',
+    };
+  }, [
+    colors.background,
+    colors.backgroundElement,
+    colors.primary,
+    colors.primaryDark,
+    colors.primaryLight,
+    colors.surface,
+    highTextContrast,
+    isDark,
+    isOled,
+    reduceTransparency,
+  ]);
+}
+
 function getActiveIndex(pathname: string) {
   const index = tabs.findIndex(
     (tab) => pathname === tab.route || pathname.startsWith(`${tab.route}/`)
@@ -87,17 +354,16 @@ function FloatingTabItem({
   tab,
   active,
   onPress,
+  palette,
 }: {
   tab: TabItem;
   active: boolean;
   onPress: () => void;
+  palette: AdaptiveTabBarPalette;
 }) {
-  const { isDark, colors } = useAppTheme();
-  const inactiveColor = isDark ? 'rgba(243, 244, 246, 0.98)' : '#475569';
-
   const itemScale = useRef(new Animated.Value(active ? 1.04 : 1)).current;
   const itemTranslateY = useRef(new Animated.Value(active ? -2 : 0)).current;
-  const itemOpacity = useRef(new Animated.Value(active ? 1 : 0.72)).current;
+  const itemOpacity = useRef(new Animated.Value(active ? 1 : 0.92)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -115,8 +381,8 @@ function FloatingTabItem({
         useNativeDriver: true,
       }),
       Animated.timing(itemOpacity, {
-        toValue: active ? 1 : 0.72,
-        duration: 80,
+        toValue: active ? 1 : 0.92,
+        duration: 100,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
@@ -141,8 +407,20 @@ function FloatingTabItem({
     }).start();
   }, [pressScale]);
 
+  const contentColor = active
+    ? palette.activeContent
+    : palette.inactiveContent;
+
+  const contentShadow = active
+    ? palette.activeShadow
+    : palette.inactiveShadow;
+
   return (
     <Pressable
+      accessibilityLabel={`${tab.label} tab`}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: active }}
+      hitSlop={4}
       onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
@@ -165,15 +443,24 @@ function FloatingTabItem({
         <Ionicons
           name={(active ? tab.activeIcon : tab.icon) as any}
           size={23}
-          color={active ? '#FFFFFF' : inactiveColor}
+          color={contentColor}
+          style={{
+            textShadowColor: contentShadow,
+            textShadowOffset: { width: 0, height: 1 },
+            textShadowRadius: 2,
+          }}
         />
 
         <Text
           numberOfLines={1}
+          maxFontSizeMultiplier={1.2}
           style={[
             styles.label,
             {
-              color: active ? '#FFFFFF' : inactiveColor,
+              color: contentColor,
+              textShadowColor: contentShadow,
+              textShadowOffset: { width: 0, height: 1 },
+              textShadowRadius: 2,
             },
           ]}
         >
@@ -188,8 +475,8 @@ const MemoTabItem = memo(FloatingTabItem);
 
 function FloatingTabBar() {
   const pathname = usePathname();
-  const { isDark, colors } = useAppTheme();
   const blurTarget = useBlurTarget();
+  const palette = useAdaptiveTabBarPalette();
 
   const routeActiveIndex = useMemo(() => getActiveIndex(pathname), [pathname]);
 
@@ -296,10 +583,6 @@ function FloatingTabBar() {
       localActiveIndexRef.current = index;
       setLocalActiveIndex(index);
 
-      /**
-       * Navigation happens immediately.
-       * The pill animation runs alongside it instead of delaying it.
-       */
       if (pathname !== tab.route) {
         router.replace(tab.route as never);
       }
@@ -338,27 +621,32 @@ function FloatingTabBar() {
   );
 
   const androidBlurMethod =
-    Platform.OS === 'android' ? 'dimezisBlurViewSdk31Plus' : undefined;
+    Platform.OS === 'android'
+      ? palette.reduceTransparency
+        ? 'none'
+        : 'dimezisBlurViewSdk31Plus'
+      : undefined;
 
-    //Blur configuration for the tab bar using the blur effect from expo blur.
   return (
     <View pointerEvents="box-none" style={styles.wrapper}>
-      <View style={styles.shadowContainer}>
+      <View
+        style={[
+          styles.shadowContainer,
+          { shadowOpacity: palette.shadowOpacity },
+        ]}
+      >
         <BlurView
           blurTarget={blurTarget?.targetRef}
           blurMethod={androidBlurMethod}
-          intensity={Platform.OS === 'android' ? 47 : 48}
+          intensity={palette.blurIntensity}
           blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
-          tint={isDark ? 'dark' : 'light'}
+          tint={palette.tint}
           style={[
             styles.blurBox,
             {
-              backgroundColor: isDark
-                ? 'rgba(10, 15, 20, 0.76)'
-                : 'rgba(255, 255, 255, 0.72)',
-              borderColor: isDark
-                ? 'rgba(255,255,255,0.20)'
-                : 'rgba(255,255,255,0.95)',
+              backgroundColor: palette.barSurface,
+              borderColor: palette.barBorder,
+              borderWidth: palette.reduceTransparency ? 1.5 : 1,
             },
           ]}
         >
@@ -367,9 +655,7 @@ function FloatingTabBar() {
             style={[
               StyleSheet.absoluteFill,
               {
-                backgroundColor: isDark
-                  ? 'rgba(2, 6, 10, 0.34)'
-                  : 'rgba(255, 255, 255, 0.22)',
+                backgroundColor: palette.scrim,
               },
             ]}
           />
@@ -410,12 +696,8 @@ function FloatingTabBar() {
                     width: pillWidth,
                     height: PILL_HEIGHT,
                     top: pillTop,
-                    backgroundColor: isDark
-                      ? 'rgba(16, 185, 129, 0.92)'
-                      : 'rgba(6, 95, 70, 0.96)',
-                    borderColor: isDark
-                      ? 'rgba(255,255,255,0.16)'
-                      : 'rgba(255,255,255,0.68)',
+                    backgroundColor: palette.pillBackground,
+                    borderColor: palette.pillBorder,
                     transform: [
                       { translateX: indicatorX },
                       { translateY: pillTranslateY },
@@ -427,22 +709,9 @@ function FloatingTabBar() {
                 <View
                   pointerEvents="none"
                   style={[
-                    StyleSheet.absoluteFill,
-                    {
-                      borderRadius: PILL_RADIUS,
-                      backgroundColor: colors.primary + '38',
-                    },
-                  ]}
-                />
-
-                <View
-                  pointerEvents="none"
-                  style={[
                     styles.pillHighlight,
                     {
-                      backgroundColor: isDark
-                        ? 'rgba(255,255,255,0.16)'
-                        : 'rgba(255,255,255,0.24)',
+                      backgroundColor: palette.pillHighlight,
                     },
                   ]}
                 />
@@ -457,6 +726,7 @@ function FloatingTabBar() {
                   key={tab.route}
                   tab={tab}
                   active={active}
+                  palette={palette}
                   onPress={() => handleTabPress(index)}
                 />
               );
@@ -484,7 +754,6 @@ const styles = StyleSheet.create({
     borderRadius: BAR_RADIUS,
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.22,
     shadowRadius: 22,
     elevation: 18,
   },
@@ -492,7 +761,6 @@ const styles = StyleSheet.create({
   blurBox: {
     borderRadius: BAR_RADIUS,
     overflow: 'hidden',
-    borderWidth: 1,
   },
 
   innerRow: {
@@ -523,6 +791,7 @@ const styles = StyleSheet.create({
 
   item: {
     flex: 1,
+    minHeight: 60,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,

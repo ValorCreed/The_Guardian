@@ -21,9 +21,9 @@ import {
 import { useAppTheme } from '../context/ThemeContext';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const APP_VERSION = '3.0.1 Beta';
+const APP_VERSION = '3.5 Beta';
 
-const DEVELOPERS = [
+const Developers = [
   {
     name: 'Peprah Isaac Korankye',
     role: 'isaacpeprahkorankye@gmail.com',
@@ -65,13 +65,10 @@ export default function AboutScreen() {
           style={styles.logoBox}
         />
 
-        <Text style={styles.title}>About The Guardian</Text>
+        <Text style={styles.title}>About</Text>
 
         <Text style={styles.subtitle}>
-          The Guardian is a secure mobile vault built to help users store and
-          manage sensitive information such as passwords, cards, and documents
-          in one protected place and also share these sensitive information with
-          those they deem worthy.
+          A private vault for your most important digital information.
         </Text>
 
         <View style={styles.versionCard}>
@@ -85,7 +82,7 @@ export default function AboutScreen() {
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>WHAT THE APP DOES</Text>
+        <Text style={styles.sectionLabel}>What it does</Text>
 
         <View style={styles.card}>
           <FeatureRow
@@ -123,7 +120,7 @@ export default function AboutScreen() {
           />
         </View>
 
-        <Text style={styles.sectionLabel}>DEVELOPING COMPANY</Text>
+        <Text style={styles.sectionLabel}>Company</Text>
 
         <View style={styles.companyCard}>
           <View style={styles.companyIcon}>
@@ -139,10 +136,10 @@ export default function AboutScreen() {
           </View>
         </View>
 
-        <Text style={styles.sectionLabel}>DEVELOPERS</Text>
+        <Text style={styles.sectionLabel}>Developers</Text>
 
         <View style={styles.card}>
-          {DEVELOPERS.map((developer, index) => (
+          {Developers.map((developer, index) => (
             <View key={`${developer.name}-${developer.role}`}>
               <View style={styles.developerRow}>
                 <View style={styles.developerIcon}>
@@ -155,7 +152,7 @@ export default function AboutScreen() {
                 </View>
               </View>
 
-              {index !== DEVELOPERS.length - 1 && (
+              {index !== Developers.length - 1 && (
                 <View style={styles.divider} />
               )}
             </View>
@@ -163,7 +160,7 @@ export default function AboutScreen() {
         </View>
 
         <Text style={styles.footerText}>
-          © 2026 TheGuardian.LLC. All rights reserved.
+          © 2026 TheGuardian LLC. All rights reserved.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -235,10 +232,10 @@ const makeStyles = (C: any) =>
       marginBottom: 26,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     versionIcon: {
       width: 44,
@@ -282,10 +279,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     featureRow: {
       flexDirection: 'row',
@@ -332,10 +329,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     companyIcon: {
       width: 48,

@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -28,6 +30,7 @@ import {
   SecureNoteResponse,
   VaultItem,
 } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 import {
   hapticToggleOn,
@@ -93,6 +96,7 @@ const toggleSelection = (
 };
 
 export default function NewMemberScreen() {
+  const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -118,11 +122,19 @@ export default function NewMemberScreen() {
     const loadShareableItems = async () => {
       setItemsLoading(true);
       const results = await Promise.allSettled([
-        api.getVaultItems(),
-        api.getCards(),
-        api.getDocuments(),
-        api.getSecureNotes(),
+        requestApi.getVaultItems(),
+        requestApi.getCards(),
+        requestApi.getDocuments(),
+        requestApi.getSecureNotes(),
       ]);
+
+      if (
+        results.some(
+          (result) => result.status === 'rejected' && isScreenRequestCancelled(result.reason)
+        )
+      ) {
+        return;
+      }
 
       if (!active) return;
 
@@ -158,7 +170,7 @@ export default function NewMemberScreen() {
   );
 
   const ensureFamilyPlanBeforeSubmit = async () => {
-    const subscription = await api.getSubscriptionFresh?.();
+    const subscription = await requestApi.getSubscriptionFresh?.();
     const plan = String(subscription?.plan || '').toUpperCase();
     const active = subscription?.active !== false;
 
@@ -188,7 +200,7 @@ export default function NewMemberScreen() {
       hapticWarning();
       Alert.alert(
         'Choose specific items',
-        'Select at least one password, card, document, or secure note to share.'
+        'Select at least one password, card, document, or SecureNote to share.'
       );
       return;
     }
@@ -200,8 +212,9 @@ export default function NewMemberScreen() {
       if (!(await ensureFamilyPlanBeforeSubmit())) return;
 
       try {
-        await api.lookupFamilyMemberAccount(cleanEmail);
+        await requestApi.lookupFamilyMemberAccount(cleanEmail);
       } catch (lookupError: any) {
+    if (isScreenRequestCancelled(lookupError)) return;
         const lookupStatus = lookupError?.status;
         const lookupCode = String(lookupError?.code || '').toUpperCase();
 
@@ -223,7 +236,7 @@ export default function NewMemberScreen() {
         throw lookupError;
       }
 
-      await api.addFamilyMember(cleanEmail, {
+      await requestApi.addFamilyMember(cleanEmail, {
         sharePasswords: selectedPasswordIds.length > 0,
         shareCards: selectedCardIds.length > 0,
         shareDocuments: selectedDocumentIds.length > 0,
@@ -233,7 +246,7 @@ export default function NewMemberScreen() {
         documentItemIds: selectedDocumentIds,
         noteItemIds: selectedNoteIds,
       });
-      api.clearCache();
+      requestApi.clearCache();
 
       hapticSuccess();
       Alert.alert(
@@ -242,6 +255,7 @@ export default function NewMemberScreen() {
         [{ text: 'OK', onPress: () => router.replace('/family') }]
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       const status = error?.status;
       const message =
         status === 404
@@ -279,16 +293,23 @@ export default function NewMemberScreen() {
   const noteOptions: SelectableItem[] = notes.map((item) => ({
     id: Number(item.id),
     title: item.title || 'Untitled note',
-    subtitle: item.category || 'Secure note',
+    subtitle: item.category || 'SecureNote',
   }));
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
       <ScrollView
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.iconBox}>
@@ -297,7 +318,7 @@ export default function NewMemberScreen() {
 
         <Text style={styles.title}>Add family member</Text>
         <Text style={styles.subtitle}>
-          Enter a Guardian account email, then choose the exact vault items this person can view.
+          Choose a member and the items they can view.
         </Text>
 
         <Text style={styles.label}>Member email</Text>
@@ -318,7 +339,7 @@ export default function NewMemberScreen() {
         </View>
 
         <View style={styles.selectionHeader}>
-          <Text style={styles.sectionLabel}>SELECT SPECIFIC VAULT ITEMS</Text>
+          <Text style={styles.sectionLabel}>Shared items</Text>
           <View style={styles.selectionCount}>
             <Text style={styles.selectionCountText}>{selectedCount} selected</Text>
           </View>
@@ -365,11 +386,11 @@ export default function NewMemberScreen() {
             />
             <ItemSection
               icon={<NotebookText size={20} color={C.primary} />}
-              title="Secure notes"
+              title="SecureNotes"
               items={noteOptions}
               selectedIds={selectedNoteIds}
               setSelectedIds={setSelectedNoteIds}
-              emptyText="No saved secure notes"
+              emptyText="No saved SecureNotes"
               C={C}
               styles={styles}
             />
@@ -389,6 +410,7 @@ export default function NewMemberScreen() {
           The member receives read-only access only to the items checked above. Unselected items remain private.
         </Text>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -481,10 +503,10 @@ const makeStyles = (C: any) =>
       marginBottom: 28,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     title: { color: C.text, fontSize: 34, fontWeight: '800', marginBottom: 10 },
     subtitle: { color: C.textSecondary, fontSize: 15, lineHeight: 22, marginBottom: 30 },
     label: { color: C.text, fontWeight: '800', fontSize: 14, marginBottom: 8 },
@@ -499,10 +521,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     input: { flex: 1, color: C.text, fontSize: 16, paddingVertical: 16, marginLeft: 10 },
     selectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
     sectionLabel: { flex: 1, color: C.textSecondary, fontSize: 12, fontWeight: '900', letterSpacing: 0.7 },
@@ -521,10 +543,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     loadingText: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
     itemsCard: {
       backgroundColor: C.backgroundElement,
@@ -535,49 +557,49 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     itemsHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15, backgroundColor: C.actionCard 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     permissionIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: C.backgroundElement, alignItems: 'center', justifyContent: 'center' },
     permissionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     permissionSub: { color: C.textSecondary, fontSize: 11, marginTop: 3, fontWeight: '700' },
     selectAllButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 999, backgroundColor: C.backgroundElement 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     selectAllText: { color: C.primary, fontSize: 11, fontWeight: '900' },
     itemRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 15, paddingVertical: 13 },
     itemDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     checkbox: { width: 24, height: 24, borderRadius: 8, borderWidth: 2, borderColor: C.border, alignItems: 'center', justifyContent: 'center' 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     checkboxSelected: { backgroundColor: C.primary, borderColor: C.primary 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     itemTitle: { color: C.text, fontSize: 14, fontWeight: '800' },
     itemSubtitle: { color: C.textSecondary, fontSize: 11, marginTop: 3 },
     emptyText: { color: C.textSecondary, fontSize: 12, padding: 16, textAlign: 'center' },
     button: { backgroundColor: C.primary, borderRadius: 999, paddingVertical: 17, alignItems: 'center', justifyContent: 'center', marginTop: 10 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     disabledButton: { opacity: 0.55 },
     buttonText: { color: '#fff', fontSize: 16, fontWeight: '900' },
     note: { color: C.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center', marginTop: 16 },

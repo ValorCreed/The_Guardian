@@ -13,11 +13,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, Clock3, XCircle } from 'lucide-react-native';
+import { Check, Clock3, Crown, ShieldCheck, UsersRound, XCircle } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 
 type PlanType = 'FREE' | 'PREMIUM' | 'FAMILY';
@@ -29,12 +30,17 @@ interface FeatureRowProps {
   isLast?: boolean;
   styles: ScreenStyles;
   colors: ThemeColors;
+  accentColor?: string;
+  textColor?: string;
+  emphasized?: boolean;
 }
 
 interface PriceTagProps {
   price: string;
   period: string;
   styles: ScreenStyles;
+  amountStyle?: any;
+  periodStyle?: any;
 }
 
 interface PlanCardProps {
@@ -46,22 +52,64 @@ interface PlanCardProps {
   colors: ThemeColors;
 }
 
-const FeatureRow = ({ label, isLast = false, styles, colors }: FeatureRowProps) => (
+const FAMILY_ACCENT = '#7C3AED';
+const FAMILY_ACCENT_LIGHT = '#A78BFA';
+
+const FeatureRow = ({
+  label,
+  isLast = false,
+  styles,
+  colors,
+  accentColor,
+  textColor,
+  emphasized = false,
+}: FeatureRowProps) => (
   <View style={[styles.featureRow, isLast && { marginBottom: 0 }]}>
-    <Check size={16} color={colors.primary} strokeWidth={3} />
-    <Text style={styles.featureLabel}>{label}</Text>
+    <View
+      style={[
+        styles.featureCheck,
+        accentColor && { backgroundColor: `${accentColor}18` },
+      ]}
+    >
+      <Check
+        size={15}
+        color={accentColor || colors.primary}
+        strokeWidth={3}
+      />
+    </View>
+    <Text
+      style={[
+        styles.featureLabel,
+        textColor ? { color: textColor } : null,
+        emphasized && styles.featureLabelEmphasized,
+      ]}
+    >
+      {label}
+    </Text>
   </View>
 );
 
-const PriceTag = ({ price, period, styles }: PriceTagProps) => (
+const PriceTag = ({
+  price,
+  period,
+  styles,
+  amountStyle,
+  periodStyle,
+}: PriceTagProps) => (
   <Text style={styles.priceTag}>
-    <Text style={styles.priceAmount}>{price}</Text>
-    <Text style={styles.pricePeriod}>/{period}</Text>
+    <Text style={[styles.priceAmount, amountStyle]}>{price}</Text>
+    <Text style={[styles.pricePeriod, periodStyle]}>/{period}</Text>
   </Text>
 );
 
-const CurrentPlanBadge = ({ styles }: { styles: ScreenStyles }) => (
-  <View style={styles.currentBadge}>
+const CurrentPlanBadge = ({
+  styles,
+  family = false,
+}: {
+  styles: ScreenStyles;
+  family?: boolean;
+}) => (
+  <View style={[styles.currentBadge, family && styles.familyCurrentBadge]}>
     <Text style={styles.currentBadgeText}>CURRENT PLAN</Text>
   </View>
 );
@@ -89,22 +137,22 @@ const getEntryContext = (from?: string | string[]) => {
     case 'adddocument':
       return {
         title: 'Document vault upgrade',
-        message: 'Premium and Family unlock encrypted document storage. Use back to return to Add Document.',
+        message: 'Premium and Family unlock encrypted document storage',
       };
     case 'addnote':
       return {
-        title: 'Secure notes upgrade',
-        message: 'Premium and Family remove the Free secure-note limit. Use back to return to Add Note.',
+        title: 'SecureNotes upgrade',
+        message: 'Premium and Family remove the Free secure-note limit.',
       };
     case 'backup':
       return {
         title: 'Encrypted backup upgrade',
-        message: 'Premium and Family unlock encrypted cloud backups. Use back to return to Backup.',
+        message: 'Premium and Family unlock encrypted cloud backups.',
       };
     case 'emergencyaccess':
       return {
         title: 'Emergency access upgrade',
-        message: 'Paid plans unlock more emergency contacts and advanced emergency sharing controls. Use back to return to Emergency Access.',
+        message: 'Paid plans unlock more emergency contacts and advanced emergency sharing controls.',
       };
     case 'family':
       return {
@@ -114,17 +162,17 @@ const getEntryContext = (from?: string | string[]) => {
     case 'home':
       return {
         title: 'Upgrade your protection',
-        message: 'Premium and Family add stronger protection across your vault. Use back to return Home.',
+        message: 'Premium and Family add stronger protection across your vault.',
       };
     case 'passwordgenerator':
       return {
         title: 'Password generator upgrade',
-        message: 'Premium and Family unlock advanced password generation options. Use back to return to Password Generator.',
+        message: 'Premium and Family unlock advanced password generation options.',
       };
     case 'securityhealth':
       return {
         title: 'Security Health upgrade',
-        message: 'Premium and Family unlock advanced breach monitoring and deeper security reports. Use back to return to Security Health.',
+        message: 'Premium and Family unlock advanced breach monitoring and deeper security reports.',
       };
     case 'settings':
       return {
@@ -140,7 +188,11 @@ const FreePlanCard = ({
   styles,
   colors,
 }: Pick<PlanCardProps, 'styles' | 'colors'>) => (
-  <View style={styles.card}>
+  <View style={[styles.card, styles.freeCard]}>
+    <View style={styles.freeBadge}>
+      <Text style={styles.freeBadgeText}>ESSENTIALS</Text>
+    </View>
+
     <View style={styles.cardHeaderRow}>
       <Text style={styles.planName}>Free</Text>
       <PriceTag price="$0" period="forever" styles={styles} />
@@ -149,7 +201,7 @@ const FreePlanCard = ({
     <View style={styles.featureList}>
       <FeatureRow label="10 passwords" styles={styles} colors={colors} />
       <FeatureRow label="Basic vault" styles={styles} colors={colors} />
-      <FeatureRow label="5 secure notes" styles={styles} colors={colors} />
+      <FeatureRow label="5 SecureNotes" styles={styles} colors={colors} />
       <FeatureRow label="1 emergency contact" styles={styles} colors={colors} />
       <FeatureRow label="Basic password generator" styles={styles} colors={colors} />
       <FeatureRow label="Basic security score" styles={styles} colors={colors} />
@@ -182,6 +234,8 @@ const PremiumPlanCard = ({
         <PriceTag price="$3.99" period="month" styles={styles} />
       </View>
 
+      <Text style={styles.planSubtitle}>Strong individual protection.</Text>
+
       <View style={styles.featureList}>
         <FeatureRow
           label="Unlimited password storage"
@@ -189,7 +243,7 @@ const PremiumPlanCard = ({
           colors={colors}
         />
         <FeatureRow label="Document vault" styles={styles} colors={colors} />
-        <FeatureRow label="Unlimited secure notes" styles={styles} colors={colors} />
+        <FeatureRow label="Unlimited SecureNotes" styles={styles} colors={colors} />
         <FeatureRow label="Up to 3 emergency contacts" styles={styles} colors={colors} />
         <FeatureRow
           label="Advanced Security Health Center"
@@ -250,34 +304,94 @@ const FamilyPlanCard = ({
   const isAnyUpgradeLoading = upgradingPlan !== null;
 
   return (
-    <View style={styles.card}>
-      {isCurrent && <CurrentPlanBadge styles={styles} />}
+    <View style={[styles.card, styles.familyCard]}>
+      <View pointerEvents="none" style={styles.familyGlowLarge} />
+      <View pointerEvents="none" style={styles.familyGlowSmall} />
 
-      <View style={styles.cardHeaderRow}>
-        <Text style={styles.planName}>Family</Text>
-        <PriceTag price="$6.99" period="month" styles={styles} />
+      <View style={styles.familyBadgeRow}>
+        <View style={styles.familyBadge}>
+          <Crown size={14} color="#FFFFFF" strokeWidth={2.8} />
+          <Text style={styles.familyBadgeText}>ULTIMATE PROTECTION</Text>
+        </View>
+
+        {/* <View style={styles.familyCoverageBadge}>
+          <ShieldCheck size={13} color={FAMILY_ACCENT} strokeWidth={2.7} />
+          <Text style={styles.familyCoverageText}>TOP TIER</Text>
+        </View> */}
       </View>
+
+      {isCurrent && <CurrentPlanBadge styles={styles} family />}
+
+      <View style={styles.familyHeaderRow}>
+        <View style={styles.familyHeaderCopy}>
+          <Text style={styles.familyPlanName}>Family</Text>
+          {/* <Text style={styles.familyPlanSubtitle}>
+            Maximum protection for everyone you trust.
+          </Text> */}
+        </View>
+
+        <PriceTag
+          price="$6.99"
+          period="month"
+          styles={styles}
+          amountStyle={styles.familyPriceAmount}
+          periodStyle={styles.familyPricePeriod}
+        />
+      </View>
+
+      <View>
+        {/* <View style={styles.familyMembersIcon}>
+          <UsersRound size={18} color={FAMILY_ACCENT} strokeWidth={2.5} />
+        </View> */}
+        {/* <Text style={styles.familyMembersText}>Protect up to 6 members together</Text> */}
+      </View>
+
+      <View style={styles.familyDivider} />
 
       <View style={styles.featureList}>
         <FeatureRow
           label="Everything in Premium"
           styles={styles}
           colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+          emphasized
         />
-        <FeatureRow label="Up to 6 members" styles={styles} colors={colors} />
-        <FeatureRow label="Shared vaults" styles={styles} colors={colors} />
-        <FeatureRow label="Family security health checks" styles={styles} colors={colors} />
-        <FeatureRow label="Up to 6 emergency contacts" styles={styles} colors={colors} />
-        {/* <FeatureRow
-          label="Family  backup support"
+        <FeatureRow
+          label="Up to 6 members"
           styles={styles}
           colors={colors}
-        /> */}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+        />
+        <FeatureRow
+          label="Shared vaults"
+          styles={styles}
+          colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+        />
+        <FeatureRow
+          label="Family security health checks"
+          styles={styles}
+          colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+        />
+        <FeatureRow
+          label="Up to 6 emergency contacts"
+          styles={styles}
+          colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+        />
         <FeatureRow
           label="Admin controls when sharing vaults"
           isLast
           styles={styles}
           colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
         />
       </View>
 
@@ -299,7 +413,12 @@ const FamilyPlanCard = ({
               </Text>
             </View>
           ) : (
-            <Text style={styles.chooseFamilyButtonText}>Choose Family</Text>
+            <View style={styles.buttonContent}>
+              <Crown size={18} color="#FFFFFF" strokeWidth={2.8} />
+              <Text style={styles.chooseFamilyButtonText}>
+                Choose ultimate protection
+              </Text>
+            </View>
           )}
         </TouchableOpacity>
       )}
@@ -344,8 +463,9 @@ function AnimatedSkeleton({
 }
 
 export default function PlansScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors, isDark } = useAppTheme();
-  const styles = makeStyles(colors);
+  const styles = makeStyles(colors, isDark);
   const params = useLocalSearchParams<{ from?: string }>();
   const entryContext = getEntryContext(params.from);
 
@@ -370,7 +490,7 @@ export default function PlansScreen() {
         setLoading(true);
       }
 
-      const response: any = await api.getSubscription();
+      const response: any = await requestApi.getSubscription();
       setLoadError(null);
 
       const plan =
@@ -385,6 +505,7 @@ export default function PlansScreen() {
       setStartedAt(response?.startedAt || null);
       setExpiresAt(response?.expiresAt || null);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       console.log('SUBSCRIPTION LOAD ERROR:', error);
       setLoadError(error?.message || 'We could not refresh your subscription right now.');
     } finally {
@@ -410,7 +531,7 @@ export default function PlansScreen() {
     try {
       setUpgradingPlan(plan);
 
-      const response: any = await api.initializePayment(plan);
+      const response: any = await requestApi.initializePayment(plan);
 
       const paymentUrl =
         response?.authorizationUrl ||
@@ -424,6 +545,7 @@ export default function PlansScreen() {
 
       await Linking.openURL(paymentUrl);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Payment failed', error.message || 'Please try again.');
     } finally {
       setUpgradingPlan(null);
@@ -446,7 +568,7 @@ export default function PlansScreen() {
             try {
               setCanceling(true);
 
-              await api.cancelSubscription();
+              await requestApi.cancelSubscription();
               await loadCurrentSubscription(true);
 
               Alert.alert(
@@ -454,6 +576,7 @@ export default function PlansScreen() {
                 'Your account has been moved to the Free plan.'
               );
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert(
                 'Cancel failed',
                 error.message || 'Could not cancel your subscription.'
@@ -536,8 +659,10 @@ export default function PlansScreen() {
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.eyebrow}>Choose your protection</Text>
-            <Text style={styles.title}>Plans</Text>
+            <Text style={styles.title}>Choose your protection</Text>
+            {/* <Text style={styles.headerSubtitle}>
+              Family offers the highest level of protection and sharing.
+            </Text> */}
           </View>
         </View>
 
@@ -565,18 +690,7 @@ export default function PlansScreen() {
               <Text style={styles.currentPlanTitle}>
                 {currentPlan} plan active
               </Text>
-
-              <Text style={styles.currentPlanText}>
-                Started: {formatDate(startedAt)}
-              </Text>
-
-              <Text style={styles.currentPlanText}>
-                Expires: {formatDate(expiresAt)}
-              </Text>
-
-              <Text style={styles.currentPlanText}>
-               Subscription lasts for 1 month.
-              </Text>
+              <Text style={styles.currentPlanText}>Expires {formatDate(expiresAt)}</Text>
             </View>
           </View>
         )}
@@ -620,16 +734,13 @@ export default function PlansScreen() {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.footnote}>
-          Cancel anytime.
-          Each paid plan is valid for 1 month after activation.
-        </Text>
+        <Text style={styles.footnote}>Cancel anytime.</Text>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-const makeStyles = (C: ThemeColors) =>
+const makeStyles = (C: ThemeColors, isDark: boolean) =>
   StyleSheet.create({
     safeArea: {
       flex: 1,
@@ -661,10 +772,10 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 999,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     skeletonEyebrow: {
       width: 140,
@@ -760,10 +871,10 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     warningTitle: {
       color: C.text,
@@ -786,8 +897,17 @@ const makeStyles = (C: ThemeColors) =>
 
     title: {
       fontSize: 30,
-      fontWeight: '700',
+      fontWeight: '800',
       color: C.text,
+      letterSpacing: -0.5,
+    },
+
+    headerSubtitle: {
+      color: C.textSecondary,
+      fontSize: 14,
+      lineHeight: 20,
+      marginTop: 6,
+      maxWidth: 330,
     },
 
     currentPlanCard: {
@@ -800,10 +920,10 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     currentPlanIcon: {
       width: 44,
@@ -829,6 +949,7 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     card: {
+      position: 'relative',
       backgroundColor: C.backgroundElement,
       borderRadius: 24,
       borderWidth: 1,
@@ -837,21 +958,211 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
+
+    freeCard: {
+      backgroundColor: isDark ? C.backgroundElement : '#F8FAFC',
+      borderColor: isDark ? C.border : '#CBD5E1',
+    },
+
+    freeBadge: {
+      alignSelf: 'flex-start',
+      backgroundColor: isDark ? C.backgroundSelected : '#E2E8F0',
+      paddingHorizontal: 11,
+      paddingVertical: 5,
+      borderRadius: 11,
+      marginBottom: 12,
+    },
+
+    freeBadgeText: {
+      color: C.textSecondary,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.7,
+    },
 
     premiumCard: {
       backgroundColor: C.securityScoreBg,
       borderColor: C.securityScore,
+      borderWidth: 1.5,
       paddingTop: 16,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
+
+    planSubtitle: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '700',
+      marginBottom: 14,
+    },
+
+    familyCard: {
+      overflow: 'hidden',
+      backgroundColor: isDark ? '#241A3A' : '#F5F0FF',
+      borderColor: isDark ? FAMILY_ACCENT_LIGHT : FAMILY_ACCENT,
+      borderWidth: 2,
+      paddingTop: 18,
+      shadowColor: FAMILY_ACCENT,
+      shadowOpacity: isDark ? 0.30 : 0.18,
+      shadowRadius: 24,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 8,
+    },
+
+    familyGlowLarge: {
+      position: 'absolute',
+      width: 190,
+      height: 190,
+      borderRadius: 95,
+      right: -78,
+      top: -86,
+      backgroundColor: isDark
+        ? 'rgba(167,139,250,0.14)'
+        : 'rgba(124,58,237,0.10)',
+    },
+
+    familyGlowSmall: {
+      position: 'absolute',
+      width: 112,
+      height: 112,
+      borderRadius: 56,
+      left: -52,
+      bottom: 54,
+      backgroundColor: isDark
+        ? 'rgba(124,58,237,0.12)'
+        : 'rgba(167,139,250,0.15)',
+    },
+
+    familyBadgeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 10,
+      marginBottom: 14,
+    },
+
+    familyBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 7,
+      alignSelf: 'flex-start',
+      backgroundColor: FAMILY_ACCENT,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      borderRadius: 13,
+    },
+
+    familyBadgeText: {
+      color: '#FFFFFF',
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.75,
+    },
+
+    familyCoverageBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 5,
+      paddingHorizontal: 9,
+      paddingVertical: 6,
+      borderRadius: 12,
+      backgroundColor: isDark
+        ? 'rgba(255,255,255,0.90)'
+        : 'rgba(255,255,255,0.82)',
+      borderWidth: 1,
+      borderColor: isDark ? '#DDD6FE' : '#E9D5FF',
+    },
+
+    familyCoverageText: {
+      color: FAMILY_ACCENT,
+      fontSize: 9,
+      fontWeight: '900',
+      letterSpacing: 0.65,
+    },
+
+    familyHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 12,
+      marginBottom: 14,
+    },
+
+    familyHeaderCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+
+    familyPlanName: {
+      color: isDark ? '#F5F3FF' : '#4C1D95',
+      fontSize: 28,
+      fontWeight: '900',
+      letterSpacing: -0.6,
+    },
+
+    familyPlanSubtitle: {
+      color: isDark ? '#DDD6FE' : '#6D28D9',
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '700',
+      marginTop: 5,
+    },
+
+    familyPriceAmount: {
+      color: isDark ? '#F5F3FF' : '#4C1D95',
+      fontSize: 22,
+      fontWeight: '900',
+    },
+
+    familyPricePeriod: {
+      color: isDark ? '#C4B5FD' : '#7C3AED',
+      fontWeight: '700',
+    },
+
+    familyMembersRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      padding: 11,
+      borderRadius: 16,
+      backgroundColor: isDark
+        ? 'rgba(255,255,255,0.08)'
+        : 'rgba(255,255,255,0.70)',
+      borderWidth: 1,
+      borderColor: isDark ? '#4C3B6B' : '#DDD6FE',
+    },
+
+    familyMembersIcon: {
+      width: 34,
+      height: 34,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: isDark ? '#F5F3FF' : '#EDE9FE',
+    },
+
+    familyMembersText: {
+      flex: 1,
+      color: isDark ? '#EDE9FE' : '#5B21B6',
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '900',
+    },
+
+    familyDivider: {
+      height: 1,
+      backgroundColor: isDark ? '#4C3B6B' : '#DDD6FE',
+      marginVertical: 16,
+    },
+
 
     cardHeaderRow: {
       flexDirection: 'row',
@@ -906,6 +1217,10 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 14,
     },
 
+    familyCurrentBadge: {
+      backgroundColor: isDark ? '#A78BFA' : '#6D28D9',
+    },
+
     currentBadgeText: {
       fontSize: 11,
       fontWeight: '700',
@@ -923,10 +1238,26 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 12,
     },
 
+    featureCheck: {
+      width: 25,
+      height: 25,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.backgroundSelected,
+      flexShrink: 0,
+    },
+
     featureLabel: {
+      flex: 1,
       fontSize: 15,
+      lineHeight: 20,
       color: C.textSecondary,
       marginLeft: 10,
+    },
+
+    featureLabelEmphasized: {
+      fontWeight: '900',
     },
 
     upgradeButton: {
@@ -938,10 +1269,10 @@ const makeStyles = (C: ThemeColors) =>
       minHeight: 52,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     upgradeButtonText: {
       fontSize: 16,
@@ -950,22 +1281,22 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     chooseFamilyButton: {
-      backgroundColor: C.backgroundbutton,
+      backgroundColor: FAMILY_ACCENT,
       borderRadius: 30,
       paddingVertical: 16,
       alignItems: 'center',
       justifyContent: 'center',
       minHeight: 54,
     
-      shadowColor: '#000',
-      shadowOpacity: 0.065,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      shadowColor: FAMILY_ACCENT,
+      shadowOpacity: 0.28,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 6,},
 
     chooseFamilyButtonText: {
-      fontSize: 16,
-      fontWeight: '600',
+      fontSize: 15,
+      fontWeight: '900',
       color: '#FFFFFF',
     },
 
@@ -989,10 +1320,10 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     disabledButton: {
       opacity: 0.65,

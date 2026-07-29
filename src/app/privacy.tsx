@@ -21,17 +21,17 @@ export default function PrivacyPolicyScreen() {
     {
       icon: <ShieldCheck size={20} color={C.primary} />,
       title: 'What The Guardian protects',
-      body: 'The Guardian helps you store passwords, cards, documents, secure notes, emergency access contacts, family sharing settings, trusted devices, security alerts, backups, and subscription information.',
+      body: 'The Guardian helps you store passwords, cards, documents, SecureNotes, emergency access contacts, family sharing settings, trusted devices, security alerts, backups, and subscription information.',
     },
     {
       icon: <FileLock2 size={20} color={C.primary} />,
       title: 'Vault encryption',
-      body: 'Sensitive vault values are encrypted before storage. Documents are encrypted by the backend before they are stored in private object storage. The app should never include passwords, card numbers, secure note contents, or document contents in support reports.',
+      body: 'Sensitive vault values are encrypted before storage. Documents are encrypted by the backend before they are stored in private object storage. The app should never include passwords, card numbers, SecureNote contents, or document contents in support reports.',
     },
     {
       icon: <Database size={20} color={C.primary} />,
       title: 'Data we store',
-      body: 'We store account details such as your name, email, plan, device sessions, notification records, and vault metadata. Some data is stored locally on your device to support offline vault access and app preferences such as appearance, haptics, and auto-lock settings.',
+      body: 'We store account details such as your name, email, plan, device sessions, notification records, and vault metadata. Some non-secret vault metadata is stored locally on your device to show an offline item list. Passwords, card numbers, CVVs, SecureNote contents, and document contents are not stored in that offline snapshot. App preferences such as appearance, haptics, analytics, and auto-lock settings are also stored locally.',
     },
     {
       icon: <Users size={20} color={C.primary} />,
@@ -41,7 +41,7 @@ export default function PrivacyPolicyScreen() {
     {
       icon: <BarChart3 size={20} color={C.primary} />,
       title: 'Privacy-preserving analytics',
-      body: 'The Guardian uses limited, always-on product analytics to improve reliability, security, and user experience. These events may include screen views, feature usage, plan-limit prompts, upload success or failure, API error categories, and bug report submission status. Analytics events are designed to be privacy-safe and must never include passwords, card numbers, CVVs, secure note contents, document contents, recovery codes, JWTs, encryption secrets, email addresses, or full names.',
+      body: 'The Guardian can use limited, optional product analytics to improve reliability, security, and user experience. These events may include screen views, feature usage, plan-limit prompts, upload success or failure, API error categories, and bug report submission status. Analytics events are designed to be privacy-safe and must never include passwords, card numbers, CVVs, SecureNote contents, document contents, recovery codes, JWTs, encryption secrets, email addresses, or full names.',
     },
     {
       icon: <Bug size={20} color={C.primary} />,
@@ -79,9 +79,9 @@ export default function PrivacyPolicyScreen() {
           </View>
         ))}
 
-        <Text style={styles.footer}>
+        {/* <Text style={styles.footer}>
           For privacy questions or account deletion concerns, contact the project owner or use the bug report/support page inside the app.
-        </Text>
+        </Text> */}
 
         <TouchableOpacity
           style={styles.button}

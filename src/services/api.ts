@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
 import { UploadType } from 'expo-file-system';
-import { markOfflineVaultStale } from './offlineVault';
+import { clearOfflineVaultMemoryCache, markOfflineVaultStale } from './offlineVault';
+import { markSecurityScoreDirty } from './securityScoreSync';
 import {
   captureAnalyticsEvent,
   clearAnalyticsUser,
@@ -18,12 +19,11 @@ import {
   trackPlanLimitReached,
 } from './analytics';
 
-export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_BASE_URL ||
+export const API_BASE_URL = (//'http://10.229.93.37:8080'
   process.env.EXPO_PUBLIC_API_URL ||
   'https://guardian-vault-gateway.onrender.com'
 ).replace(/\/+$/, '');
-/**
+/**\
  * REQUEST TIMEOUT SETTINGS
  *
  * AUTH_REQUEST_TIMEOUT_MS:
@@ -35,36 +35,250 @@ export const API_BASE_URL = (
  * LONG_REQUEST_TIMEOUT_MS:
  * Backup, restore, document upload, payment initialization.
  */
-const AUTH_REQUEST_TIMEOUT_MS = 300000;
-const DEFAULT_REQUEST_TIMEOUT_MS = 300000;
-const LONG_REQUEST_TIMEOUT_MS = 300000;
-const VAULT_LIST_TIMEOUT_MS = 300000; // Render free services may need time to wake before returning data.
-const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 400000; // Documents can be large because the backend decrypts and returns Base64.
-const DOCUMENT_UPLOAD_TIMEOUT_MS = 300000; // Multipart uploads, especially PDFs/DOCX, need more time than normal API calls.
+const AUTH_REQUEST_TIMEOUT_MS = 60000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
+const LONG_REQUEST_TIMEOUT_MS = 180000;
+const VAULT_LIST_TIMEOUT_MS = 60000; // Allows one controlled cold-start retry without leaving the UI blocked for minutes.
+const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 180000; // Large downloads remain cancellable and should expose progress in their screens.
+const DOCUMENT_UPLOAD_TIMEOUT_MS = 180000; // Multipart uploads get a longer deadline than ordinary requests.
 
 /**
- * Android can briefly report a transport-level network failure immediately
- * after a cold launch or resume, even when the phone is connected. Render may
- * also be waking the gateway at the same time. Retry only requests that are
- * safe to repeat, and only when no HTTP response was received quickly.
+ * Authentication uses a dedicated XMLHttpRequest transport.
+ *
+ * The previous implementation used fetch + AbortController for login while
+ * other parts of the app also created short-lived fetch probes. On Android,
+ * those independent fetch/abort cycles can fail before an HTTP request reaches
+ * the gateway after a cold start, resume, or biometric prompt. The result is a
+ * status-0 NETWORK_UNREACHABLE event even while the server is healthy.
+ *
+ * Keep retries restricted to login because login is safe to repeat. Account
+ * creation, password reset, verification-email delivery, and similar POSTs are
+ * sent only once so the app never duplicates a state-changing request.
  */
-const TRANSIENT_NETWORK_RETRY_DELAYS_MS = [1200, 3000] as const;
-const TRANSIENT_NETWORK_FAILURE_WINDOW_MS = 5000;
-const RETRYABLE_AUTH_PATHS = new Set(['/vault/auth/login']);
+const LOGIN_TRANSPORT_RETRY_DELAYS_MS = [1000, 2500, 5000] as const;
+const AUTH_APP_ACTIVE_WAIT_MS = 4000;
+const AUTH_NETWORK_SETTLE_MS = 350;
+const REACHABILITY_TIMEOUT_MS = 6000;
+
+/**
+ * A fetch failure that happens quickly is usually a transient Android/native
+ * networking interruption rather than proof that the backend is offline.
+ *
+ * GET and HEAD requests may retry only while the failed attempt completed
+ * inside this window. State-changing requests are never retried here.
+ */
+const TRANSIENT_NETWORK_FAILURE_WINDOW_MS = 15000;
+
+const AUTH_TOKEN_SECURE_STORE_KEY = 'guardian.auth-token';
+const LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY = 'token';
+const LEGACY_BIOMETRIC_PASSWORD_SECURE_STORE_KEY = 'biometricPassword';
+
+type ScopedApiRequestOptions = {
+  signal?: AbortSignal;
+  __guardianScreenRequest?: true;
+};
+
+let activeScopedSignal: AbortSignal | null = null;
+
+const createAbortError = () => {
+  const error = new Error('The request was cancelled because the screen is no longer active.');
+  error.name = 'AbortError';
+  return error;
+};
+
+const getScopedSignal = () => activeScopedSignal;
 
 const wait = (delayMs: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 
-function getTransientNetworkRetryCount(path: string, method: string) {
-  if (method === 'GET' || method === 'HEAD') {
-    return TRANSIENT_NETWORK_RETRY_DELAYS_MS.length;
+type AuthTransportResponse = {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+};
+
+type AuthTransportFailureCode =
+  | 'NETWORK_UNREACHABLE'
+  | 'REQUEST_TIMEOUT'
+  | 'REQUEST_ABORTED';
+
+type AuthTransportFailure = Error & {
+  code?: AuthTransportFailureCode;
+};
+
+let reachabilityPromise: Promise<boolean> | null = null;
+
+function createAuthTransportFailure(
+  code: AuthTransportFailureCode,
+  message: string
+): AuthTransportFailure {
+  const error = new Error(message) as AuthTransportFailure;
+  error.name = code;
+  error.code = code;
+  return error;
+}
+
+async function waitForAuthAppState() {
+  if (AppState.currentState === 'active') {
+    return;
   }
 
-  if (method === 'POST' && RETRYABLE_AUTH_PATHS.has(path)) {
-    return TRANSIENT_NETWORK_RETRY_DELAYS_MS.length;
-  }
+  await new Promise<void>((resolve) => {
+    let completed = false;
 
-  return 0;
+    const finish = () => {
+      if (completed) return;
+      completed = true;
+      clearTimeout(timeoutId);
+      subscription.remove();
+      resolve();
+    };
+
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') finish();
+    });
+
+    const timeoutId = setTimeout(finish, AUTH_APP_ACTIVE_WAIT_MS);
+  });
+
+  // Android can report active slightly before its native networking layer has
+  // completely resumed after a biometric/system prompt.
+  await wait(AUTH_NETWORK_SETTLE_MS);
+}
+
+function xhrJsonRequest(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: any,
+  timeoutMs: number,
+  externalSignal?: AbortSignal | null
+): Promise<AuthTransportResponse> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    let settled = false;
+
+    const abortFromScreen = () => {
+      try {
+        xhr.abort();
+      } catch {
+        // The request may not have opened yet. The aborted check below still rejects it.
+      }
+    };
+
+    if (externalSignal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
+    externalSignal?.addEventListener('abort', abortFromScreen, { once: true });
+
+    const cleanupExternalSignal = () => {
+      externalSignal?.removeEventListener('abort', abortFromScreen);
+    };
+
+    const resolveOnce = (value: AuthTransportResponse) => {
+      if (settled) return;
+      settled = true;
+      cleanupExternalSignal();
+      resolve(value);
+    };
+
+    const rejectOnce = (error: AuthTransportFailure | Error) => {
+      if (settled) return;
+      settled = true;
+      cleanupExternalSignal();
+      reject(error);
+    };
+
+    try {
+      xhr.open(method, url, true);
+      xhr.timeout = timeoutMs;
+
+      Object.entries(headers).forEach(([key, value]) => {
+        xhr.setRequestHeader(key, value);
+      });
+
+      xhr.onload = () => {
+        const status = Number(xhr.status || 0);
+        resolveOnce({
+          status,
+          ok: status >= 200 && status < 300,
+          bodyText: xhr.responseText || '',
+        });
+      };
+
+      xhr.onerror = () => {
+        rejectOnce(
+          createAuthTransportFailure(
+            'NETWORK_UNREACHABLE',
+            'Network request failed'
+          )
+        );
+      };
+
+      xhr.ontimeout = () => {
+        rejectOnce(
+          createAuthTransportFailure(
+            'REQUEST_TIMEOUT',
+            `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`
+          )
+        );
+      };
+
+      xhr.onabort = () => {
+        if (externalSignal?.aborted) {
+          rejectOnce(createAbortError());
+          return;
+        }
+
+        rejectOnce(
+          createAuthTransportFailure('REQUEST_ABORTED', 'Request was aborted')
+        );
+      };
+
+      xhr.send((body ?? null) as any);
+    } catch (error: any) {
+      rejectOnce(
+        createAuthTransportFailure(
+          'NETWORK_UNREACHABLE',
+          String(error?.message || 'Network request failed')
+        )
+      );
+    }
+  });
+}
+
+export async function checkApiReachability(
+  timeoutMs = REACHABILITY_TIMEOUT_MS
+): Promise<boolean> {
+  if (reachabilityPromise) return reachabilityPromise;
+
+  reachabilityPromise = (async () => {
+    await waitForAuthAppState();
+
+    try {
+      const response = await xhrJsonRequest(
+        `${API_BASE_URL}/actuator/health?guardianProbe=${Date.now()}`,
+        'GET',
+        {
+          Accept: 'application/json, text/plain, */*',
+          'Cache-Control': 'no-cache',
+        },
+        null,
+        timeoutMs
+      );
+
+      // Any HTTP status proves that the request reached the gateway.
+      return response.status > 0;
+    } catch {
+      return false;
+    }
+  })().finally(() => {
+    reachabilityPromise = null;
+  });
+
+  return reachabilityPromise;
 }
 
 
@@ -117,13 +331,24 @@ export type LoginResponse = {
   };
 };
 
-export type RegisterResponse = LoginResponse & {
-  message?: string;
-  emailSent?: boolean;
-  verificationEmailSent?: boolean;
-  emailDeliveryFailed?: boolean;
-  emailWarning?: string;
-  warning?: string;
+export type BiometricEnrollmentResponse = {
+  credentialToken: string;
+  expiresAt: string;
+};
+
+export type LegalConsentResponse = {
+  version: string;
+  privacyAccepted: boolean;
+  termsAccepted: boolean;
+  acceptedAt?: string | null;
+  clientSource?: string | null;
+};
+
+export type RegisterResponse = {
+  email: string;
+  message: string;
+  codeExpiresAt?: string;
+  verificationEmailSent: boolean;
 };
 
 export class GuardianApiError extends Error {
@@ -197,7 +422,7 @@ export function getEmailDeliveryWarning(value: any): string | null {
 
   return (
     possibleMessage ||
-    'Your account was created, but we could not send the verification email right now.'
+    'We could not send the verification email. No account has been created yet.'
   );
 }
 
@@ -227,6 +452,9 @@ export type CreditCardResponse = {
   encryptedCvv: string;
   encryptedCardholderName?: string;
   encryptedCardHolderName?: string;
+  encryptedNotes?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 
@@ -396,6 +624,28 @@ export type FamilyOverview = {
   sharedVaultOwners: SharedVaultOwner[];
 };
 
+export type FamilyMemberAccess = {
+  membershipId: number;
+  userId: number;
+  fullName: string;
+  email: string;
+  passwordItemIds: number[];
+  cardItemIds: number[];
+  documentItemIds: number[];
+  noteItemIds: number[];
+};
+
+export type UpdateFamilyMemberAccessBody = {
+  sharePasswords: boolean;
+  shareCards: boolean;
+  shareDocuments: boolean;
+  shareNotes: boolean;
+  passwordItemIds: number[];
+  cardItemIds: number[];
+  documentItemIds: number[];
+  noteItemIds: number[];
+};
+
 export type SharedPasswordItem = VaultItem & {
   itemType: 'PASSWORD';
   ownerId: number;
@@ -461,6 +711,12 @@ export type FamilyMemberPasswordRisk = {
 };
 
 export type SharedVaultItem = SharedPasswordItem;
+
+export type UserProfileResponse = {
+  userId: number;
+  fullName: string;
+  email: string;
+};
 
 export type SubscriptionResponse = {
   id?: number;
@@ -635,7 +891,8 @@ const MAX_CACHE_ENTRIES = 80;
 const cache = new Map<string, CacheEntry<any>>();
 let tokenCache: string | null | undefined = undefined;
 
-const GUARDIAN_DEVICE_ID_KEY = 'guardian:device-id';
+const GUARDIAN_DEVICE_ID_KEY = 'guardian.device-id';
+const GUARDIAN_DEVICE_ID_FALLBACK_KEY = 'guardianDeviceIdFallback';
 
 function createLocalDeviceId() {
   // This ID is not a hardware ID. It is only a random app-installation ID.
@@ -647,22 +904,39 @@ function createLocalDeviceId() {
 }
 
 async function getGuardianDeviceId() {
-  try {
-    const existing = await SecureStore.getItemAsync(GUARDIAN_DEVICE_ID_KEY);
+  /*
+   * Older builds used a SecureStore key containing a colon. Preserve the
+   * existing AsyncStorage fallback ID first so upgrading does not make the same
+   * physical installation appear as a new trusted device.
+   */
+  const fallbackExisting = await AsyncStorage.getItem(
+    GUARDIAN_DEVICE_ID_FALLBACK_KEY
+  );
 
-    if (existing) return existing;
+  try {
+    const secureExisting = await SecureStore.getItemAsync(
+      GUARDIAN_DEVICE_ID_KEY
+    );
+
+    if (secureExisting) return secureExisting;
+
+    if (fallbackExisting) {
+      await SecureStore.setItemAsync(
+        GUARDIAN_DEVICE_ID_KEY,
+        fallbackExisting
+      );
+      return fallbackExisting;
+    }
 
     const created = createLocalDeviceId();
     await SecureStore.setItemAsync(GUARDIAN_DEVICE_ID_KEY, created);
+    await AsyncStorage.setItem(GUARDIAN_DEVICE_ID_FALLBACK_KEY, created);
     return created;
   } catch {
-    const fallbackKey = 'guardianDeviceIdFallback';
-    const existing = await AsyncStorage.getItem(fallbackKey);
-
-    if (existing) return existing;
+    if (fallbackExisting) return fallbackExisting;
 
     const created = createLocalDeviceId();
-    await AsyncStorage.setItem(fallbackKey, created);
+    await AsyncStorage.setItem(GUARDIAN_DEVICE_ID_FALLBACK_KEY, created);
     return created;
   }
 }
@@ -691,20 +965,61 @@ function getDeviceType() {
   return Platform.OS || 'Unknown';
 }
 
+function sanitizeHeaderValue(value: string) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[^\x20-\x7E]/g, '')
+    .trim();
+}
+
 async function getGuardianDeviceHeaders() {
   const deviceId = await getGuardianDeviceId();
 
   return {
-    'X-Guardian-Device-Id': deviceId,
-    'X-Guardian-Device-Name': getReadableDeviceName(),
-    'X-Guardian-Device-Type': getDeviceType(),
+    'X-Guardian-Device-Id': sanitizeHeaderValue(deviceId),
+    'X-Guardian-Device-Name': sanitizeHeaderValue(getReadableDeviceName()),
+    'X-Guardian-Device-Type': sanitizeHeaderValue(getDeviceType()),
   };
 }
 
 async function getToken() {
   if (tokenCache !== undefined) return tokenCache;
-  tokenCache = await AsyncStorage.getItem('token');
+
+  // Older releases stored the reusable account password for biometric login.
+  // Remove that legacy secret before reading the current device-bound token.
+  await SecureStore.deleteItemAsync(
+    LEGACY_BIOMETRIC_PASSWORD_SECURE_STORE_KEY
+  ).catch(() => undefined);
+
+  try {
+    const secureToken = await SecureStore.getItemAsync(AUTH_TOKEN_SECURE_STORE_KEY);
+    if (secureToken) {
+      tokenCache = secureToken;
+      return secureToken;
+    }
+  } catch {
+    // Continue to the one-time legacy migration below.
+  }
+
+  const legacyToken = await AsyncStorage.getItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
+
+  if (legacyToken) {
+    try {
+      await SecureStore.setItemAsync(AUTH_TOKEN_SECURE_STORE_KEY, legacyToken, {
+        keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+      });
+      await AsyncStorage.removeItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
+    } catch {
+      // Keep the legacy token for this session if SecureStore is temporarily unavailable.
+    }
+  }
+
+  tokenCache = legacyToken;
   return tokenCache;
+}
+
+export async function hasStoredAuthToken() {
+  return Boolean(await getToken());
 }
 
 function clearCache(prefix?: string) {
@@ -718,10 +1033,13 @@ function clearCache(prefix?: string) {
   });
 }
 
-function clearVaultCaches() {
+function clearVaultCaches(securityReason?: string) {
   markOfflineVaultStale().catch(() => undefined);
   AsyncStorage.setItem('homeNeedsInitialSync', 'true').catch(() => undefined);
-  AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
+
+  if (securityReason) {
+    markSecurityScoreDirty(securityReason);
+  }
   clearCache('GET:/api/vault');
   clearCache('GET:/vault/documents');
   clearCache('GET:/vault/cards');
@@ -783,6 +1101,26 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
   const upper = message.toUpperCase();
   const route = path || '';
 
+  const serviceUnavailable =
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    lower.includes('connection refused') ||
+    lower.includes('getsockopt') ||
+    lower.includes('i/o error') ||
+    lower.includes('service unavailable') ||
+    lower.includes('bad gateway') ||
+    lower.includes('connect timed out') ||
+    lower.includes('connection timed out');
+
+  if (serviceUnavailable) {
+    if (route.includes('/vault/family')) {
+      return 'Family sharing is temporarily unavailable. Please try again shortly.';
+    }
+
+    return 'This service is temporarily unavailable. Please try again shortly.';
+  }
+
   if (
     lower.includes('device_limit_reached') ||
     lower.includes('free plan allows one trusted device') ||
@@ -808,7 +1146,7 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
     lower.includes('free note limit') ||
     lower.includes('note limit reached')
   ) {
-    return 'Free accounts can save up to 5 secure notes. Upgrade to Premium or Family for unlimited secure notes.';
+    return 'Free accounts can save up to 5 SecureNotes. Upgrade to Premium or Family for unlimited secure notes.';
   }
 
   if (
@@ -868,6 +1206,9 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
 
     if (status === 400) return 'Some details are missing or invalid. Please check the form and try again.';
     if (status === 401) {
+      if (route.includes('/vault/auth/biometric/login')) {
+        return 'Biometric sign-in needs to be set up again. Sign in with your password once.';
+      }
       if (route.includes('/vault/auth/login')) return 'The email or password is incorrect.';
       if (route.includes('/verify-2fa')) return 'The verification code is incorrect or has expired.';
       return 'Your session has expired. Please sign in again.';
@@ -905,10 +1246,10 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
 
   if (lower.includes('failed to fetch') || lower.includes('network request failed')) {
     if (route.includes('/vault/auth/login')) {
-      return 'The Guardian server could not be reached. It may still be starting. Please wait a moment and try again.';
+      return 'The app could not establish a connection to The Guardian. Keep the app open for a moment and try again.';
     }
 
-    return 'The Guardian servers are temporarily unreachable. Your internet connection may still be working. Please try again shortly.';
+    return 'The app could not establish a connection to The Guardian. Your internet may still be working. Please try again shortly.';
   }
 
   if (lower.includes('bad credentials') || lower.includes('invalid credentials')) {
@@ -970,11 +1311,11 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
     (lower.includes('email') || lower.includes('mail')) &&
     (lower.includes('send') || lower.includes('smtp') || lower.includes('connection timed out'))
   ) {
-    return 'Your account may have been created, but we could not send the verification email. You can still sign in and verify later from User Information.';
+    return 'We could not send the verification email. No account has been created. Please try again.';
   }
 
   if (
-    route.includes('/vault/auth/resend-verification') &&
+    (route.includes('/vault/auth/resend-verification') || route.includes('/vault/auth/resend-registration-code')) &&
     (lower.includes('email') || lower.includes('mail') || lower.includes('smtp') || lower.includes('connection timed out'))
   ) {
     return 'We could not send a verification code right now. You can still use the app by logging in, but your account is safer after email verification.';
@@ -988,13 +1329,188 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
   return message;
 }
 
+async function authRequest<T>(
+  path: string,
+  options: RequestInit,
+  retryLoginTransport = false,
+  timeoutMs = AUTH_REQUEST_TIMEOUT_MS
+): Promise<T> {
+  const scopedSignal = getScopedSignal();
+  if (scopedSignal?.aborted) throw createAbortError();
+
+  await waitForAuthAppState();
+  if (scopedSignal?.aborted) throw createAbortError();
+
+  const deviceHeaders = await getGuardianDeviceHeaders();
+  const requestMethod = String(options.method || 'POST').toUpperCase();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/plain, */*',
+    'Cache-Control': 'no-cache',
+    ...deviceHeaders,
+    ...(options.headers as Record<string, string>),
+  };
+
+  const retryDelays = retryLoginTransport
+    ? LOGIN_TRANSPORT_RETRY_DELAYS_MS
+    : [];
+  const requestStartedAt = Date.now();
+  let attempt = 0;
+
+  while (attempt <= retryDelays.length) {
+    try {
+      const response = await xhrJsonRequest(
+        `${API_BASE_URL}${path}`,
+        requestMethod,
+        headers,
+        options.body,
+        timeoutMs,
+        scopedSignal
+      );
+
+      const text = response.bodyText;
+      let data: any = null;
+
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        data = text;
+      }
+
+      if (!response.ok) {
+        const serverMessage = getServerMessage(data, text);
+        const rawCode = String(data?.code || data?.errorCode || '').trim();
+        const derivedCode = rawCode || (
+          String(serverMessage || '').toUpperCase().includes('DEVICE_LIMIT_REACHED')
+            ? 'DEVICE_LIMIT_REACHED'
+            : undefined
+        );
+
+        recordApiRequest({
+          path,
+          method: requestMethod,
+          status: response.status,
+          durationMs: Date.now() - requestStartedAt,
+          success: false,
+          code: derivedCode || 'HTTP_ERROR',
+          transport: 'XHR_AUTH',
+          retryCount: attempt,
+          networkStage: 'HTTP_RESPONSE',
+        });
+
+        throw new GuardianApiError(
+          getFriendlyErrorMessage(response.status, path, serverMessage),
+          {
+            status: response.status,
+            path,
+            rawMessage: serverMessage,
+            code: derivedCode,
+            data,
+          }
+        );
+      }
+
+      recordApiRequest({
+        path,
+        method: requestMethod,
+        status: response.status,
+        durationMs: Date.now() - requestStartedAt,
+        success: true,
+        transport: 'XHR_AUTH',
+        retryCount: attempt,
+        networkStage: 'HTTP_RESPONSE',
+      });
+
+      return data as T;
+    } catch (error: any) {
+      if (error instanceof GuardianApiError) throw error;
+      if (scopedSignal?.aborted || error?.name === 'AbortError') {
+        throw createAbortError();
+      }
+
+      const code = String(
+        error?.code || error?.name || 'NETWORK_UNREACHABLE'
+      ).toUpperCase();
+      const timeout = code === 'REQUEST_TIMEOUT';
+      const canRetry = !timeout && attempt < retryDelays.length;
+
+      if (canRetry) {
+        const delayMs = retryDelays[attempt];
+        attempt += 1;
+        await wait(delayMs);
+        await waitForAuthAppState();
+        continue;
+      }
+
+      const gatewayReachable = timeout
+        ? false
+        : await checkApiReachability(REACHABILITY_TIMEOUT_MS);
+
+      const finalCode = timeout
+        ? 'REQUEST_TIMEOUT'
+        : gatewayReachable
+          ? 'TRANSIENT_NETWORK_FAILURE'
+          : 'NETWORK_UNREACHABLE';
+
+      const rawMessage = timeout
+        ? `Request timed out after ${Math.round(timeoutMs / 1000)} seconds`
+        : 'Network request failed';
+
+      recordApiRequest({
+        path,
+        method: requestMethod,
+        durationMs: Date.now() - requestStartedAt,
+        success: false,
+        code: finalCode,
+        transport: 'XHR_AUTH',
+        retryCount: attempt,
+        networkStage: timeout
+          ? 'XHR_TIMEOUT'
+          : gatewayReachable
+            ? 'GATEWAY_REACHABLE_REQUEST_FAILED'
+            : 'GATEWAY_UNREACHABLE',
+      });
+
+      throw new GuardianApiError(
+        getFriendlyErrorMessage(undefined, path, rawMessage),
+        {
+          path,
+          rawMessage,
+          code: finalCode,
+        }
+      );
+    }
+  }
+
+  throw new GuardianApiError(
+    getFriendlyErrorMessage(undefined, path, 'Network request failed'),
+    {
+      path,
+      rawMessage: 'Network request failed',
+      code: 'NETWORK_UNREACHABLE',
+    }
+  );
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
   useAuth = true,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
 ): Promise<T> {
-  const token = await getToken();
+  const scopedSignal = getScopedSignal();
+  if (scopedSignal?.aborted) throw createAbortError();
+
+  /*
+   * Android can report the application as active slightly before its native
+   * networking stack has fully resumed. Waiting here prevents ordinary Vault,
+   * Security, and Family requests from producing false status-0 failures after
+   * app resume, biometric prompts, or system dialogs.
+   */
+  await waitForAuthAppState();
+  if (scopedSignal?.aborted) throw createAbortError();
+
+  const token = useAuth ? await getToken() : null;
   const deviceHeaders = await getGuardianDeviceHeaders();
 
   const headers: Record<string, string> = {
@@ -1007,7 +1523,7 @@ async function request<T>(
 
   const requestStartedAt = Date.now();
   const requestMethod = String(options.method || 'GET').toUpperCase();
-  const retryCount = getTransientNetworkRetryCount(path, requestMethod);
+  const retryCount = requestMethod === 'GET' || requestMethod === 'HEAD' ? 2 : 0;
 
   let response: Response | null = null;
   let attempt = 0;
@@ -1015,7 +1531,13 @@ async function request<T>(
   while (attempt <= retryCount) {
     const controller = new AbortController();
     const attemptStartedAt = Date.now();
+    let timedOut = false;
+
+    const abortFromScreen = () => controller.abort();
+    scopedSignal?.addEventListener('abort', abortFromScreen, { once: true });
+
     const timeoutId = setTimeout(() => {
+      timedOut = true;
       controller.abort();
     }, timeoutMs);
 
@@ -1040,12 +1562,19 @@ async function request<T>(
         errorMessage.includes('cancelled');
 
       if (wasAborted) {
+        if (scopedSignal?.aborted && !timedOut) {
+          throw createAbortError();
+        }
+
         recordApiRequest({
           path,
           method: requestMethod,
           durationMs: totalDurationMs,
           success: false,
           code: 'REQUEST_TIMEOUT',
+          transport: 'FETCH',
+          retryCount: attempt,
+          networkStage: 'FETCH_ABORT_TIMEOUT',
         });
 
         throw new GuardianApiError(
@@ -1067,10 +1596,7 @@ async function request<T>(
         attemptDurationMs <= TRANSIENT_NETWORK_FAILURE_WINDOW_MS;
 
       if (canRetry) {
-        const delayMs =
-          TRANSIENT_NETWORK_RETRY_DELAYS_MS[
-            Math.min(attempt, TRANSIENT_NETWORK_RETRY_DELAYS_MS.length - 1)
-          ];
+        const delayMs = attempt === 0 ? 1200 : 3000;
 
         if (__DEV__) {
           console.log('TRANSIENT NETWORK FAILURE - RETRYING', {
@@ -1083,17 +1609,43 @@ async function request<T>(
 
         attempt += 1;
         await wait(delayMs);
+        await waitForAuthAppState();
         continue;
       }
 
-      console.log('FETCH ERROR', error);
+      if (__DEV__) {
+        console.log('FETCH ERROR', {
+          path,
+          method: requestMethod,
+          name: error?.name,
+          message: error?.message,
+        });
+      }
+
+      /*
+       * A fetch status-0 error does not prove the server is down. Probe the
+       * gateway before recording NETWORK_UNREACHABLE. Any HTTP status from the
+       * health route proves the request reached the gateway.
+       */
+      const gatewayReachable = await checkApiReachability(
+        REACHABILITY_TIMEOUT_MS
+      );
+
+      const finalCode = gatewayReachable
+        ? 'TRANSIENT_NETWORK_FAILURE'
+        : 'NETWORK_UNREACHABLE';
 
       recordApiRequest({
         path,
         method: requestMethod,
         durationMs: totalDurationMs,
         success: false,
-        code: 'NETWORK_UNREACHABLE',
+        code: finalCode,
+        transport: 'FETCH',
+        retryCount: attempt,
+        networkStage: gatewayReachable
+          ? 'GATEWAY_REACHABLE_REQUEST_FAILED'
+          : 'GATEWAY_UNREACHABLE',
       });
 
       throw new GuardianApiError(
@@ -1101,21 +1653,35 @@ async function request<T>(
         {
           path,
           rawMessage: 'Network request failed',
-          code: 'NETWORK_UNREACHABLE',
+          code: finalCode,
         }
       );
     } finally {
       clearTimeout(timeoutId);
+      scopedSignal?.removeEventListener('abort', abortFromScreen);
     }
   }
 
   if (!response) {
+    const gatewayReachable = await checkApiReachability(
+      REACHABILITY_TIMEOUT_MS
+    );
+
+    const finalCode = gatewayReachable
+      ? 'TRANSIENT_NETWORK_FAILURE'
+      : 'NETWORK_UNREACHABLE';
+
     recordApiRequest({
       path,
       method: requestMethod,
       durationMs: Date.now() - requestStartedAt,
       success: false,
-      code: 'NETWORK_UNREACHABLE',
+      code: finalCode,
+      transport: 'FETCH',
+      retryCount: attempt,
+      networkStage: gatewayReachable
+        ? 'GATEWAY_REACHABLE_NO_RESPONSE'
+        : 'GATEWAY_UNREACHABLE',
     });
 
     throw new GuardianApiError(
@@ -1123,7 +1689,7 @@ async function request<T>(
       {
         path,
         rawMessage: 'Network request failed',
-        code: 'NETWORK_UNREACHABLE',
+        code: finalCode,
       }
     );
   }
@@ -1142,12 +1708,12 @@ async function request<T>(
     const rawCode = String(data?.code || data?.errorCode || '').trim();
     const quietOptional401 = isOptionalFamily401(path, response.status);
 
-    if (!quietOptional401) {
+    if (__DEV__ && !quietOptional401) {
       console.log('API RESPONSE ERROR', {
         path,
         status: response.status,
-        serverMessage,
-        data,
+        code: rawCode || undefined,
+        message: serverMessage,
       });
     }
 
@@ -1169,6 +1735,9 @@ async function request<T>(
         durationMs: Date.now() - requestStartedAt,
         success: false,
         code: derivedCode || 'HTTP_ERROR',
+        transport: 'FETCH',
+        retryCount: attempt,
+        networkStage: 'HTTP_RESPONSE',
       });
     }
 
@@ -1194,6 +1763,9 @@ async function request<T>(
     status: response.status,
     durationMs: Date.now() - requestStartedAt,
     success: true,
+    transport: 'FETCH',
+    retryCount: attempt,
+    networkStage: 'HTTP_RESPONSE',
   });
 
   return data as T;
@@ -1207,9 +1779,17 @@ async function cachedGet<T>(
   const key = `GET:${path}`;
   const now = Date.now();
   const existing = cache.get(key) as CacheEntry<T> | undefined;
+  const scopedSignal = getScopedSignal();
 
   if (existing?.data !== undefined && now - existing.time < CACHE_TIME_MS) {
     return existing.data;
+  }
+
+  if (scopedSignal) {
+    const raw = await request<any>(path, {}, true, timeoutMs);
+    const data = normalize ? normalize(raw) : (raw as T);
+    cache.set(key, { time: Date.now(), data });
+    return data;
   }
 
   if (existing?.promise) {
@@ -1437,33 +2017,19 @@ async function parseUploadResult(result: FileSystem.FileSystemUploadResult) {
     throw new Error(getFriendlyErrorMessage(result.status, '/vault/documents/upload', serverMessage));
   }
 
-  clearVaultCaches();
+  clearVaultCaches('vault-item');
   return data;
 }
 
 
-async function pingServer(timeoutMs = 2500): Promise<boolean> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  try {
-    await fetch(API_BASE_URL, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-    return true;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-export const api = {
-  clearCache: () => clearCache(),
+const apiImplementation = {
+  clearCache: (prefix?: string) => clearCache(prefix),
+  checkServerReachability: (timeoutMs?: number) =>
+    checkApiReachability(timeoutMs),
 
   register: async (body: { fullname: string; email: string; password: string }) => {
-    const result = await request<RegisterResponse>('/vault/auth/register', {
+    const result = await authRequest<RegisterResponse>('/vault/auth/register', {
       method: 'POST',
       body: JSON.stringify({
         fullname: body.fullname.trim(),
@@ -1472,25 +2038,89 @@ export const api = {
       }),
     }, false, AUTH_REQUEST_TIMEOUT_MS);
 
-    trackFeatureAction('AUTH', 'ACCOUNT_REGISTERED', {
+    trackFeatureAction('AUTH', 'REGISTRATION_VERIFICATION_SENT', {
       verification_delivery_requested: true,
     });
 
     return result;
   },
 
+  verifyRegistration: async (body: { email: string; code: string }) => {
+    const result = await authRequest<LoginResponse>('/vault/auth/verify-registration', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: body.email.trim().toLowerCase(),
+        code: body.code.trim(),
+      }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS);
+
+    trackFeatureAction('AUTH', 'ACCOUNT_REGISTERED', {
+      email_verified_before_creation: true,
+    });
+    trackFeatureAction('AUTH', 'EMAIL_VERIFIED');
+    markSecurityScoreDirty('email-verification');
+
+    return result;
+  },
+
+  resendRegistrationCode: (body: { email: string }) =>
+    authRequest<{ message: string }>('/vault/auth/resend-registration-code', {
+      method: 'POST',
+      body: JSON.stringify({ email: body.email.trim().toLowerCase() }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS),
+
   login: (body: { email: string; password: string; forceReplaceDevice?: boolean }) =>
-    request<LoginResponse>('/vault/auth/login', {
+    authRequest<LoginResponse>('/vault/auth/login', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
         password: body.password,
         forceReplaceDevice: body.forceReplaceDevice === true,
       }),
+    }, true, AUTH_REQUEST_TIMEOUT_MS),
+
+  biometricLogin: (body: { email: string; credentialToken: string }) =>
+    authRequest<LoginResponse>('/vault/auth/biometric/login', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: body.email.trim().toLowerCase(),
+        credentialToken: body.credentialToken.trim(),
+      }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
+  enrollBiometricCredential: () =>
+    request<BiometricEnrollmentResponse>('/vault/auth/biometric/enroll', {
+      method: 'POST',
+    }),
+
+  revokeBiometricCredential: () =>
+    request<{ message: string }>('/vault/auth/biometric', {
+      method: 'DELETE',
+    }),
+
+  getLegalConsent: (version: string) =>
+    request<LegalConsentResponse>(
+      `/vault/auth/legal-consent?version=${encodeURIComponent(version.trim())}`
+    ),
+
+  saveLegalConsent: (body: {
+    version: string;
+    privacyAccepted: boolean;
+    termsAccepted: boolean;
+    clientSource?: string;
+  }) =>
+    request<LegalConsentResponse>('/vault/auth/legal-consent', {
+      method: 'POST',
+      body: JSON.stringify({
+        version: body.version.trim(),
+        privacyAccepted: body.privacyAccepted,
+        termsAccepted: body.termsAccepted,
+        clientSource: body.clientSource || 'MOBILE_APP',
+      }),
+    }),
+
   verifyTwoFactor: (body: { email: string; code: string }) =>
-    request<LoginResponse>('/vault/auth/verify-2fa', {
+    authRequest<LoginResponse>('/vault/auth/verify-2fa', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
@@ -1499,7 +2129,7 @@ export const api = {
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
   verifyEmail: async (body: { email: string; code: string }) => {
-    const result = await request<{ message: string }>('/vault/auth/verify-email', {
+    const result = await authRequest<{ message: string }>('/vault/auth/verify-email', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
@@ -1508,23 +2138,24 @@ export const api = {
     }, false, AUTH_REQUEST_TIMEOUT_MS);
 
     trackFeatureAction('AUTH', 'EMAIL_VERIFIED');
+    markSecurityScoreDirty('email-verification');
     return result;
   },
 
   resendVerification: (body: { email: string }) =>
-    request<{ message: string }>('/vault/auth/resend-verification', {
+    authRequest<{ message: string }>('/vault/auth/resend-verification', {
       method: 'POST',
       body: JSON.stringify({ email: body.email.trim().toLowerCase() }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
   forgotPassword: (body: { email: string }) =>
-    request<{ message: string }>('/vault/auth/forgot-password', {
+    authRequest<{ message: string }>('/vault/auth/forgot-password', {
       method: 'POST',
       body: JSON.stringify({ email: body.email.trim().toLowerCase() }),
     }, false, AUTH_REQUEST_TIMEOUT_MS),
 
   resetPassword: async (body: { email: string; code: string; newPassword: string }) => {
-    const result = await request<{ message: string }>('/vault/auth/reset-password', {
+    const result = await authRequest<{ message: string }>('/vault/auth/reset-password', {
       method: 'POST',
       body: JSON.stringify({
         email: body.email.trim().toLowerCase(),
@@ -1548,6 +2179,7 @@ export const api = {
     clearCache('GET:/vault/recovery-kit/status');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    markSecurityScoreDirty('recovery-kit');
     trackFeatureAction('RECOVERY_KIT', 'GENERATED');
     return result;
   },
@@ -1559,6 +2191,7 @@ export const api = {
     clearCache('GET:/vault/recovery-kit/status');
     clearCache('GET:/vault/notifications');
     clearCache('GET:/vault/notifications/unread-count');
+    markSecurityScoreDirty('recovery-kit');
     trackFeatureAction('RECOVERY_KIT', 'REVOKED');
     return result;
   },
@@ -1591,6 +2224,19 @@ export const api = {
     return result;
   },
 
+  getMyProfile: () =>
+    cachedGet<UserProfileResponse>('/vault/users/me'),
+
+  updateMyProfile: async (body: { fullName: string }) => {
+    const result = await request<UserProfileResponse>('/vault/users/me/profile', {
+      method: 'PUT',
+      body: JSON.stringify({ fullName: body.fullName.trim() }),
+    });
+    clearCache('GET:/vault/users/me');
+    trackFeatureAction('ACCOUNT', 'PROFILE_UPDATED');
+    return result;
+  },
+
   getSecuritySettings: () =>
     cachedGet<{ emailVerified: boolean; twoFactorEnabled: boolean }>('/vault/auth/me/security'),
 
@@ -1600,6 +2246,7 @@ export const api = {
       body: JSON.stringify({ enabled }),
     });
     clearCache('GET:/vault/auth/me/security');
+    markSecurityScoreDirty('two-factor');
     trackFeatureAction('SECURITY', 'TWO_FACTOR_CHANGED', { enabled });
     return result;
   },
@@ -1622,7 +2269,7 @@ export const api = {
     const result = await request<SubscriptionResponse>('/vault/api/subscriptions/cancel', {
       method: 'POST',
     });
-    clearVaultCaches();
+    clearVaultCaches('subscription');
     void captureAnalyticsEvent('subscription_cancelled');
     return result;
   },
@@ -1631,7 +2278,7 @@ export const api = {
     const result = await request<SubscriptionResponse>(`/vault/api/subscriptions/upgrade?plan=${plan}`, {
       method: 'POST',
     });
-    clearVaultCaches();
+    clearVaultCaches('subscription');
     void captureAnalyticsEvent('subscription_upgraded', { plan });
     return result;
   },
@@ -1644,6 +2291,7 @@ export const api = {
       method: 'POST',
     }, true, LONG_REQUEST_TIMEOUT_MS);
     clearCache('GET:/vault/backup/status');
+    markSecurityScoreDirty('backup');
     trackFeatureAction('BACKUP', 'CREATED', {
       item_count_bucket:
         result.totalItemCount < 10
@@ -1666,7 +2314,7 @@ export const api = {
         replaceExisting: Boolean(body.replaceExisting),
       }),
     }, true, LONG_REQUEST_TIMEOUT_MS);
-    clearVaultCaches();
+    clearVaultCaches('backup');
     clearCache('GET:/vault/backup/status');
     trackFeatureAction('BACKUP', 'RESTORED', {
       replace_existing: Boolean(body.replaceExisting),
@@ -1695,7 +2343,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ reference }),
     }, true, LONG_REQUEST_TIMEOUT_MS);
-    clearVaultCaches();
+    clearVaultCaches('subscription');
     void captureAnalyticsEvent('subscription_payment_verified');
     return result;
   },
@@ -1705,7 +2353,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-password');
     void captureAnalyticsEvent('vault_item_created', { item_type: 'PASSWORD' });
     return result;
   },
@@ -1724,7 +2372,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-password');
     trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'PASSWORD' });
     return result;
   },
@@ -1733,7 +2381,7 @@ export const api = {
     const result = await request<void>(`/api/vault/${id}`, {
       method: 'DELETE',
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-password');
     trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'PASSWORD' });
     return result;
   },
@@ -1825,7 +2473,7 @@ export const api = {
               durationMs: Date.now() - uploadStartedAt,
               success: true,
             });
-            clearVaultCaches();
+            clearVaultCaches('vault-item');
             void captureAnalyticsEvent('vault_item_created', {
               item_type: 'DOCUMENT',
               file_kind: getAnalyticsFileKind(file.type),
@@ -2009,7 +2657,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     void captureAnalyticsEvent('vault_item_created', { item_type: 'DOCUMENT' });
     return result;
   },
@@ -2048,7 +2696,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'DOCUMENT' });
     return result;
   },
@@ -2057,7 +2705,7 @@ export const api = {
     const result = await request<void>(`/vault/documents/${id}`, {
       method: 'DELETE',
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'DOCUMENT' });
     return result;
   },
@@ -2068,12 +2716,13 @@ export const api = {
     encryptedExpiryDate: string;
     encryptedCvv: string;
     encryptedCardholderName?: string;
+    encryptedNotes?: string;
   }) => {
     const result = await request<CreditCardResponse>('/vault/cards', {
       method: 'POST',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     void captureAnalyticsEvent('vault_item_created', { item_type: 'CARD' });
     return result;
   },
@@ -2089,7 +2738,7 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(body),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_UPDATED', { item_type: 'CARD' });
     return result;
   },
@@ -2098,7 +2747,7 @@ export const api = {
     const result = await request<void>(`/vault/cards/${id}`, {
       method: 'DELETE',
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'CARD' });
     return result;
   },
@@ -2114,7 +2763,7 @@ export const api = {
         pinned: Boolean(body.pinned),
       }),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     void captureAnalyticsEvent('vault_item_created', { item_type: 'NOTE' });
     return result;
   },
@@ -2135,7 +2784,7 @@ export const api = {
         pinned: Boolean(body.pinned),
       }),
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_UPDATED', {
       item_type: 'NOTE',
       pinned: Boolean(body.pinned),
@@ -2147,7 +2796,7 @@ export const api = {
     const result = await request<void>(`/vault/notes/${id}`, {
       method: 'DELETE',
     });
-    clearVaultCaches();
+    clearVaultCaches('vault-item');
     trackFeatureAction('VAULT', 'ITEM_DELETED', { item_type: 'NOTE' });
     return result;
   },
@@ -2341,7 +2990,7 @@ export const api = {
     clearCache('GET:/vault/family');
     clearCache('GET:/vault/family/shared-items');
     clearCache('GET:/vault/family/member-password-risks');
-    AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
+    markSecurityScoreDirty('family-sharing');
     trackFeatureAction('FAMILY', 'MEMBER_ADDED', {
       permission_count:
         Number(Boolean(permissions?.sharePasswords ?? passwordItemIds.length > 0)) +
@@ -2357,6 +3006,35 @@ export const api = {
     return result;
   },
 
+  getFamilyMemberAccess: (membershipId: number | string) =>
+    cachedGet<FamilyMemberAccess>(`/vault/family/members/${membershipId}/access`, undefined, VAULT_LIST_TIMEOUT_MS),
+
+  updateFamilyMemberAccess: async (
+    membershipId: number | string,
+    body: UpdateFamilyMemberAccessBody
+  ) => {
+    const result = await request<FamilyMemberAccess>(
+      `/vault/family/members/${membershipId}/access`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }
+    );
+    clearCache('GET:/vault/family');
+    clearCache(`GET:/vault/family/members/${membershipId}/access`);
+    clearCache('GET:/vault/family/shared-items');
+    clearCache('GET:/vault/family/member-password-risks');
+    markSecurityScoreDirty('family-sharing');
+    trackFeatureAction('FAMILY', 'MEMBER_ACCESS_UPDATED', {
+      selected_item_count:
+        body.passwordItemIds.length +
+        body.cardItemIds.length +
+        body.documentItemIds.length +
+        body.noteItemIds.length,
+    });
+    return result;
+  },
+
   removeFamilyMember: async (membershipId: number | string) => {
     const result = await request<void>(`/vault/family/members/${membershipId}`, {
       method: 'DELETE',
@@ -2364,7 +3042,7 @@ export const api = {
     clearCache('GET:/vault/family');
     clearCache('GET:/vault/family/shared-items');
     clearCache('GET:/vault/family/member-password-risks');
-    AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true').catch(() => undefined);
+    markSecurityScoreDirty('family-sharing');
     trackFeatureAction('FAMILY', 'MEMBER_REMOVED');
     return result;
   },
@@ -2569,6 +3247,32 @@ export const api = {
   },
 };
 
+export const api = new Proxy(apiImplementation, {
+  get(target, property, receiver) {
+    const value = Reflect.get(target, property, receiver);
+    if (typeof value !== 'function') return value;
+
+    return (...receivedArgs: unknown[]) => {
+      const lastArg = receivedArgs[receivedArgs.length - 1] as
+        | ScopedApiRequestOptions
+        | undefined;
+      const isScopedCall = Boolean(lastArg?.__guardianScreenRequest);
+      const args = isScopedCall ? receivedArgs.slice(0, -1) : receivedArgs;
+      const previousSignal = activeScopedSignal;
+
+      if (isScopedCall) {
+        activeScopedSignal = lastArg?.signal || null;
+      }
+
+      try {
+        return value.apply(target, args);
+      } finally {
+        activeScopedSignal = previousSignal;
+      }
+    };
+  },
+}) as typeof apiImplementation;
+
 export async function saveLoginSession(data: LoginResponse) {
   if (data.requiresTwoFactor) {
     throw new Error('2FA verification is required before saving the login session.');
@@ -2598,7 +3302,10 @@ export async function saveLoginSession(data: LoginResponse) {
 
   tokenCache = token;
 
-  await AsyncStorage.setItem('token', token);
+  await SecureStore.setItemAsync(AUTH_TOKEN_SECURE_STORE_KEY, token, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+  await AsyncStorage.removeItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
   await AsyncStorage.setItem('userEmail', cleanEmail);
   await AsyncStorage.setItem('userName', name);
 
@@ -2643,10 +3350,35 @@ export async function saveLoginSession(data: LoginResponse) {
   });
 
   await trackLoginSuccess();
+
+  // Keep Android Autofill data isolated before a different Guardian account
+  // can finish signing in and use the native provider.
+  try {
+    const { prepareGuardianAutofillForSignedInUser } = await import('./autofillSync');
+    await prepareGuardianAutofillForSignedInUser(cleanEmail);
+  } catch {
+    // Autofill is optional; authentication must still succeed if the native
+    // module is unavailable in a development or iOS build.
+  }
+
+  // A locally accepted legal record is synchronized after authentication so
+  // registration and returning-user flows gain a server-side audit record.
+  void import('./legalConsent')
+    .then(({ syncLegalConsentToBackend }) => syncLegalConsentToBackend(cleanEmail))
+    .catch(() => undefined);
 }
 export async function logout() {
   await trackLogout();
   tokenCache = null;
+  // Remove decrypted offline values from JavaScript memory while preserving the
+  // encrypted SecureStore snapshot for the next authenticated unlock.
+  clearOfflineVaultMemoryCache();
+
+  try {
+    await SecureStore.deleteItemAsync(AUTH_TOKEN_SECURE_STORE_KEY);
+  } catch {
+    // Continue clearing local profile state even if SecureStore is unavailable.
+  }
 
   /**
    * Do not remove:

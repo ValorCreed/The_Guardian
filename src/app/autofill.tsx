@@ -1,8 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  NativeModules,
   Platform,
   RefreshControl,
   ScrollView,
@@ -13,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,42 +20,22 @@ import * as Application from 'expo-application';
 import * as IntentLauncher from 'expo-intent-launcher';
 
 import { useAppTheme } from '../context/ThemeContext';
-import { api, VaultItem } from '../services/api';
-import { decryptPassword } from '../utils/vaultcrypto';
+import { isScreenRequestCancelled } from '../hooks/useCancelableApi';
+import {
+  clearGuardianAutofillCache,
+  getGuardianAutofillCounts,
+  GUARDIAN_AUTOFILL_ENABLED_KEY,
+  GUARDIAN_AUTOFILL_LAST_SYNCED_AT_KEY,
+  isGuardianAutofillAvailable,
+  syncGuardianAutofillCache,
+  syncPendingGuardianAutofillSaves,
+  type GuardianAutofillCounts,
+} from '../services/autofillSync';
 
-const AUTOFILL_KEY = 'autofillEnabled';
-
-const GuardianAutofill = NativeModules.GuardianAutofill as
-  | {
-      syncCredentials: (credentialsJson: string) => Promise<number>;
-      clearCredentials: () => Promise<boolean>;
-      getCredentialCount: () => Promise<number>;
-    }
-  | undefined;
-
-type CachedCredential = {
-  id: string;
-  title: string;
-  username: string;
-  password: string;
-  website: string;
-};
-
-const clean = (value?: string | null) => String(value || '').trim();
-
-const buildCredential = (item: VaultItem): CachedCredential | null => {
-  const password = item.encryptedPassword ? decryptPassword(item.encryptedPassword) : '';
-  const username = clean(item.usernameValue);
-
-  if (!username || !password) return null;
-
-  return {
-    id: String(item.id),
-    title: clean(item.title || item.website) || 'Saved login',
-    username,
-    password,
-    website: clean(item.website || item.title),
-  };
+const EMPTY_COUNTS: GuardianAutofillCounts = {
+  credentials: 0,
+  cards: 0,
+  pending: 0,
 };
 
 export default function AutofillScreen() {
@@ -65,36 +45,57 @@ export default function AutofillScreen() {
   const [enabled, setEnabled] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [syncedCount, setSyncedCount] = useState(0);
+  const [counts, setCounts] = useState<GuardianAutofillCounts>(EMPTY_COUNTS);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
 
-  const nativeAutofillAvailable = Platform.OS === 'android' && Boolean(GuardianAutofill);
+  const nativeAutofillAvailable = isGuardianAutofillAvailable();
+  const totalReady = counts.credentials + counts.cards;
 
   const statusText = useMemo(() => {
-    if (Platform.OS !== 'android') return 'iOS requires a separate Credential Provider extension later.';
-    if (!GuardianAutofill) return 'Native Autofill module is not available in this build yet.';
-    if (!enabled) return 'Enable and sync your saved logins before using Android Autofill.';
-    if (syncedCount === 0) return 'No passwords have been synced for autofill yet.';
-    return `${syncedCount} saved login${syncedCount === 1 ? '' : 's'} ready for Android Autofill.`;
-  }, [enabled, syncedCount]);
+    if (Platform.OS !== 'android') {
+      return 'System-wide Guardian autofill is currently available on Android.';
+    }
+    if (!nativeAutofillAvailable) {
+      return 'The native Autofill module is not available in this build. Rebuild the Android app.';
+    }
+    if (!enabled) {
+      return 'Enable Autofill to use saved passwords and cards in supported Android apps and websites.';
+    }
+    if (totalReady === 0) {
+      return 'No passwords or cards have been synced for autofill yet.';
+    }
+    return `${counts.credentials} login${counts.credentials === 1 ? '' : 's'} and ${counts.cards} card${counts.cards === 1 ? '' : 's'} are ready.`;
+  }, [counts.cards, counts.credentials, enabled, nativeAutofillAvailable, totalReady]);
 
   const loadState = useCallback(async () => {
-    setEnabled((await AsyncStorage.getItem(AUTOFILL_KEY)) === 'true');
-    setLastSyncedAt(await AsyncStorage.getItem('autofillLastSyncedAt'));
+    const storedEnabled =
+      (await AsyncStorage.getItem(GUARDIAN_AUTOFILL_ENABLED_KEY)) === 'true';
+    setEnabled(storedEnabled);
+    setLastSyncedAt(
+      await AsyncStorage.getItem(GUARDIAN_AUTOFILL_LAST_SYNCED_AT_KEY)
+    );
 
-    if (GuardianAutofill) {
-      try {
-        const count = await GuardianAutofill.getCredentialCount();
-        setSyncedCount(Number(count || 0));
-      } catch {
-        setSyncedCount(0);
-      }
+    if (!nativeAutofillAvailable) {
+      setCounts(EMPTY_COUNTS);
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-    loadState();
-  }, [loadState]);
+    try {
+      if (storedEnabled) {
+        await syncPendingGuardianAutofillSaves();
+      }
+      setCounts(await getGuardianAutofillCounts());
+    } catch (error) {
+      if (isScreenRequestCancelled(error)) return;
+      setCounts(EMPTY_COUNTS);
+    }
+  }, [nativeAutofillAvailable]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadState();
+    }, [loadState])
+  );
 
   const openDeviceSettings = useCallback(async () => {
     if (Platform.OS !== 'android') {
@@ -107,28 +108,20 @@ export default function AutofillScreen() {
 
     try {
       const applicationId = Application.applicationId;
-
       if (!applicationId) {
         throw new Error('The Android application ID is unavailable in this build.');
       }
 
       await IntentLauncher.startActivityAsync(
         'android.settings.REQUEST_SET_AUTOFILL_SERVICE',
-        {
-          data: `package:${applicationId}`,
-        }
+        { data: `package:${applicationId}` }
       );
     } catch (error: any) {
+      if (isScreenRequestCancelled(error)) return;
       try {
-        /*
-         * Some Android manufacturers do not implement the direct autofill
-         * selection intent correctly. This fallback opens the system's
-         * password/autofill settings instead of The Guardian's app-info page.
-         */
-        await IntentLauncher.startActivityAsync(
-          'android.settings.AUTOFILL_SETTINGS'
-        );
-      } catch {
+        await IntentLauncher.startActivityAsync('android.settings.AUTOFILL_SETTINGS');
+      } catch (settingsError) {
+        if (isScreenRequestCancelled(settingsError)) return;
         Alert.alert(
           'Open Autofill settings manually',
           'Open Settings and search for “Autofill”, “Passwords”, “Password manager”, or “Preferred service”, then choose The Guardian.'
@@ -137,16 +130,16 @@ export default function AutofillScreen() {
     }
   }, []);
 
-  const syncAutofillCredentials = useCallback(async () => {
+  const syncAutofillVault = useCallback(async () => {
     if (Platform.OS !== 'android') {
-      Alert.alert('Android only for now', 'System-wide autofill is currently being added for Android first.');
+      Alert.alert('Android only for now', 'System-wide autofill is currently available on Android only.');
       return;
     }
 
-    if (!GuardianAutofill) {
+    if (!nativeAutofillAvailable) {
       Alert.alert(
         'Rebuild required',
-        'The native Autofill module is not available in this build. Replace the Android files from the zip and rebuild the development APK.'
+        'The native Autofill module is not available in this build. Add the updated Android files and rebuild the APK.'
       );
       return;
     }
@@ -154,41 +147,43 @@ export default function AutofillScreen() {
     try {
       setSyncing(true);
 
-      api.clearCache?.();
-      const items = await api.getVaultItems();
-      const credentials = (items || [])
-        .filter((item) => (item.itemType || 'PASSWORD') === 'PASSWORD')
-        .map(buildCredential)
-        .filter(Boolean) as CachedCredential[];
-
-      const count = await GuardianAutofill.syncCredentials(JSON.stringify(credentials));
+      // Enable and seed the native cache first. Pending credentials captured by
+      // Android before this screen was opened can then be committed to the
+      // signed-in online vault during the same setup action.
+      await syncGuardianAutofillCache({
+        force: true,
+        enable: true,
+      });
+      await syncPendingGuardianAutofillSaves();
+      const nextCounts = await getGuardianAutofillCounts();
       const now = new Date().toISOString();
 
-      await AsyncStorage.setItem(AUTOFILL_KEY, 'true');
-      await AsyncStorage.setItem('autofillLastSyncedAt', now);
-
       setEnabled(true);
-      setSyncedCount(Number(count || credentials.length));
+      setCounts(nextCounts);
       setLastSyncedAt(now);
 
       Alert.alert(
         'Autofill synced',
-        `${Number(count || credentials.length)} saved login${Number(count || credentials.length) === 1 ? '' : 's'} are ready for Android Autofill.`
+        `${nextCounts.credentials} login${nextCounts.credentials === 1 ? '' : 's'} and ${nextCounts.cards} card${nextCounts.cards === 1 ? '' : 's'} are ready for Android Autofill.`
       );
     } catch (error: any) {
-      Alert.alert('Sync failed', error.message || 'Could not sync passwords for autofill.');
+      if (isScreenRequestCancelled(error)) return;
+      Alert.alert(
+        'Sync failed',
+        error?.message || 'Could not sync passwords and cards for autofill.'
+      );
     } finally {
       setSyncing(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [nativeAutofillAvailable]);
 
-  const clearAutofillCredentials = useCallback(async () => {
-    if (!GuardianAutofill) return;
+  const clearAutofill = useCallback(async () => {
+    if (!nativeAutofillAvailable) return;
 
     Alert.alert(
       'Clear autofill cache?',
-      'This removes the encrypted autofill cache from this device. Your vault items stay saved in your account.',
+      'This removes the encrypted password and card autofill cache from this device, including any newly saved logins still waiting to sync. Your online vault is not deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -197,15 +192,14 @@ export default function AutofillScreen() {
           onPress: async () => {
             try {
               setSyncing(true);
-              await GuardianAutofill.clearCredentials();
-              await AsyncStorage.setItem(AUTOFILL_KEY, 'false');
-              await AsyncStorage.removeItem('autofillLastSyncedAt');
+              await clearGuardianAutofillCache();
               setEnabled(false);
-              setSyncedCount(0);
+              setCounts(EMPTY_COUNTS);
               setLastSyncedAt(null);
-              Alert.alert('Cleared', 'Autofill cache was removed from this device.');
+              Alert.alert('Cleared', 'The encrypted autofill cache was removed from this device.');
             } catch (error: any) {
-              Alert.alert('Could not clear cache', error.message || 'Please try again.');
+              if (isScreenRequestCancelled(error)) return;
+              Alert.alert('Could not clear cache', error?.message || 'Please try again.');
             } finally {
               setSyncing(false);
             }
@@ -213,20 +207,19 @@ export default function AutofillScreen() {
         },
       ]
     );
-  }, []);
+  }, [nativeAutofillAvailable]);
 
   const toggleAutofill = async (value: boolean) => {
     if (value) {
-      await syncAutofillCredentials();
+      await syncAutofillVault();
       return;
     }
-
-    await clearAutofillCredentials();
+    await clearAutofill();
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await syncAutofillCredentials();
+    await syncAutofillVault();
   };
 
   const lastSyncedLabel = lastSyncedAt
@@ -238,18 +231,17 @@ export default function AutofillScreen() {
       })
     : 'Not synced yet';
 
-  const platformSteps =
-    Platform.OS === 'android'
-      ? [
-          ['Sync your vault', 'Tap Sync passwords for autofill so Android can show your saved logins.'],
-          ['Choose The Guardian', 'Open Android Autofill settings and select The Guardian as the autofill service.'],
-          ['Fill in other apps', 'Tap a username or password field, unlock, choose a login, and Android fills it.'],
-        ]
-      : [
-          ['iOS coming later', 'iPhone needs a separate Credential Provider extension.'],
-          ['Keep vault ready', 'Your saved logins will be useful when the iOS extension is added.'],
-          ['Use copy for now', 'Open a password item and copy the username/password manually on iOS.'],
-        ];
+  const platformSteps = Platform.OS === 'android'
+    ? [
+        ['Sync your vault', 'Sync saved passwords and cards into Android’s encrypted Guardian cache.'],
+        ['Choose The Guardian', 'Select The Guardian as your preferred Autofill service in Android Settings.'],
+        ['Fill passwords and cards', 'Tap a supported login or payment field, unlock, then choose an item.'],
+        ['Save new logins', 'After signing in or creating a password, Android can offer to save it to The Guardian.'],
+      ]
+    : [
+        ['Android implementation', 'Password and card provider support is currently implemented for Android.'],
+        ['Use the vault on iPhone', 'Open a vault item and securely copy the required value.'],
+      ];
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -274,27 +266,29 @@ export default function AutofillScreen() {
 
         <View style={styles.heroCard}>
           <View style={styles.iconCircle}>
-            <Ionicons name="key-outline" size={28} color={C.primary} />
+            <Ionicons name="shield-checkmark-outline" size={28} color={C.primary} />
           </View>
 
-          <Text style={styles.heroTitle}>Fill passwords faster</Text>
+          <Text style={styles.heroTitle}>Autofill status</Text>
           <Text style={styles.heroText}>{statusText}</Text>
 
           <View style={styles.statusPill}>
             <Ionicons
-              name={enabled && syncedCount > 0 ? 'checkmark-circle' : 'alert-circle-outline'}
+              name={enabled && totalReady > 0 ? 'checkmark-circle' : 'alert-circle-outline'}
               size={16}
-              color={enabled && syncedCount > 0 ? C.success : C.warning}
+              color={enabled && totalReady > 0 ? C.success : C.warning}
             />
-            <Text style={styles.statusPillText}>{enabled && syncedCount > 0 ? 'Ready' : 'Setup needed'}</Text>
+            <Text style={styles.statusPillText}>
+              {enabled && totalReady > 0 ? 'Ready' : 'Setup needed'}
+            </Text>
           </View>
         </View>
 
         <View style={styles.card}>
           <View style={styles.row}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rowTitle}>Android Autofill cache</Text>
-              <Text style={styles.rowSub}>Encrypted on this device · Last sync: {lastSyncedLabel}</Text>
+              <Text style={styles.rowTitle}>Autofill cache</Text>
+              <Text style={styles.rowSub}>Last sync: {lastSyncedLabel}</Text>
             </View>
 
             <Switch
@@ -306,12 +300,53 @@ export default function AutofillScreen() {
               disabled={syncing || Platform.OS !== 'android'}
             />
           </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.infoRow}>
+            <View style={styles.numberCircle}>
+              <Ionicons name="key-outline" size={16} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoTitle}>Passwords</Text>
+              <Text style={styles.infoSub}>{counts.credentials} ready for autofill</Text>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.infoRow}>
+            <View style={styles.numberCircle}>
+              <Ionicons name="card-outline" size={16} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.infoTitle}>Cards</Text>
+              <Text style={styles.infoSub}>{counts.cards} ready for payment forms</Text>
+            </View>
+          </View>
+
+          {counts.pending > 0 && (
+            <>
+              <View style={styles.divider} />
+              <View style={styles.infoRow}>
+                <View style={styles.numberCircle}>
+                  <Ionicons name="cloud-upload-outline" size={16} color={C.warning} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.infoTitle}>Awaiting online sync</Text>
+                  <Text style={styles.infoSub}>
+                    {counts.pending} login{counts.pending === 1 ? '' : 's'} saved securely on this device
+                  </Text>
+                </View>
+              </View>
+            </>
+          )}
         </View>
 
         <TouchableOpacity
           style={[styles.primaryButton, syncing && styles.disabledButton]}
           activeOpacity={0.85}
-          onPress={syncAutofillCredentials}
+          onPress={syncAutofillVault}
           disabled={syncing || Platform.OS !== 'android'}
         >
           {syncing ? (
@@ -319,7 +354,9 @@ export default function AutofillScreen() {
           ) : (
             <Ionicons name="sync-outline" size={20} color="#FFFFFF" />
           )}
-          <Text style={styles.primaryButtonText}>{syncing ? 'Syncing...' : 'Sync passwords for autofill'}</Text>
+          <Text style={styles.primaryButtonText}>
+            {syncing ? 'Syncing...' : 'Sync passwords and cards'}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -329,7 +366,9 @@ export default function AutofillScreen() {
         >
           <Ionicons name="settings-outline" size={20} color={C.primary} />
           <Text style={styles.secondaryButtonText}>
-            {Platform.OS === 'android' ? 'Choose The Guardian as autofill service' : 'Open device settings'}
+            {Platform.OS === 'android'
+              ? 'Choose The Guardian as autofill service'
+              : 'Open device settings'}
           </Text>
         </TouchableOpacity>
 
@@ -353,21 +392,21 @@ export default function AutofillScreen() {
           ))}
         </View>
 
-        <View style={styles.warningCard}>
-          <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} />
+        <View>
+          {/* <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} /> */}
           <View style={{ flex: 1 }}>
-            <Text style={styles.warningTitle}>Security note</Text>
+            {/* <Text style={styles.warningTitle}>Security note</Text>
             <Text style={styles.warningText}>
-              The native autofill cache is encrypted and stored only on this device. Sync again whenever you add, edit, or delete a password.
-            </Text>
+              Autofill data is encrypted with Android Keystore and released only after device authentication. Newly saved logins sync to your online vault the next time The Guardian is opened while signed in.
+            </Text> */}
           </View>
         </View>
 
-        {nativeAutofillAvailable && syncedCount > 0 && (
+        {nativeAutofillAvailable && totalReady > 0 && (
           <TouchableOpacity
             style={styles.clearButton}
             activeOpacity={0.8}
-            onPress={clearAutofillCredentials}
+            onPress={clearAutofill}
             disabled={syncing}
           >
             <Ionicons name="trash-outline" size={18} color={C.danger} />
@@ -412,12 +451,12 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     iconCircle: {
       width: 58,
@@ -452,12 +491,12 @@ const makeStyles = (C: any) =>
       borderRadius: 999,
       paddingHorizontal: 12,
       paddingVertical: 8,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     statusPillText: {
       color: C.text,
@@ -472,12 +511,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       marginBottom: 16,
       overflow: 'hidden',
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     row: {
       flexDirection: 'row',
@@ -508,12 +547,12 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 9,
       marginBottom: 12,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     primaryButtonText: {
       color: '#FFFFFF',
@@ -532,12 +571,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 22,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -606,12 +645,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 16,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     warningTitle: {
       fontSize: 14,
@@ -636,12 +675,12 @@ const makeStyles = (C: any) =>
       borderColor: C.danger,
       borderRadius: 999,
       paddingVertical: 14,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     clearButtonText: {
       color: C.danger,

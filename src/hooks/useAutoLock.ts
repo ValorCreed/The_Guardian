@@ -223,27 +223,22 @@ export const useAutoLock = () => {
     if (!mountedRef.current) return;
 
     const lastBackgroundAt = await getStoredBackgroundTime();
-
     if (!lastBackgroundAt) return;
 
     const timeout = await getAutoLockTimeout();
+    const timeAway = Math.max(0, Date.now() - lastBackgroundAt);
+    const shouldLock =
+      timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
 
     /*
-     * A timestamp can remain when Android kills the process or the user swipes
-     * the app away from Recent Apps. A normal timeout must not be treated as if
-     * JavaScript had continued running while the process was gone.
-     *
-     * Therefore:
-     * - Numeric timeout modes only apply during a real background -> active
-     *   transition while the app process is still alive.
-     * - The explicit "When app closes" option still locks on a cold launch.
-     *
-     * Clearing the stale marker also prevents a launch-time race where the auth
-     * route guard briefly opens Home and this hook then logs the user out.
+     * Android may kill the JavaScript process while the app is in the
+     * background. The persisted timestamp is therefore the only reliable way
+     * to honour the user's numeric timeout after a cold resume. Clear it only
+     * after the elapsed time has been evaluated.
      */
     await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
 
-    if (timeout === AUTO_LOCK_ON_APP_CLOSE) {
+    if (shouldLock) {
       await lockVault({ force: true });
     }
   }, [lockVault]);
@@ -252,9 +247,8 @@ export const useAutoLock = () => {
     mountedRef.current = true;
 
     /*
-     * Resolve a marker left behind by a killed/swiped-away process. Normal
-     * timeout modes keep the existing authenticated session on a cold launch;
-     * only the explicit "When app closes" mode locks in that situation.
+     * Resolve a marker left behind by a killed/swiped-away process. Both the
+     * explicit app-close option and elapsed numeric timeouts are enforced.
      */
     checkColdStartShouldLock();
 

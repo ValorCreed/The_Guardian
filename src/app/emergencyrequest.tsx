@@ -17,8 +17,10 @@ import { router } from 'expo-router';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 
 export default function EmergencyRequestScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -36,13 +38,14 @@ export default function EmergencyRequestScreen() {
 
     try {
       setSending(true);
-      await api.requestEmergencyAccess({ ownerEmail, message });
+      await requestApi.requestEmergencyAccess({ ownerEmail, message });
       Alert.alert(
         'Request sent',
         'The vault owner has been notified. Access will only be released if they approve or if the waiting period expires.',
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Request failed', error.message || 'Could not send emergency request.');
     } finally {
       setSending(false);
@@ -51,14 +54,24 @@ export default function EmergencyRequestScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.iconCircle}>
             <Ionicons name="hand-left-outline" size={34} color={C.primary} />
           </View>
 
-          <Text style={styles.eyebrow}>Trusted contact</Text>
-          <Text style={styles.title}>Request Emergency Access</Text>
+          <Text style={styles.eyebrow}></Text>
+          <Text style={styles.title}>Request emergency access</Text>
           <Text style={styles.subtitle}>
             Use this only when the vault owner is unavailable and has added you as a trusted emergency contact.
           </Text>
@@ -118,10 +131,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.045,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
+    elevation: 2,
   },
   eyebrow: { color: C.textSecondary, fontSize: 13, fontWeight: '800' },
   title: { color: C.text, fontSize: 29, fontWeight: '900', marginTop: 2 },
@@ -134,10 +147,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     padding: 16,
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.045,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    elevation: 2,
   },
   label: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 8 },
   input: { backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 },
@@ -155,7 +168,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 2,
   },
   noticeText: { color: C.primary, flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '700' },
   sendButton: {
@@ -167,10 +180,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     shadowColor: C.primary,
-    shadowOpacity: 0.20,
+    shadowOpacity: 0.11,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    elevation: 3,
   },
   disabledButton: { opacity: 0.65 },
   sendButtonText: { color: '#fff', fontSize: 15, fontWeight: '900' },

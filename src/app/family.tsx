@@ -20,6 +20,7 @@ import {
   FileText,
   KeyRound,
   NotebookText,
+  Pencil,
   Plus,
   Trash2,
   Users,
@@ -34,6 +35,7 @@ import {
   SharedNoteItem,
   SharedPasswordItem,
 } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { hapticDelete, hapticLight, hapticSuccess, hapticWarning } from '../utils/haptics';
@@ -78,7 +80,37 @@ const EMPTY_FAMILY_OVERVIEW: FamilyOverview = {
   sharedVaultOwners: [],
 };
 
+const FAMILY_FAST_REACHABILITY_TIMEOUT_MS = 1800;
+
+const getFriendlyFamilyError = (
+  error: any,
+  fallback: string
+) => {
+  const message = String(
+    error?.message ||
+      error?.rawMessage ||
+      error ||
+      ''
+  ).toLowerCase();
+
+  if (
+    message.includes('connection refused') ||
+    message.includes('getsockopt') ||
+    message.includes('i/o error') ||
+    message.includes('service unavailable') ||
+    message.includes('bad gateway') ||
+    message.includes('connect timed out') ||
+    message.includes('connection timed out') ||
+    message.includes('localhost:8085')
+  ) {
+    return 'Family sharing is temporarily unavailable. Please try again shortly.';
+  }
+
+  return fallback;
+};
+
 export default function FamilyScreen() {
+  const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -95,28 +127,54 @@ export default function FamilyScreen() {
   const [sharedItemsNotice, setSharedItemsNotice] = useState('');
   const [deletingMemberId, setDeletingMemberId] = useState<number | null>(null);
 
-  const loadFamily = useCallback(async (options?: { manual?: boolean }) => {
-    const manual = Boolean(options?.manual);
+  const loadFamily = useCallback(async (_options?: { manual?: boolean }) => {
+    const serverReachable = await api
+      .checkServerReachability(FAMILY_FAST_REACHABILITY_TIMEOUT_MS)
+      .catch(() => false);
+
+    if (!serverReachable) {
+      setFamilyNotice(
+        'The Guardian could not reach the server. Family sharing will be available again when you reconnect.'
+      );
+      setSharedItemsNotice('');
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
 
     const [familyResult, sharedItemsResult] = await Promise.allSettled([
-      api.getFamilyOverview(),
-      api.getSharedFamilyItems(),
+      requestApi.getFamilyOverview(),
+      requestApi.getSharedFamilyItems(),
     ]);
+
+    if (
+      (familyResult.status === 'rejected' && isScreenRequestCancelled(familyResult.reason)) ||
+      (sharedItemsResult.status === 'rejected' && isScreenRequestCancelled(sharedItemsResult.reason))
+    ) {
+      return;
+    }
 
     if (familyResult.status === 'fulfilled') {
       setOverview(familyResult.value || EMPTY_FAMILY_OVERVIEW);
       setFamilyNotice('');
     } else {
       console.log('Family overview load failed', familyResult.reason);
-      setOverview((current) => current || EMPTY_FAMILY_OVERVIEW);
       setFamilyNotice(
-        familyResult.reason?.message ||
-          'We could not refresh your family plan details right now.'
+        getFriendlyFamilyError(
+          familyResult.reason,
+          'We could not refresh your family details right now. Please try again shortly.'
+        )
       );
     }
 
     if (sharedItemsResult.status === 'fulfilled') {
-      const items = sharedItemsResult.value || { passwords: [], cards: [], documents: [], notes: [] };
+      const items = sharedItemsResult.value || {
+        passwords: [],
+        cards: [],
+        documents: [],
+        notes: [],
+      };
+
       setSharedItems({
         passwords: items.passwords || [],
         cards: items.cards || [],
@@ -127,25 +185,16 @@ export default function FamilyScreen() {
     } else {
       console.log('Shared family items load failed', sharedItemsResult.reason);
       setSharedItemsNotice(
-        sharedItemsResult.reason?.message ||
-          'We could not refresh shared vault items right now.'
-      );
-    }
-
-    if (
-      manual &&
-      familyResult.status === 'rejected' &&
-      sharedItemsResult.status === 'rejected'
-    ) {
-      Alert.alert(
-        'Could not refresh family',
-        'Your family screen is still available, but the latest family data could not be refreshed right now.'
+        getFriendlyFamilyError(
+          sharedItemsResult.reason,
+          'We could not refresh the items shared with you right now.'
+        )
       );
     }
 
     setLoading(false);
     setRefreshing(false);
-  }, []);
+  }, [requestApi]);
 
   useFocusEffect(
     useCallback(() => {
@@ -156,7 +205,7 @@ export default function FamilyScreen() {
   const handleRefresh = () => {
     hapticLight();
     setRefreshing(true);
-    api.clearCache();
+    requestApi.clearCache();
     loadFamily({ manual: true });
   };
 
@@ -174,11 +223,12 @@ export default function FamilyScreen() {
 
           try {
             setDeletingMemberId(membershipId);
-            await api.removeFamilyMember(membershipId);
-            api.clearCache();
+            await requestApi.removeFamilyMember(membershipId);
+            requestApi.clearCache();
             hapticSuccess();
             await loadFamily({ manual: true });
           } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
             hapticWarning();
             Alert.alert('Could not remove member', error.message || 'Please try again.');
           } finally {
@@ -204,26 +254,76 @@ export default function FamilyScreen() {
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
-      <View style={styles.listCard}>
-        {[1, 2, 3, 4, 5].map((item, index) => (
-          <View
-            key={`family-skeleton-${item}`}
-            style={[
-              styles.notificationRow,
-              index !== 4 && styles.rowDivider,
-            ]}
-          >
-            <PulsingSkeleton styles={styles} style={styles.iconCircle} />
+      <PulsingSkeleton styles={styles} style={styles.skeletonPageTitle} />
 
-            <View style={{ flex: 1 }}>
-              <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
-              <PulsingSkeleton styles={styles} style={styles.skeletonText} />
-              <PulsingSkeleton styles={styles} style={styles.skeletonDate} />
-              <PulsingSkeleton styles={styles} style={styles.skeletonDate} />
-              <PulsingSkeleton styles={styles} style={styles.skeletonDate} />
+      <View style={styles.skeletonHeroCard}>
+        <PulsingSkeleton styles={styles} style={styles.skeletonHeroIcon} />
+        <View style={styles.skeletonHeroCopy}>
+          <PulsingSkeleton styles={styles} style={styles.skeletonHeroTitle} />
+          <PulsingSkeleton styles={styles} style={styles.skeletonHeroText} />
+        </View>
+      </View>
+
+      <PulsingSkeleton styles={styles} style={styles.skeletonPrimaryAction} />
+
+      <PulsingSkeleton styles={styles} style={styles.skeletonSectionLabel} />
+      <View style={styles.skeletonCardShell}>
+        <View style={styles.skeletonCardSurface}>
+          <View style={styles.skeletonMemberRow}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonMemberAvatar} />
+
+            <View style={styles.skeletonMemberDetails}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonMemberName} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonMemberEmail} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonPermission} />
+
+              <View style={styles.skeletonMemberActions}>
+                <PulsingSkeleton styles={styles} style={styles.skeletonMemberAction} />
+                <PulsingSkeleton styles={styles} style={styles.skeletonMemberAction} />
+              </View>
             </View>
           </View>
-        ))}
+        </View>
+      </View>
+
+      <PulsingSkeleton styles={styles} style={styles.skeletonSectionLabelShort} />
+      <View style={styles.skeletonCardShell}>
+        <View style={styles.skeletonCardSurface}>
+          <View style={styles.skeletonOwnerRow}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonOwnerIcon} />
+            <View style={styles.skeletonOwnerCopy}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonOwnerName} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonOwnerEmail} />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <PulsingSkeleton styles={styles} style={styles.skeletonSectionLabelCompact} />
+      <View style={styles.skeletonCardShell}>
+        <View style={styles.skeletonCardSurface}>
+          <View style={styles.skeletonInnerHeader}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonInnerTitle} />
+          </View>
+
+          {[1, 2].map((item, index) => (
+            <View
+              key={`shared-item-skeleton-${item}`}
+              style={[
+                styles.skeletonSharedRow,
+                index === 0 && styles.rowDivider,
+              ]}
+            >
+              <PulsingSkeleton styles={styles} style={styles.skeletonSharedIcon} />
+              <View style={styles.skeletonSharedCopy}>
+                <PulsingSkeleton styles={styles} style={styles.skeletonSharedTitle} />
+                <PulsingSkeleton styles={styles} style={styles.skeletonSharedSubtitle} />
+                <PulsingSkeleton styles={styles} style={styles.skeletonSharedMeta} />
+              </View>
+              <PulsingSkeleton styles={styles} style={styles.skeletonChevron} />
+            </View>
+          ))}
+        </View>
       </View>
     </ScrollView>
   );
@@ -233,6 +333,56 @@ export default function FamilyScreen() {
       <SafeAreaView style={styles.safeArea}>
         <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
         {renderFamilySkeleton()}
+      </SafeAreaView>
+    );
+  }
+
+  if (!overview && familyNotice) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={C.primary}
+              colors={[C.primary]}
+            />
+          }
+        >
+          <Text style={styles.title}>Family</Text>
+
+          <View style={styles.serviceUnavailableCard}>
+            <View style={styles.serviceUnavailableIcon}>
+              <Users size={28} color={C.primary} />
+            </View>
+
+            <Text style={styles.serviceUnavailableTitle}>
+              Family sharing is unavailable
+            </Text>
+            <Text style={styles.serviceUnavailableText}>
+              We could not reach the Family service. Your plan, members, and
+              shared items have not been changed.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.serviceRetryButton}
+              activeOpacity={0.78}
+              onPress={() => {
+                hapticLight();
+                setRefreshing(true);
+                requestApi.clearCache();
+                loadFamily({ manual: true });
+              }}
+            >
+              <Text style={styles.serviceRetryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -247,7 +397,6 @@ export default function FamilyScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
       >
         <Text style={styles.title}>Family</Text>
-        <Text style={styles.subtitle}>Share selected vault types with people you trust.</Text>
 
         {!!familyNotice && (
           <View style={styles.noticeBox}>
@@ -258,7 +407,7 @@ export default function FamilyScreen() {
               activeOpacity={0.75}
               onPress={() => {
                 setRefreshing(true);
-                api.clearCache();
+                requestApi.clearCache();
                 loadFamily({ manual: true });
               }}
             >
@@ -274,12 +423,12 @@ export default function FamilyScreen() {
 
           <View style={{ flex: 1 }}>
             <Text style={styles.heroTitle}>
-              {canAddMembers ? 'Family sharing is active' : 'Family plan required'}
+              {canAddMembers ? 'Family sharing' : 'Family plan needed'}
             </Text>
             <Text style={styles.heroText}>
               {canAddMembers
-                ? `${memberCount}/${memberLimit} family members added`
-                : 'Upgrade to the Family plan before adding family members.'}
+                ? `${memberCount} of ${memberLimit} members`
+                : 'Upgrade to add and share with family members.'}
             </Text>
           </View>
         </View>
@@ -307,7 +456,7 @@ export default function FamilyScreen() {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.sectionLabel}>YOUR FAMILY MEMBERS</Text>
+        <Text style={styles.sectionLabel}>Family members</Text>
 
         <View style={styles.card}>
           {overview?.members?.length ? (
@@ -320,24 +469,54 @@ export default function FamilyScreen() {
                   <Text style={styles.avatarText}>{getInitials(member.fullName, member.email)}</Text>
                 </View>
 
-                <View style={{ flex: 1 }}>
+                <View style={styles.memberDetails}>
                   <Text style={styles.memberName}>{member.fullName || 'Family member'}</Text>
                   <Text style={styles.memberEmail}>{member.email}</Text>
                   <Text style={styles.permissionText}>{permissionLabel(member)}</Text>
-                </View>
 
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  activeOpacity={0.7}
-                  disabled={deletingMemberId !== null}
-                  onPress={() => handleRemoveMember(member.membershipId, member.fullName || member.email)}
-                >
-                  {deletingMemberId === member.membershipId ? (
-                    <ActivityIndicator size="small" color={C.danger} />
-                  ) : (
-                    <Trash2 size={18} color={C.danger} />
-                  )}
-                </TouchableOpacity>
+                  <View style={styles.memberActions}>
+                    {canAddMembers && (
+                      <TouchableOpacity
+                        style={styles.editButton}
+                        activeOpacity={0.72}
+                        disabled={deletingMemberId !== null}
+                        onPress={() => {
+                          hapticLight();
+                          router.push({
+                            pathname: '/editfamilyaccess',
+                            params: {
+                              membershipId: String(member.membershipId),
+                              memberName: member.fullName || 'Family member',
+                              memberEmail: member.email,
+                            },
+                          });
+                        }}
+                      >
+                        <Pencil size={17} color={C.primary} />
+                        <Text style={styles.editButtonText}>Edit access</Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <TouchableOpacity
+                      style={styles.deleteButton}
+                      activeOpacity={0.7}
+                      disabled={deletingMemberId !== null}
+                      onPress={() => handleRemoveMember(member.membershipId, member.fullName || member.email)}
+                    >
+                      {deletingMemberId === member.membershipId ? (
+                        <>
+                          <ActivityIndicator size="small" color={C.danger} />
+                          <Text style={styles.deleteButtonText}>Removing</Text>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 size={17} color={C.danger} />
+                          <Text style={styles.deleteButtonText}>Remove</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             ))
           ) : (
@@ -352,7 +531,7 @@ export default function FamilyScreen() {
           )}
         </View>
 
-        <Text style={styles.sectionLabel}>VAULTS SHARED WITH YOU</Text>
+        <Text style={styles.sectionLabel}>Shared with you</Text>
 
         <View style={styles.card}>
           {overview?.sharedVaultOwners?.length ? (
@@ -374,12 +553,12 @@ export default function FamilyScreen() {
           ) : (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>No shared vaults</Text>
-              <Text style={styles.emptyText}>When another Family admin adds you, their shared items appear below.</Text>
+              <Text style={styles.emptyText}>Shared vaults will appear here.</Text>
             </View>
           )}
         </View>
 
-        <Text style={styles.sectionLabel}>SHARED ITEMS WITH YOU</Text>
+        <Text style={styles.sectionLabel}>Shared items</Text>
 
         {!!sharedItemsNotice && (
           <View style={styles.noticeBox}>
@@ -390,7 +569,7 @@ export default function FamilyScreen() {
               activeOpacity={0.75}
               onPress={() => {
                 setRefreshing(true);
-                api.clearCache();
+                requestApi.clearCache();
                 loadFamily({ manual: true });
               }}
             >
@@ -403,7 +582,7 @@ export default function FamilyScreen() {
           <View style={styles.card}>
             <View style={styles.emptyBox}>
               <Text style={styles.emptyTitle}>No shared items yet</Text>
-              <Text style={styles.emptyText}>Shared passwords, cards, documents, and secure notes will appear here.</Text>
+              <Text style={styles.emptyText}>Items shared with you will appear here.</Text>
             </View>
           </View>
         ) : (
@@ -502,7 +681,7 @@ function SharedNoteSection({ items, styles, C }: { items: SharedNoteItem[]; styl
 
   return (
     <View style={styles.card}>
-      <Text style={styles.innerSectionTitle}>Secure Notes</Text>
+      <Text style={styles.innerSectionTitle}>SecureNotes</Text>
       <FlatList
         data={items}
         keyExtractor={(item) => `note-${item.ownerId}-${item.id}`}
@@ -510,9 +689,9 @@ function SharedNoteSection({ items, styles, C }: { items: SharedNoteItem[]; styl
         renderItem={({ item, index }) => (
           <SharedRow
             icon={<NotebookText size={18} color={C.primary} />}
-            title={item.title || 'Shared secure note'}
+            title={item.title || 'Shared SecureNote'}
             subtitle={`Shared by ${item.ownerName || item.ownerEmail}`}
-            extra={item.category || 'Secure note'}
+            extra={item.category || 'SecureNote'}
             isLast={index === items.length - 1}
             styles={styles}
             onPress={() => router.push({ pathname: '/sharedvaultdetails', params: { id: String(item.id), type: 'NOTE' } })}
@@ -572,14 +751,14 @@ function permissionLabel(member: any) {
   if (member.sharePasswords) permissions.push('Passwords');
   if (member.shareCards) permissions.push('Cards');
   if (member.shareDocuments) permissions.push('Documents');
-  if (member.shareNotes) permissions.push('Secure notes');
+  if (member.shareNotes) permissions.push('SecureNotes');
   return permissions.length ? `Can view: ${permissions.join(', ')}` : 'No vault access selected';
 }
 
 const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
-    scrollContent: { paddingHorizontal: 18, paddingTop: 48, paddingBottom: 170 },
+    scrollContent: { paddingHorizontal: 18, paddingTop: 25, paddingBottom: 170 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     loadingText: { marginTop: 10, color: C.textSecondary },
 
@@ -587,43 +766,222 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
       shadowColor: '#000',
-      shadowOpacity: 0.05,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 2,
-
+      shadowOpacity: 0.07,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3,
     },
-    listCard: {
+    skeletonPageTitle: {
+      width: 118,
+      height: 36,
+      borderRadius: 14,
+      marginBottom: 12,
+      alignSelf: 'flex-start',
+    },
+    skeletonHeroCard: {
+      minHeight: 98,
+      flexDirection: 'row',
+      alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 30,
+      padding: 18,
+      marginBottom: 14,
       borderWidth: 1,
       borderColor: C.border,
-      overflow: 'hidden',
-      marginBottom: 22,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 9 },
-      elevation: 4,
+      shadowOpacity: 0.10,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 6,
     },
-    notificationRow: {
+    skeletonHeroIcon: {
+      width: 62,
+      height: 62,
+      borderRadius: 22,
+      marginRight: 15,
+      shadowColor: C.primary,
+      shadowOpacity: 0.18,
+      shadowRadius: 14,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 5,
+    },
+    skeletonHeroCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    skeletonHeroTitle: {
+      width: '64%',
+      height: 19,
+      marginBottom: 10,
+    },
+    skeletonHeroText: {
+      width: '88%',
+      height: 13,
+    },
+    skeletonPrimaryAction: {
+      width: '100%',
+      height: 54,
+      borderRadius: 22,
+      marginBottom: 24,
+      shadowColor: C.primary,
+      shadowOpacity: 0.18,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 9 },
+      elevation: 5,
+    },
+    skeletonSectionLabel: {
+      width: 112,
+      height: 12,
+      marginLeft: 4,
+      marginBottom: 10,
+      borderRadius: 6,
+    },
+    skeletonSectionLabelShort: {
+      width: 104,
+      height: 12,
+      marginLeft: 4,
+      marginBottom: 10,
+      borderRadius: 6,
+    },
+    skeletonSectionLabelCompact: {
+      width: 88,
+      height: 12,
+      marginLeft: 4,
+      marginBottom: 10,
+      borderRadius: 6,
+    },
+    skeletonCardShell: {
+      width: '100%',
+      borderRadius: 24,
+      marginBottom: 24,
+      shadowColor: '#000',
+      shadowOpacity: 0.10,
+      shadowRadius: 19,
+      shadowOffset: { width: 0, height: 10 },
+      elevation: 6,
+      backgroundColor: C.backgroundElement,
+    },
+    skeletonCardSurface: {
+      width: '100%',
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: C.border,
+    },
+    skeletonMemberRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      padding: 16,
+    },
+    skeletonMemberAvatar: {
+      width: 46,
+      height: 46,
+      borderRadius: 18,
+      marginRight: 13,
+      flexShrink: 0,
+    },
+    skeletonMemberDetails: {
+      flex: 1,
+      minWidth: 0,
+    },
+    skeletonMemberName: {
+      width: '58%',
+      height: 15,
+      marginBottom: 8,
+    },
+    skeletonMemberEmail: {
+      width: '82%',
+      height: 12,
+      marginBottom: 8,
+    },
+    skeletonPermission: {
+      width: '92%',
+      height: 12,
+    },
+    skeletonMemberActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 14,
+    },
+    skeletonMemberAction: {
+      flex: 1,
+      height: 42,
+      borderRadius: 15,
+    },
+    skeletonOwnerRow: {
+      minHeight: 78,
       flexDirection: 'row',
       alignItems: 'center',
       padding: 16,
-      gap: 12,
-      backgroundColor: C.backgroundElement,
     },
-    iconCircle: {
+    skeletonOwnerIcon: {
       width: 44,
       height: 44,
-      borderRadius: 18,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: C.backgroundSelected,
+      borderRadius: 17,
+      marginRight: 13,
+      flexShrink: 0,
     },
-    skeletonTitle: { width: '72%', height: 15, marginBottom: 9 },
-    skeletonText: { width: '94%', height: 12, marginBottom: 9 },
-    skeletonDate: { width: 84, height: 10 },
+    skeletonOwnerCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    skeletonOwnerName: {
+      width: '54%',
+      height: 15,
+      marginBottom: 8,
+    },
+    skeletonOwnerEmail: {
+      width: '78%',
+      height: 12,
+    },
+    skeletonInnerHeader: {
+      paddingHorizontal: 16,
+      paddingTop: 16,
+      paddingBottom: 8,
+    },
+    skeletonInnerTitle: {
+      width: 86,
+      height: 15,
+    },
+    skeletonSharedRow: {
+      minHeight: 84,
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: 16,
+    },
+    skeletonSharedIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 17,
+      marginRight: 13,
+      flexShrink: 0,
+    },
+    skeletonSharedCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    skeletonSharedTitle: {
+      width: '62%',
+      height: 14,
+      marginBottom: 7,
+    },
+    skeletonSharedSubtitle: {
+      width: '88%',
+      height: 11,
+      marginBottom: 7,
+    },
+    skeletonSharedMeta: {
+      width: '42%',
+      height: 10,
+    },
+    skeletonChevron: {
+      width: 12,
+      height: 20,
+      borderRadius: 6,
+      marginLeft: 12,
+    },
 
     title: {
       fontSize: 36,
@@ -634,17 +992,17 @@ const makeStyles = (C: any) =>
     },
     subtitle: { fontSize: 15, color: C.textSecondary, marginBottom: 20, lineHeight: 22, fontWeight: '600' },
     noticeBox: {
-      backgroundColor: C.alertWarningBg || C.backgroundSelected,
+      backgroundColor: C.backgroundElement,
       borderRadius: 22,
       padding: 16,
       marginBottom: 16,
       borderWidth: 1,
-      borderColor: C.warning,
+      borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.07,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,
+      elevation: 2,
     },
     noticeTitle: { color: C.text, fontSize: 14, fontWeight: '900', marginBottom: 5 },
     noticeText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: '600' },
@@ -657,6 +1015,59 @@ const makeStyles = (C: any) =>
       marginTop: 12,
     },
     retrySmallButtonText: { color: '#fff', fontWeight: '900', fontSize: 12 },
+    serviceUnavailableCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 28,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 22,
+      paddingVertical: 28,
+      alignItems: 'center',
+      marginTop: 18,
+      shadowColor: '#000',
+      shadowOpacity: 0.035,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 2,
+    },
+    serviceUnavailableIcon: {
+      width: 68,
+      height: 68,
+      borderRadius: 24,
+      backgroundColor: C.actionCard || C.backgroundSelected,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
+    },
+    serviceUnavailableTitle: {
+      color: C.text,
+      fontSize: 19,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    serviceUnavailableText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 20,
+      fontWeight: '600',
+      textAlign: 'center',
+      marginTop: 8,
+    },
+    serviceRetryButton: {
+      minWidth: 132,
+      minHeight: 44,
+      borderRadius: 999,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 22,
+      marginTop: 20,
+    },
+    serviceRetryButtonText: {
+      color: '#FFFFFF',
+      fontSize: 13,
+      fontWeight: '900',
+    },
     heroCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -667,10 +1078,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.06,
+      shadowOpacity: 0.035,
       shadowRadius: 18,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      elevation: 2,
     },
     heroIcon: {
       width: 62,
@@ -693,10 +1104,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 16,
       marginBottom: 24,
       shadowColor: C.primary,
-      shadowOpacity: 0.18,
+      shadowOpacity: 0.10,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
     upgradeText: { color: '#fff', fontWeight: '900', fontSize: 15 },
     addButton: {
@@ -709,10 +1120,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 16,
       marginBottom: 24,
       shadowColor: C.primary,
-      shadowOpacity: 0.18,
+      shadowOpacity: 0.10,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
     addButtonText: { color: '#fff', fontWeight: '900', fontSize: 15 },
     sectionLabel: {
@@ -740,12 +1151,13 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
-    memberRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
+    memberRow: { flexDirection: 'row', alignItems: 'flex-start', padding: 16 },
+    memberDetails: { flex: 1, minWidth: 0 },
     vaultRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
     rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     avatar: {
@@ -771,14 +1183,48 @@ const makeStyles = (C: any) =>
     memberEmail: { fontSize: 13, color: C.textSecondary, marginTop: 4, fontWeight: '600' },
     permissionText: { fontSize: 12, color: C.primary, marginTop: 5, fontWeight: '800', lineHeight: 17 },
     websiteText: { fontSize: 12, color: C.primary, marginTop: 5, fontWeight: '800' },
-    deleteButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 18,
-      backgroundColor: C.alertDangerBg,
+    memberActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 14,
+      alignSelf: 'stretch',
+    },
+    editButton: {
+      flex: 1,
+      minHeight: 42,
+      borderRadius: 15,
+      backgroundColor: C.actionCard || C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: C.border,
+      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-      marginLeft: 8,
+      gap: 7,
+      paddingHorizontal: 12,
+    },
+    editButtonText: {
+      color: C.primary,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    deleteButton: {
+      flex: 1,
+      minHeight: 42,
+      borderRadius: 15,
+      backgroundColor: C.alertDangerBg,
+      borderWidth: 1,
+      borderColor: C.danger,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+      paddingHorizontal: 12,
+    },
+    deleteButtonText: {
+      color: C.danger,
+      fontSize: 12,
+      fontWeight: '900',
     },
     emptyBox: { padding: 24, alignItems: 'center' },
     emptyTitle: { color: C.text, fontSize: 16, fontWeight: '900' },

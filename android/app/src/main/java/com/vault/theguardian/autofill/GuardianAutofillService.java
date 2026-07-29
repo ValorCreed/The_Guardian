@@ -12,7 +12,9 @@ import android.service.autofill.FillContext;
 import android.service.autofill.FillRequest;
 import android.service.autofill.FillResponse;
 import android.service.autofill.SaveCallback;
+import android.service.autofill.SaveInfo;
 import android.service.autofill.SaveRequest;
+import android.text.InputType;
 import android.view.autofill.AutofillId;
 import android.view.autofill.AutofillValue;
 import android.widget.RemoteViews;
@@ -21,10 +23,21 @@ import com.vault.theguardian.R;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 public class GuardianAutofillService extends AutofillService {
+    public static final String EXTRA_FILL_KIND = "com.vault.theguardian.autofill.FILL_KIND";
+    public static final String FILL_KIND_LOGIN = "LOGIN";
+    public static final String FILL_KIND_CARD = "CARD";
+
     public static final String EXTRA_USERNAME_IDS = "com.vault.theguardian.autofill.USERNAME_IDS";
     public static final String EXTRA_PASSWORD_IDS = "com.vault.theguardian.autofill.PASSWORD_IDS";
+    public static final String EXTRA_CARDHOLDER_IDS = "com.vault.theguardian.autofill.CARDHOLDER_IDS";
+    public static final String EXTRA_CARD_NUMBER_IDS = "com.vault.theguardian.autofill.CARD_NUMBER_IDS";
+    public static final String EXTRA_EXPIRY_DATE_IDS = "com.vault.theguardian.autofill.EXPIRY_DATE_IDS";
+    public static final String EXTRA_EXPIRY_MONTH_IDS = "com.vault.theguardian.autofill.EXPIRY_MONTH_IDS";
+    public static final String EXTRA_EXPIRY_YEAR_IDS = "com.vault.theguardian.autofill.EXPIRY_YEAR_IDS";
+    public static final String EXTRA_SECURITY_CODE_IDS = "com.vault.theguardian.autofill.SECURITY_CODE_IDS";
     public static final String EXTRA_PACKAGE_NAME = "com.vault.theguardian.autofill.PACKAGE_NAME";
     public static final String EXTRA_WEB_DOMAIN = "com.vault.theguardian.autofill.WEB_DOMAIN";
 
@@ -36,70 +49,67 @@ public class GuardianAutofillService extends AutofillService {
     ) {
         try {
             List<FillContext> fillContexts = request.getFillContexts();
-
             if (fillContexts == null || fillContexts.isEmpty()) {
                 callback.onSuccess(null);
                 return;
             }
 
             AssistStructure structure = fillContexts.get(fillContexts.size() - 1).getStructure();
-
-            ArrayList<AutofillId> usernameFields = new ArrayList<>();
-            ArrayList<AutofillId> passwordFields = new ArrayList<>();
+            FieldCollection fields = new FieldCollection();
             PageMetadata metadata = new PageMetadata();
+            findFields(structure, fields, metadata, null);
 
-            findLoginFields(structure, usernameFields, passwordFields, metadata);
-
-            if (usernameFields.isEmpty() && passwordFields.isEmpty()) {
+            if (!fields.hasLoginFields() && !fields.hasCardFields()) {
                 callback.onSuccess(null);
                 return;
             }
 
-            Intent authIntent = new Intent(this, AutofillUnlockActivity.class);
-            authIntent.putParcelableArrayListExtra(EXTRA_USERNAME_IDS, usernameFields);
-            authIntent.putParcelableArrayListExtra(EXTRA_PASSWORD_IDS, passwordFields);
-            authIntent.putExtra(EXTRA_PACKAGE_NAME, metadata.packageName);
-            authIntent.putExtra(EXTRA_WEB_DOMAIN, metadata.webDomain);
+            FillResponse.Builder responseBuilder = new FillResponse.Builder();
+            boolean hasDataset = false;
 
-            int pendingIntentFlags = PendingIntent.FLAG_CANCEL_CURRENT;
+            if (fields.hasLoginFields()) {
+                responseBuilder.addDataset(createLockedDataset(
+                        fields.loginIds(),
+                        createAuthIntent(fields, metadata, FILL_KIND_LOGIN),
+                        "Unlock The Guardian logins"
+                ));
+                hasDataset = true;
 
-            /*
-             * Autofill authentication must be mutable on Android 12+.
-             * The platform needs to hand the authenticated Dataset result back to
-             * the original app that requested autofill. Using an immutable pending
-             * intent can make the picker close without filling the selected login.
-             */
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                pendingIntentFlags |= PendingIntent.FLAG_MUTABLE;
+                if (!metadata.packageName.equals(getPackageName()) && !fields.passwordIds.isEmpty()) {
+                    int saveTypes = SaveInfo.SAVE_DATA_TYPE_PASSWORD;
+                    if (!fields.usernameIds.isEmpty()) {
+                        saveTypes |= SaveInfo.SAVE_DATA_TYPE_USERNAME;
+                    }
+
+                    SaveInfo.Builder saveBuilder = new SaveInfo.Builder(
+                            saveTypes,
+                            fields.passwordIds.toArray(new AutofillId[0])
+                    )
+                            .setDescription("Save this login to The Guardian")
+                            .setFlags(SaveInfo.FLAG_SAVE_ON_ALL_VIEWS_INVISIBLE);
+
+                    // Username fields are optional so password-only forms and
+                    // multi-step sign-in flows can still trigger Android's save UI.
+                    if (!fields.usernameIds.isEmpty()) {
+                        saveBuilder.setOptionalIds(
+                                fields.usernameIds.toArray(new AutofillId[0])
+                        );
+                    }
+
+                    responseBuilder.setSaveInfo(saveBuilder.build());
+                }
             }
 
-            PendingIntent pendingIntent = PendingIntent.getActivity(
-                    this,
-                    (int) System.currentTimeMillis(),
-                    authIntent,
-                    pendingIntentFlags
-            );
-
-            RemoteViews presentation = createPresentation("Unlock The Guardian");
-            Dataset.Builder datasetBuilder = new Dataset.Builder(presentation);
-
-            for (AutofillId id : usernameFields) {
-                datasetBuilder.setValue(id, null, presentation);
+            if (fields.hasCardFields()) {
+                responseBuilder.addDataset(createLockedDataset(
+                        fields.cardIds(),
+                        createAuthIntent(fields, metadata, FILL_KIND_CARD),
+                        "Unlock The Guardian cards"
+                ));
+                hasDataset = true;
             }
 
-            for (AutofillId id : passwordFields) {
-                datasetBuilder.setValue(id, null, presentation);
-            }
-
-            Dataset lockedDataset = datasetBuilder
-                    .setAuthentication(pendingIntent.getIntentSender())
-                    .build();
-
-            FillResponse response = new FillResponse.Builder()
-                    .addDataset(lockedDataset)
-                    .build();
-
-            callback.onSuccess(response);
+            callback.onSuccess(hasDataset ? responseBuilder.build() : null);
         } catch (Exception error) {
             error.printStackTrace();
             callback.onSuccess(null);
@@ -108,7 +118,50 @@ public class GuardianAutofillService extends AutofillService {
 
     @Override
     public void onSaveRequest(SaveRequest request, SaveCallback callback) {
-        callback.onSuccess();
+        try {
+            List<FillContext> contexts = request.getFillContexts();
+            if (contexts == null || contexts.isEmpty()) {
+                callback.onSuccess();
+                return;
+            }
+
+            PageMetadata metadata = new PageMetadata();
+            CapturedLogin captured = new CapturedLogin();
+
+            // SaveRequest can contain multiple FillContext objects when a site
+            // collects the username and password on separate screens. Traverse
+            // every context so the queued Guardian login contains both values.
+            for (FillContext context : contexts) {
+                findFields(context.getStructure(), new FieldCollection(), metadata, captured);
+            }
+
+            if (metadata.packageName.equals(getPackageName()) || captured.password.isEmpty()) {
+                callback.onSuccess();
+                return;
+            }
+
+            String target = !metadata.webDomain.isEmpty()
+                    ? metadata.webDomain
+                    : metadata.packageName;
+            String title = readableTarget(target);
+
+            GuardianAutofillCredential credential = new GuardianAutofillCredential(
+                    "",
+                    title,
+                    captured.username,
+                    captured.password,
+                    target,
+                    metadata.packageName,
+                    metadata.webDomain,
+                    System.currentTimeMillis()
+            );
+
+            GuardianAutofillStore.enqueuePendingCredential(this, credential);
+            callback.onSuccess();
+        } catch (Exception error) {
+            error.printStackTrace();
+            callback.onFailure("The Guardian could not securely save this login.");
+        }
     }
 
     static RemoteViews createPresentation(android.content.Context context, String text) {
@@ -117,103 +170,288 @@ public class GuardianAutofillService extends AutofillService {
         return views;
     }
 
-    private RemoteViews createPresentation(String text) {
-        return createPresentation(this, text);
-    }
-
-    private void findLoginFields(
-            AssistStructure structure,
-            ArrayList<AutofillId> usernameFields,
-            ArrayList<AutofillId> passwordFields,
-            PageMetadata metadata
+    private Dataset createLockedDataset(
+            List<AutofillId> ids,
+            Intent authIntent,
+            String label
     ) {
-        if (structure.getActivityComponent() != null) {
-            metadata.packageName = structure.getActivityComponent().getPackageName();
+        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            flags |= PendingIntent.FLAG_MUTABLE;
         }
 
-        int windowCount = structure.getWindowNodeCount();
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+                this,
+                (int) (System.nanoTime() & 0x7fffffff),
+                authIntent,
+                flags
+        );
 
-        for (int i = 0; i < windowCount; i++) {
-            AssistStructure.WindowNode windowNode = structure.getWindowNodeAt(i);
-            AssistStructure.ViewNode rootNode = windowNode.getRootViewNode();
-            parseNode(rootNode, usernameFields, passwordFields, metadata);
+        RemoteViews presentation = createPresentation(this, label);
+        Dataset.Builder builder = new Dataset.Builder(presentation);
+        for (AutofillId id : ids) {
+            builder.setValue(id, null, presentation);
+        }
+
+        return builder.setAuthentication(pendingIntent.getIntentSender()).build();
+    }
+
+    private Intent createAuthIntent(
+            FieldCollection fields,
+            PageMetadata metadata,
+            String fillKind
+    ) {
+        Intent intent = new Intent(this, AutofillUnlockActivity.class);
+        intent.putExtra(EXTRA_FILL_KIND, fillKind);
+        intent.putParcelableArrayListExtra(EXTRA_USERNAME_IDS, fields.usernameIds);
+        intent.putParcelableArrayListExtra(EXTRA_PASSWORD_IDS, fields.passwordIds);
+        intent.putParcelableArrayListExtra(EXTRA_CARDHOLDER_IDS, fields.cardholderIds);
+        intent.putParcelableArrayListExtra(EXTRA_CARD_NUMBER_IDS, fields.cardNumberIds);
+        intent.putParcelableArrayListExtra(EXTRA_EXPIRY_DATE_IDS, fields.expiryDateIds);
+        intent.putParcelableArrayListExtra(EXTRA_EXPIRY_MONTH_IDS, fields.expiryMonthIds);
+        intent.putParcelableArrayListExtra(EXTRA_EXPIRY_YEAR_IDS, fields.expiryYearIds);
+        intent.putParcelableArrayListExtra(EXTRA_SECURITY_CODE_IDS, fields.securityCodeIds);
+        intent.putExtra(EXTRA_PACKAGE_NAME, metadata.packageName);
+        intent.putExtra(EXTRA_WEB_DOMAIN, metadata.webDomain);
+        return intent;
+    }
+
+    private void findFields(
+            AssistStructure structure,
+            FieldCollection fields,
+            PageMetadata metadata,
+            CapturedLogin captured
+    ) {
+        if (structure.getActivityComponent() != null) {
+            metadata.packageName = safeLower(structure.getActivityComponent().getPackageName());
+        }
+
+        for (int i = 0; i < structure.getWindowNodeCount(); i++) {
+            parseNode(structure.getWindowNodeAt(i).getRootViewNode(), fields, metadata, captured);
         }
     }
 
     private void parseNode(
             AssistStructure.ViewNode node,
-            ArrayList<AutofillId> usernameFields,
-            ArrayList<AutofillId> passwordFields,
-            PageMetadata metadata
+            FieldCollection fields,
+            PageMetadata metadata,
+            CapturedLogin captured
     ) {
         if (node == null) return;
 
-        AutofillId autofillId = node.getAutofillId();
-
-        String hint = joinHints(node.getAutofillHints());
-        String idEntry = safeLower(node.getIdEntry());
-        String hintText = safeLower(String.valueOf(node.getHint()));
-        String text = safeLower(String.valueOf(node.getText()));
-        String className = safeLower(String.valueOf(node.getClassName()));
         String webDomain = safeLower(node.getWebDomain());
-
-        if (!webDomain.trim().isEmpty() && metadata.webDomain.trim().isEmpty()) {
+        if (!webDomain.isEmpty() && metadata.webDomain.isEmpty()) {
             metadata.webDomain = webDomain;
         }
 
-        String combined = hint + " " + idEntry + " " + hintText + " " + text + " " + className;
+        AutofillId id = node.getAutofillId();
+        FieldKind kind = classify(node);
 
-        if (autofillId != null) {
-            if (isPasswordField(combined)) {
-                if (!passwordFields.contains(autofillId)) passwordFields.add(autofillId);
-            } else if (isUsernameField(combined)) {
-                if (!usernameFields.contains(autofillId)) usernameFields.add(autofillId);
+        if (id != null) {
+            fields.add(kind, id);
+        }
+
+        if (captured != null) {
+            String value = nodeValue(node);
+            if (!value.isEmpty()) {
+                if (kind == FieldKind.USERNAME && captured.username.isEmpty()) {
+                    captured.username = value;
+                } else if (kind == FieldKind.PASSWORD) {
+                    // The final non-empty password is normally the new/confirmed password.
+                    captured.password = value;
+                }
             }
         }
 
-        int childCount = node.getChildCount();
-
-        for (int i = 0; i < childCount; i++) {
-            parseNode(node.getChildAt(i), usernameFields, passwordFields, metadata);
+        for (int i = 0; i < node.getChildCount(); i++) {
+            parseNode(node.getChildAt(i), fields, metadata, captured);
         }
     }
 
-    private boolean isUsernameField(String value) {
-        return value.contains("username")
-                || value.contains("user")
-                || value.contains("email")
-                || value.contains("e-mail")
-                || value.contains("login")
-                || value.contains("account")
-                || value.contains("phone");
+    private FieldKind classify(AssistStructure.ViewNode node) {
+        String hints = joinHints(node.getAutofillHints());
+        String idEntry = safeLower(node.getIdEntry());
+        String hintText = safeLower(String.valueOf(node.getHint()));
+        String className = safeLower(String.valueOf(node.getClassName()));
+        String combined = hints + " " + idEntry + " " + hintText + " " + className;
+        String compact = combined.replace("_", "").replace("-", "").replace(" ", "");
+
+        if (containsAny(compact,
+                "creditcardsecuritycode", "securitycode", "cardsecuritycode",
+                "cccsc", "cvv", "cvc", "cvn")) {
+            return FieldKind.CARD_SECURITY_CODE;
+        }
+
+        if (containsAny(compact,
+                "creditcardexpirationmonth", "expirationmonth", "expirymonth",
+                "ccmonth", "expmonth")) {
+            return FieldKind.CARD_EXPIRY_MONTH;
+        }
+
+        if (containsAny(compact,
+                "creditcardexpirationyear", "expirationyear", "expiryyear",
+                "ccyear", "expyear")) {
+            return FieldKind.CARD_EXPIRY_YEAR;
+        }
+
+        if (containsAny(compact,
+                "creditcardexpirationdate", "expirationdate", "expirydate",
+                "ccexp", "cardexpiry", "cardexpiration")) {
+            return FieldKind.CARD_EXPIRY_DATE;
+        }
+
+        if (containsAny(compact,
+                "creditcardnumber", "cardnumber", "ccnumber", "ccnum",
+                "paymentcardnumber")) {
+            return FieldKind.CARD_NUMBER;
+        }
+
+        if (containsAny(compact,
+                "creditcardname", "cardholdername", "nameoncard", "ccname")) {
+            return FieldKind.CARDHOLDER;
+        }
+
+        // Verification and one-time-code fields must never be captured as
+        // reusable passwords by the Android save flow.
+        if (containsAny(compact,
+                "onetimecode", "otp", "verificationcode", "2facode",
+                "authenticationcode", "authcode", "smscode")) {
+            return FieldKind.OTHER;
+        }
+
+        int inputType = node.getInputType();
+        int variation = inputType & InputType.TYPE_MASK_VARIATION;
+        boolean passwordInput = variation == InputType.TYPE_TEXT_VARIATION_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD;
+
+        if (passwordInput || containsAny(compact,
+                "newpassword", "currentpassword", "password", "passwd")) {
+            return FieldKind.PASSWORD;
+        }
+
+        if (containsAny(compact,
+                "username", "emailaddress", "email", "loginid", "userid",
+                "accountname", "accountid", "phonenumber")) {
+            return FieldKind.USERNAME;
+        }
+
+        return FieldKind.OTHER;
     }
 
-    private boolean isPasswordField(String value) {
-        return value.contains("password")
-                || value.contains("passwd")
-                || value.contains("passcode")
-                || value.contains("pin");
+    private String nodeValue(AssistStructure.ViewNode node) {
+        AutofillValue autofillValue = node.getAutofillValue();
+        if (autofillValue != null && autofillValue.isText() && autofillValue.getTextValue() != null) {
+            return autofillValue.getTextValue().toString().trim();
+        }
+
+        CharSequence text = node.getText();
+        return text == null ? "" : text.toString().trim();
+    }
+
+    private boolean containsAny(String value, String... tokens) {
+        for (String token : tokens) {
+            if (value.contains(token)) return true;
+        }
+        return false;
     }
 
     private String joinHints(String[] hints) {
         if (hints == null || hints.length == 0) return "";
-
         StringBuilder builder = new StringBuilder();
-
         for (String hint : hints) {
-            if (hint != null) builder.append(hint.toLowerCase()).append(" ");
+            if (hint != null) builder.append(hint.toLowerCase(Locale.ROOT)).append(' ');
         }
-
         return builder.toString();
+    }
+
+    private String readableTarget(String target) {
+        String clean = target == null ? "" : target.trim();
+        if (clean.isEmpty()) return "Saved login";
+        clean = clean.replace("https://", "").replace("http://", "");
+        int slash = clean.indexOf('/');
+        if (slash >= 0) clean = clean.substring(0, slash);
+        return clean;
     }
 
     private String safeLower(String value) {
         if (value == null || value.equals("null")) return "";
-        return value.toLowerCase();
+        return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private enum FieldKind {
+        USERNAME,
+        PASSWORD,
+        CARDHOLDER,
+        CARD_NUMBER,
+        CARD_EXPIRY_DATE,
+        CARD_EXPIRY_MONTH,
+        CARD_EXPIRY_YEAR,
+        CARD_SECURITY_CODE,
+        OTHER
+    }
+
+    private static class CapturedLogin {
+        String username = "";
+        String password = "";
     }
 
     private static class PageMetadata {
         String packageName = "";
         String webDomain = "";
+    }
+
+    private static class FieldCollection {
+        final ArrayList<AutofillId> usernameIds = new ArrayList<>();
+        final ArrayList<AutofillId> passwordIds = new ArrayList<>();
+        final ArrayList<AutofillId> cardholderIds = new ArrayList<>();
+        final ArrayList<AutofillId> cardNumberIds = new ArrayList<>();
+        final ArrayList<AutofillId> expiryDateIds = new ArrayList<>();
+        final ArrayList<AutofillId> expiryMonthIds = new ArrayList<>();
+        final ArrayList<AutofillId> expiryYearIds = new ArrayList<>();
+        final ArrayList<AutofillId> securityCodeIds = new ArrayList<>();
+
+        void add(FieldKind kind, AutofillId id) {
+            if (kind == FieldKind.USERNAME) addUnique(usernameIds, id);
+            else if (kind == FieldKind.PASSWORD) addUnique(passwordIds, id);
+            else if (kind == FieldKind.CARDHOLDER) addUnique(cardholderIds, id);
+            else if (kind == FieldKind.CARD_NUMBER) addUnique(cardNumberIds, id);
+            else if (kind == FieldKind.CARD_EXPIRY_DATE) addUnique(expiryDateIds, id);
+            else if (kind == FieldKind.CARD_EXPIRY_MONTH) addUnique(expiryMonthIds, id);
+            else if (kind == FieldKind.CARD_EXPIRY_YEAR) addUnique(expiryYearIds, id);
+            else if (kind == FieldKind.CARD_SECURITY_CODE) addUnique(securityCodeIds, id);
+        }
+
+        boolean hasLoginFields() {
+            return !passwordIds.isEmpty();
+        }
+
+        boolean hasCardFields() {
+            return !cardNumberIds.isEmpty()
+                    || (!expiryDateIds.isEmpty() && !cardholderIds.isEmpty())
+                    || (!expiryMonthIds.isEmpty() && !expiryYearIds.isEmpty());
+        }
+
+        ArrayList<AutofillId> loginIds() {
+            ArrayList<AutofillId> ids = new ArrayList<>();
+            ids.addAll(usernameIds);
+            ids.addAll(passwordIds);
+            return ids;
+        }
+
+        ArrayList<AutofillId> cardIds() {
+            ArrayList<AutofillId> ids = new ArrayList<>();
+            ids.addAll(cardholderIds);
+            ids.addAll(cardNumberIds);
+            ids.addAll(expiryDateIds);
+            ids.addAll(expiryMonthIds);
+            ids.addAll(expiryYearIds);
+            ids.addAll(securityCodeIds);
+            return ids;
+        }
+
+        private static void addUnique(ArrayList<AutofillId> list, AutofillId id) {
+            if (!list.contains(id)) list.add(id);
+        }
     }
 }

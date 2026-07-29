@@ -1,4 +1,36 @@
-export const Colors = {
+export type ThemePalette = {
+  text: string;
+  textSecondary: string;
+  textPrimary: string;
+  background: string;
+  backgroundElement: string;
+  surface: string;
+  backgroundSelected: string;
+  primary: string;
+  primaryDark: string;
+  primaryLight: string;
+  primaryMuted: string;
+  backgroundbutton: string;
+  success: string;
+  warning: string;
+  danger: string;
+  info: string;
+  securityScore: string;
+  securityScoreBg: string;
+  actionCard: string;
+  actionIconBg: string;
+  alertDangerBg: string;
+  alertWarningBg: string;
+  border: string;
+  inputBackground: string;
+  inputBorder: string;
+  tabInactive: string;
+  tabActive: string;
+};
+
+export type ThemePaletteName = 'light' | 'dark' | 'oled';
+
+export const Colors: Record<ThemePaletteName, ThemePalette> = {
   light: {
     // Text
     text: '#111827',
@@ -21,18 +53,18 @@ export const Colors = {
     backgroundbutton: '#065F46',
 
     // Status Colors
-    success: '#10B981',
+    success: '#168B6A',
     warning: '#F59E0B',
-    danger: '#EF4444',
+    danger: '#B94A4A',
     info: '#3B82F6',
 
     // Dashboard Cards
-    securityScore: '#F5B93D',
+    securityScore: '#B7812B',
     securityScoreBg: '#FEF3C7',
 
     // Quick Actions
     actionCard: '#EDF4F0',
-    actionIconBg: '#065F46',
+    actionIconBg: '#064737',
 
     // Alerts
     alertDangerBg: '#FEE2E2',
@@ -63,31 +95,31 @@ export const Colors = {
     backgroundSelected: '#1F2937',
 
     // Brand Colors
-    primary: '#10B981',
-    primaryDark: '#065F46',
-    primaryLight: '#34D399',
-    primaryMuted: '#123F31',
+    primary: '#0B6B50',
+    primaryDark: '#064737',
+    primaryLight: '#168B6A',
+    primaryMuted: '#102E26',
 
     // Buttons
     backgroundbutton: '#065F46',
 
     // Status Colors
-    success: '#10B981',
-    warning: '#FBBF24',
-    danger: '#EF4444',
-    info: '#60A5FA',
+    success: '#168B6A',
+    warning: '#B7812B',
+    danger: '#B94A4A',
+    info: '#5077A8',
 
     // Dashboard Cards
-    securityScore: '#F5B93D',
+    securityScore: '#B7812B',
     securityScoreBg: '#3D2C06',
 
     // Quick Actions
     actionCard: '#161F2B',
-    actionIconBg: '#065F46',
+    actionIconBg: '#064737',
 
     // Alerts
-    alertDangerBg: '#3B1212',
-    alertWarningBg: '#3D2C06',
+    alertDangerBg: '#2A1214',
+    alertWarningBg: '#2B2314',
 
     // Borders
     border: '#2A3441',
@@ -98,7 +130,7 @@ export const Colors = {
 
     // Tab Bar
     tabInactive: '#D1D5DB',
-    tabActive: '#10B981',
+    tabActive: '#0B6B50',
   },
 
   oled: {
@@ -111,34 +143,34 @@ export const Colors = {
     background: '#000000',
     backgroundElement: '#050A08',
     surface: '#050A08',
-    backgroundSelected: '#071A14',
+    backgroundSelected: '#06130F',
 
     // Brand Colors
-    primary: '#10B981',
-    primaryDark: '#065F46',
-    primaryLight: '#34D399',
-    primaryMuted: '#062D22',
+    primary: '#07543F',
+    primaryDark: '#043B2D',
+    primaryLight: '#0E7457',
+    primaryMuted: '#051F18',
 
     // Buttons
     backgroundbutton: '#065F46',
 
     // Status Colors
-    success: '#10B981',
-    warning: '#FBBF24',
-    danger: '#F87171',
-    info: '#60A5FA',
+    success: '#0E7457',
+    warning: '#946A27',
+    danger: '#9F4147',
+    info: '#3F628D',
 
     // Dashboard Cards
-    securityScore: '#F5B93D',
-    securityScoreBg: '#211700',
+    securityScore: '#946A27',
+    securityScoreBg: '#18130A',
 
     // Quick Actions
-    actionCard: '#08110E',
-    actionIconBg: '#065F46',
+    actionCard: '#050D0A',
+    actionIconBg: '#043B2D',
 
     // Alerts
-    alertDangerBg: '#2A0707',
-    alertWarningBg: '#211700',
+    alertDangerBg: '#1C0A0B',
+    alertWarningBg: '#18130A',
 
     // Borders
     border: '#18231F',
@@ -149,6 +181,6 @@ export const Colors = {
 
     // Tab Bar
     tabInactive: '#D1D5DB',
-    tabActive: '#10B981',
+    tabActive: '#07543F',
   }
-} as const;
+};

@@ -18,6 +18,7 @@ import * as Sharing from 'expo-sharing';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyVaultItemResponse } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { decryptJson, decryptPassword, maskCardNumber, maskPassword } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
@@ -93,6 +94,7 @@ const formatCard = (value?: string) => {
 };
 
 export default function EmergencyVaultDetailsScreen() {
+  const requestApi = useCancelableApi(api);
   const { requestId, itemId, itemType, ownerName, ownerEmail } = useLocalSearchParams<{
     requestId: string;
     itemId: string;
@@ -116,9 +118,10 @@ export default function EmergencyVaultDetailsScreen() {
 
     try {
       setLoading(true);
-      const data = await api.getEmergencyVaultItem(requestId, itemType, itemId);
+      const data = await requestApi.getEmergencyVaultItem(requestId, itemType, itemId);
       setItem(data);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not open emergency item', error.message || 'Please try again.');
     } finally {
       setLoading(false);
@@ -157,7 +160,7 @@ export default function EmergencyVaultDetailsScreen() {
       ).replace(/[^a-zA-Z0-9._-]/g, '_');
       const mimeType = item.mimeType || item.documentType || 'application/octet-stream';
 
-      const downloaded = await api.downloadEmergencyDocumentToCache(
+      const downloaded = await requestApi.downloadEmergencyDocumentToCache(
         requestId,
         itemId,
         safeName,
@@ -191,6 +194,7 @@ export default function EmergencyVaultDetailsScreen() {
         Alert.alert('Saved temporarily', downloaded.uri);
       }
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Download failed', error.message || 'Could not download document.');
     } finally {
       setDownloading(false);
@@ -249,7 +253,7 @@ export default function EmergencyVaultDetailsScreen() {
 
         <View style={styles.warningCard}>
           <Ionicons name="eye-outline" size={20} color={C.warning} />
-          <Text style={styles.warningText}>This access is audited. Do not copy or download anything unless it is truly needed.</Text>
+          <Text style={styles.warningText}>Access is read-only and audited.</Text>
         </View>
 
         {item.itemType === 'PASSWORD' && (

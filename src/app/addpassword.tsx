@@ -13,13 +13,16 @@ import {
   Platform,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import AddScreenEntrance from '../components/AddScreenEntrance';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptPassword } from '../utils/vaultcrypto';
 import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
+import { syncGuardianAutofillCache } from '../services/autofillSync';
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -62,10 +65,13 @@ const getStrengthScore = (value: string) => {
 };
 
 const AddPasswordScreen = () => {
+  const requestApi = useCancelableApi(api);
   const router = useRouter();
   const params = useLocalSearchParams<{ generatedPassword?: string }>();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  useSensitiveScreenProtection(true);
 
   const [website, setWebsite] = useState('');
   const [username, setUsername] = useState('');
@@ -93,8 +99,8 @@ const AddPasswordScreen = () => {
       try {
         setCheckingLimits(true);
         const [subscription, vaultItems] = await Promise.all([
-          api.getSubscription().catch(() => ({ plan: 'FREE' })),
-          api.getVaultItems().catch(() => []),
+          requestApi.getSubscription().catch(() => ({ plan: 'FREE' })),
+          requestApi.getVaultItems().catch(() => []),
         ]);
 
         setPlan(subscription?.plan || 'FREE');
@@ -154,7 +160,7 @@ const AddPasswordScreen = () => {
     try {
       setSaving(true);
 
-      await api.createVaultItem({
+      await requestApi.createVaultItem({
         itemType: 'PASSWORD',
         title: website.trim(),
         website: website.trim(),
@@ -163,10 +169,13 @@ const AddPasswordScreen = () => {
         notes: notes.trim(),
       });
 
+      void syncGuardianAutofillCache().catch(() => undefined);
+
       Alert.alert('Saved', 'Password saved securely to your vault.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       const code = String(error?.code || '').toUpperCase();
       const message = String(error?.message || '');
       const lowerMessage = message.toLowerCase();
@@ -188,19 +197,25 @@ const AddPasswordScreen = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
+    <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={styles.scrollContent}
+        >
           <View style={styles.header}>
             <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Add Password</Text>
-              <Text style={styles.headerSubtitle}>
-                {checkingLimits
-                  ? 'Checking plan limit...'
-                  : isPaidPlan
-                    ? 'Unlimited passwords on your current plan'
-                    : `${passwordCount}/${FREE_PASSWORD_LIMIT} passwords used on Free plan`}
-              </Text>
+              <Text style={styles.headerTitle}>Add password</Text>
             </View>
             <TouchableOpacity style={styles.headerTool} onPress={() => router.push('/passwordgenerator')}>
               <Ionicons name="sparkles-outline" size={17} color={C.primary} />
@@ -237,6 +252,8 @@ const AddPasswordScreen = () => {
               autoCapitalize="none"
               keyboardType="email-address"
               autoCorrect={false}
+              autoComplete="username"
+              textContentType="username"
             />
 
             <Text style={styles.label}>Password</Text>
@@ -247,6 +264,8 @@ const AddPasswordScreen = () => {
                 onChangeText={setPassword}
                 autoCapitalize="none"
                 autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
               />
               <TouchableOpacity onPress={() => regenerate()} style={styles.iconButton}>
                 <Ionicons name="refresh-outline" size={20} color={C.primary} />
@@ -265,7 +284,6 @@ const AddPasswordScreen = () => {
                 <Ionicons name="flash-outline" size={18} color={C.primary} />
                 <View style={{ flex: 1 }}>
                   <Text style={styles.generatorTitle}>Quick generator</Text>
-                  <Text style={styles.generatorSub}>Use the advanced generator for passphrases and Premium options.</Text>
                 </View>
               </View>
 
@@ -356,7 +374,7 @@ const AddPasswordScreen = () => {
           <View style={{ height: 90 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </AddScreenEntrance>
   );
 };
 
@@ -392,12 +410,12 @@ const makeStyles = (C: ThemeColors) =>
       padding: 14,
       marginHorizontal: 20,
       marginBottom: 16,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     limitText: {
       flex: 1,
       color: C.text,
@@ -439,19 +457,19 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 10,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     passwordField: { flex: 1, fontSize: 15, color: C.text, minHeight: 34 },
-    iconButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: C.actionCard 
+    iconButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: C.actionCard
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
     scoreTrack: { flex: 1, height: 8, backgroundColor: C.border, borderRadius: 99, overflow: 'hidden' },
     scoreFill: { height: 8, borderRadius: 99 },
@@ -463,12 +481,12 @@ const makeStyles = (C: ThemeColors) =>
       marginBottom: 20,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     generatorHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
     generatorTitle: { fontSize: 15, fontWeight: '900', color: C.primary },
     generatorSub: { fontSize: 12, color: C.textSecondary, marginTop: 2, lineHeight: 16 },
@@ -487,12 +505,12 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 15,
       justifyContent: 'center',
       alignItems: 'center',
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     sliderValue: {
       fontSize: 15,
       fontWeight: 'bold',
@@ -533,12 +551,12 @@ const makeStyles = (C: ThemeColors) =>
       marginHorizontal: 20,
       marginTop: 4,
       marginBottom: 20,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     disabledBtn: { opacity: 0.65 },
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
   });

@@ -40,6 +40,7 @@ import {
   BackupRestoreResponse,
   BackupStatusResponse,
 } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
@@ -61,6 +62,8 @@ type BackupHistoryItem = {
 
 const BACKUP_HISTORY_KEY = 'theguardian.backup.history.v1';
 const MAX_HISTORY_ITEMS = 10;
+const MAX_BACKUP_IMPORT_BYTES = 25 * 1024 * 1024;
+const BACKUP_FILE_EXTENSION = '.tgvault';
 
 const formatBytes = (bytes?: number) => {
   if (!bytes) return '0 B';
@@ -85,6 +88,45 @@ const formatDate = (date?: string | null) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+
+const isLikelyGuardianBackupPayload = (value?: string | null) => {
+  const clean = String(value || '').trim();
+  if (clean.length < 32 || clean.length > MAX_BACKUP_IMPORT_BYTES * 2) {
+    return false;
+  }
+
+  return /^[A-Za-z0-9+/=\r\n]+$/.test(clean);
+};
+
+const validateBackupFileMetadata = async (input: {
+  uri: string;
+  name?: string | null;
+  size?: number | null;
+}) => {
+  const fileName = String(input.name || '').trim();
+
+  if (!fileName.toLowerCase().endsWith(BACKUP_FILE_EXTENSION)) {
+    throw new Error('Choose a The Guardian .tgvault backup file.');
+  }
+
+  let size = Number(input.size || 0);
+
+  if (!size) {
+    const info = await FileSystem.getInfoAsync(input.uri).catch(() => null as any);
+    size = Number(info?.exists ? info.size || 0 : 0);
+  }
+
+  if (size <= 0) {
+    throw new Error('The selected backup file is empty or unavailable.');
+  }
+
+  if (size > MAX_BACKUP_IMPORT_BYTES) {
+    throw new Error(`Backup files must be smaller than ${formatBytes(MAX_BACKUP_IMPORT_BYTES)}.`);
+  }
+
+  return size;
 };
 
 const toHistoryItem = (backup: BackupResponse, path: string): BackupHistoryItem => ({
@@ -138,6 +180,7 @@ function AnimatedSkeleton({
 }
 
 export default function BackupScreen() {
+  const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -166,7 +209,8 @@ export default function BackupScreen() {
       const saved = await AsyncStorage.getItem(BACKUP_HISTORY_KEY);
       const parsed = saved ? JSON.parse(saved) : [];
       setHistory(Array.isArray(parsed) ? parsed : []);
-    } catch {
+    } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
       setHistory([]);
     }
   }, []);
@@ -192,22 +236,24 @@ export default function BackupScreen() {
         setLoading(true);
       }
 
-      const backupStatus = await api.getBackupStatus();
+      const backupStatus = await requestApi.getBackupStatus();
 
       setStatus(backupStatus);
       setAllowed(Boolean(backupStatus.allowed));
       setPlan((backupStatus.plan || 'FREE') as Plan);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       console.log('BACKUP STATUS ERROR:', error);
 
       try {
-        const subscription = await api.getSubscription();
+        const subscription = await requestApi.getSubscription();
         const currentPlan = (subscription.plan || 'FREE') as Plan;
 
         setPlan(currentPlan);
         setAllowed(currentPlan === 'PREMIUM' || currentPlan === 'FAMILY');
         setStatus(null);
-      } catch {
+      } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
         setPlan('FREE');
         setAllowed(false);
         setStatus(null);
@@ -248,7 +294,7 @@ export default function BackupScreen() {
     try {
       setCreating(true);
 
-      const backup = await api.createBackup();
+      const backup = await requestApi.createBackup();
       const directory = FileSystem.documentDirectory || '';
       const filePath = `${directory}${backup.fileName}`;
 
@@ -264,6 +310,7 @@ export default function BackupScreen() {
         'Your encrypted backup has been created and saved on this device. It will stay in your backup history.'
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Backup failed', error.message || 'Could not create backup.');
     } finally {
       setCreating(false);
@@ -287,6 +334,7 @@ export default function BackupScreen() {
           `Keep this backup file somewhere safe.`,
       });
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Share failed', error.message || 'Could not share backup details.');
     } finally {
       setSharingId(null);
@@ -313,6 +361,7 @@ export default function BackupScreen() {
 
               Alert.alert('Deleted', 'The local backup file has been deleted.');
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Delete failed', error.message || 'Could not delete the backup file.');
             } finally {
               setDeletingId(null);
@@ -334,9 +383,21 @@ export default function BackupScreen() {
       return null;
     }
 
-    return FileSystem.readAsStringAsync(item.path, {
+    await validateBackupFileMetadata({
+      uri: item.path,
+      name: item.fileName,
+      size: Number((info as any).size || item.backupSizeBytes || 0),
+    });
+
+    const payload = await FileSystem.readAsStringAsync(item.path, {
       encoding: FileSystem.EncodingType.UTF8,
     });
+
+    if (!isLikelyGuardianBackupPayload(payload)) {
+      throw new Error('This file is not a valid encrypted The Guardian backup.');
+    }
+
+    return payload.trim();
   };
 
   const restoreFromHistory = async (item: BackupHistoryItem) => {
@@ -346,6 +407,7 @@ export default function BackupScreen() {
 
       chooseRestoreMode(encryptedBackup, item.fileName);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Restore failed', error.message || 'Could not read this backup file.');
     }
   };
@@ -362,7 +424,7 @@ export default function BackupScreen() {
       setImporting(true);
 
       const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*',
+        type: ['application/octet-stream', 'text/plain'],
         copyToCacheDirectory: true,
         multiple: false,
       });
@@ -376,12 +438,27 @@ export default function BackupScreen() {
         return;
       }
 
+      await validateBackupFileMetadata({
+        uri: asset.uri,
+        name: asset.name,
+        size: asset.size,
+      });
+
       const encryptedBackup = await FileSystem.readAsStringAsync(asset.uri, {
         encoding: FileSystem.EncodingType.UTF8,
       });
 
-      chooseRestoreMode(encryptedBackup, asset.name || 'Imported backup');
+      if (!isLikelyGuardianBackupPayload(encryptedBackup)) {
+        Alert.alert(
+          'Invalid backup file',
+          'This file does not contain a valid encrypted The Guardian backup.'
+        );
+        return;
+      }
+
+      chooseRestoreMode(encryptedBackup.trim(), asset.name || 'Imported backup');
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Import failed', error.message || 'Could not import backup file.');
     } finally {
       setImporting(false);
@@ -426,7 +503,7 @@ export default function BackupScreen() {
     try {
       setRestoring(true);
 
-      const response = await api.restoreBackup({
+      const response = await requestApi.restoreBackup({
         encryptedBackup,
         replaceExisting,
       });
@@ -439,6 +516,7 @@ export default function BackupScreen() {
         `${response.message}\n\nRestored ${response.totalRestoredCount} item(s).`
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Restore failed', error.message || 'Could not restore backup.');
     } finally {
       setRestoring(false);
@@ -578,7 +656,7 @@ export default function BackupScreen() {
 
           <Text style={styles.title}>Encrypted Backup</Text>
           <Text style={styles.subtitle}>
-            Create local encrypted backups, keep a history on this device, and restore your vault when needed.
+            Create, import and restore encrypted backups.
           </Text>
 
           <View style={styles.statusCard}>
@@ -606,7 +684,7 @@ export default function BackupScreen() {
           </View>
 
           <View style={styles.actionCard}>
-            <Text style={styles.sectionTitle}>Backup actions</Text>
+            <Text style={styles.sectionTitle}>Actions</Text>
 
             <TouchableOpacity
               style={[styles.primaryButton, (creating || restoring || importing) && styles.disabledButton]}
@@ -672,7 +750,7 @@ export default function BackupScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.sectionTitle}>Backup history</Text>
-              <Text style={styles.sectionSub}>Saved on this device. Pull down to refresh.</Text>
+              <Text style={styles.sectionSub}>Stored on this device</Text>
             </View>
           </View>
 
@@ -837,12 +915,12 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     skeletonHeroIcon: {
       width: 82,
@@ -971,12 +1049,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       overflow: 'hidden',
       marginBottom: 24,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     infoRow: {
       flexDirection: 'row',
@@ -1020,12 +1098,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 18,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     statusHeaderRow: {
       flexDirection: 'row',
@@ -1079,12 +1157,12 @@ const makeStyles = (C: any) =>
       borderRadius: 16,
       paddingVertical: 12,
       paddingHorizontal: 12,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     statValue: {
       color: C.text,
@@ -1111,12 +1189,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 16,
       marginBottom: 18,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     sectionTitle: {
       color: C.text,
@@ -1139,12 +1217,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       minHeight: 54,
       marginTop: 12,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     primaryButtonText: {
       color: '#fff',
@@ -1163,12 +1241,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 10,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -1194,12 +1272,12 @@ const makeStyles = (C: any) =>
       borderColor: C.primary,
       padding: 16,
       marginBottom: 18,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     restoreStatsRow: {
       flexDirection: 'row',
@@ -1257,12 +1335,12 @@ const makeStyles = (C: any) =>
       padding: 22,
       alignItems: 'center',
       marginBottom: 18,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     emptyTitle: {
       color: C.text,
@@ -1286,12 +1364,12 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
       padding: 15,
       marginBottom: 14,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     historyTopRow: {
       flexDirection: 'row',
@@ -1371,12 +1449,12 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       flexDirection: 'row',
       gap: 6,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     smallActionText: {
       color: C.primary,
@@ -1392,12 +1470,12 @@ const makeStyles = (C: any) =>
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     footnote: {
       color: C.textSecondary,

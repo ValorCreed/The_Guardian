@@ -20,10 +20,12 @@ import * as LocalAuthentication from "expo-local-authentication";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { api, saveLoginSession, isDeviceLimitError } from "../services/api";
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from "../context/ThemeContext";
 import { saveBiometricCredentials, biometricLogin } from "../utils/secureAuth";
 
 export default function UnlockScreen() {
+  const requestApi = useCancelableApi(api);
   const { isDark, colors: C, reloadTheme } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -54,7 +56,8 @@ export default function UnlockScreen() {
           compatible && enrolled && savedBiometric === "true",
         );
         setVaultLocked(locked === "true");
-      } catch {
+      } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
         setBiometricEnabled(false);
       }
     };
@@ -108,6 +111,7 @@ export default function UnlockScreen() {
 
       router.replace("/home");
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert(
         "Biometric login failed",
         error.message || "Please sign in with your email and password first.",
@@ -128,7 +132,9 @@ export default function UnlockScreen() {
     }
 
     await saveLoginSession(data);
-    await saveBiometricCredentials(cleanEmail, cleanPassword);
+    if (biometricEnabled) {
+      await saveBiometricCredentials(cleanEmail, cleanPassword);
+    }
     await reloadTheme?.();
     await unlockSuccess();
   };
@@ -137,7 +143,7 @@ export default function UnlockScreen() {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password;
 
-    const data = await api.login({
+    const data = await requestApi.login({
       email: cleanEmail,
       password: cleanPassword,
       forceReplaceDevice,
@@ -164,9 +170,58 @@ export default function UnlockScreen() {
       setLoading(true);
       await performLogin(false);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       const message =
         error.message ||
         "We could not sign you in. Please check your details and try again.";
+      const normalizedMessage = String(message).toLowerCase();
+
+      if (normalizedMessage.includes("finish email verification")) {
+        Alert.alert(
+          "Verification required",
+          "Your account has not been created yet. Confirm the code sent to your email to finish registration.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Verify email",
+              onPress: () =>
+                router.push({
+                  pathname: "/verifyemail",
+                  params: {
+                    email: cleanEmail,
+                    mode: "registration",
+                    next: "verification",
+                    autoSend: "true",
+                  },
+                }),
+            },
+          ],
+        );
+        return;
+      }
+
+      if (normalizedMessage.includes("verify your email before signing in")) {
+        Alert.alert(
+          "Verification required",
+          "This older account must verify its email before it can access the app.",
+          [
+            { text: "Cancel", style: "cancel" },
+            {
+              text: "Verify email",
+              onPress: () =>
+                router.push({
+                  pathname: "/verifyemail",
+                  params: {
+                    email: cleanEmail,
+                    next: "signin",
+                    autoSend: "true",
+                  },
+                }),
+            },
+          ],
+        );
+        return;
+      }
 
       if (isDeviceLimitError(error)) {
         Alert.alert(
@@ -185,6 +240,7 @@ export default function UnlockScreen() {
                   setLoading(true);
                   await performLogin(true);
                 } catch (retryError: any) {
+    if (isScreenRequestCancelled(retryError)) return;
                   Alert.alert(
                     "Login failed",
                     retryError.message ||
@@ -237,7 +293,7 @@ export default function UnlockScreen() {
 
             <Text style={styles.title}>Welcome back</Text>
             <Text style={styles.subtitle}>
-              Enter your credentials to securely unlock your vault.
+              Enter your email and master password.
             </Text>
           </View>
 
@@ -365,7 +421,7 @@ const makeStyles = (C: any) =>
     scrollContent: {
       flexGrow: 1,
       paddingHorizontal: 24,
-      paddingTop: 85,
+      paddingTop: 105,
       paddingBottom: 180,
     },
 
@@ -415,12 +471,12 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 18,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     label: {
       fontSize: 13,
@@ -452,12 +508,12 @@ const makeStyles = (C: any) =>
       marginBottom: 10,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     passwordInput: {
       flex: 1,
@@ -498,12 +554,12 @@ const makeStyles = (C: any) =>
       borderRadius: 18,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     biometricText: {
       fontSize: 15,
@@ -519,12 +575,12 @@ const makeStyles = (C: any) =>
       justifyContent: "center",
       minHeight: 56,
       marginTop: 2,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     disabledButton: {
       opacity: 0.7,

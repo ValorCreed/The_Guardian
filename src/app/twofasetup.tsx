@@ -16,8 +16,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect } from 'expo-router';
 
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import { useAppTheme } from '../context/ThemeContext';
+import type { ThemePalette } from '../constants/theme';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 
 type SecuritySettings = {
@@ -26,6 +28,7 @@ type SecuritySettings = {
 };
 
 export default function TwoFactorSetupScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -43,12 +46,13 @@ export default function TwoFactorSetupScreen() {
     try {
       if (showLoader) setLoading(true);
 
-      const response = await api.getSecuritySettings();
+      const response = await requestApi.getSecuritySettings();
       setSettings({
         emailVerified: Boolean(response.emailVerified),
         twoFactorEnabled: Boolean(response.twoFactorEnabled),
       });
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert(
         'Could not load security settings',
         error.message || 'Please check your connection and try again.'
@@ -101,19 +105,20 @@ export default function TwoFactorSetupScreen() {
             try {
               setSaving(true);
 
-              const updated = await api.setTwoFactorEnabled(enabled);
+              const updated = await requestApi.setTwoFactorEnabled(enabled);
               setSettings({
                 emailVerified: Boolean(updated.emailVerified),
                 twoFactorEnabled: Boolean(updated.twoFactorEnabled),
               });
 
-              api.clearCache?.();
+              requestApi.clearCache?.();
 
               Alert.alert(
                 'Security updated',
                 `Two-factor authentication has been ${enabled ? 'enabled' : 'disabled'}.`
               );
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert(
                 `Could not ${actionText} 2FA`,
                 error.message || 'Please try again.'
@@ -162,10 +167,9 @@ export default function TwoFactorSetupScreen() {
           />
         }
       >
-        <Text style={styles.eyebrow}>Account protection</Text>
         <Text style={styles.title}>Two-factor authentication</Text>
         <Text style={styles.subtitle}>
-          Add another verification step when signing in to The Guardian.
+          Require a code when signing in.
         </Text>
 
         <View style={styles.heroCard}>
@@ -272,8 +276,8 @@ function InfoRow({
   icon: string;
   title: string;
   subtitle: string;
-  C: any;
-  styles: any;
+  C: ThemePalette;
+  styles: ReturnType<typeof makeStyles>;
 }) {
   return (
     <View style={styles.infoRow}>
@@ -289,7 +293,7 @@ function InfoRow({
   );
 }
 
-const makeStyles = (C: any) =>
+const makeStyles = (C: ThemePalette) =>
   StyleSheet.create({
     safeArea: {
       flex: 1,
@@ -349,10 +353,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     heroIcon: {
       width: 56,
@@ -385,10 +389,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     row: {
       flexDirection: 'row',
@@ -422,10 +426,10 @@ const makeStyles = (C: any) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     warningTitle: {
       color: C.warning,

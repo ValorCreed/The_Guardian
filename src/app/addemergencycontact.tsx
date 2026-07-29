@@ -19,6 +19,7 @@ import { router } from 'expo-router';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
@@ -28,6 +29,7 @@ type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
 
 export default function AddEmergencyContactScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -48,7 +50,7 @@ export default function AddEmergencyContactScreen() {
   useEffect(() => {
     const loadPlan = async () => {
       try {
-        const subscription = await api.getSubscription();
+        const subscription = await requestApi.getSubscription();
         const loadedPlan = String(subscription?.plan || 'FREE').toUpperCase();
 
         if (loadedPlan === 'PREMIUM' || loadedPlan === 'FAMILY') {
@@ -57,6 +59,7 @@ export default function AddEmergencyContactScreen() {
           setPlan('FREE');
         }
       } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
         console.log('Could not load subscription plan:', error);
         setPlan('FREE');
       } finally {
@@ -112,7 +115,8 @@ export default function AddEmergencyContactScreen() {
         );
         return;
       }
-    } catch {
+    } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
       // If reading local storage fails, continue. Backend will still validate the request.
     }
 
@@ -127,7 +131,7 @@ export default function AddEmergencyContactScreen() {
     try {
       setSaving(true);
 
-      await api.createEmergencyContact({
+      await requestApi.createEmergencyContact({
         contactEmail: cleanEmail,
         contactName: cleanName,
         relationship: cleanRelationship,
@@ -146,6 +150,7 @@ export default function AddEmergencyContactScreen() {
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert(
         'Could not add contact',
         error?.message || 'We could not add this emergency contact. Please check the details and try again.'
@@ -197,11 +202,14 @@ export default function AddEmergencyContactScreen() {
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
           <View style={styles.headerRow}>
             <View style={styles.planPill}>
@@ -216,9 +224,7 @@ export default function AddEmergencyContactScreen() {
             </View>
           </View>
 
-          <Text style={styles.eyebrow}>Trusted contact</Text>
-          <Text style={styles.title}>Add Emergency Contact</Text>
-          <Text style={styles.subtitle}>{planNote}</Text>
+          <Text style={styles.title}>Add emergency contact</Text>
 
           <View style={styles.infoCard}>
             <Ionicons name="information-circle-outline" size={20} color={C.primary} />
@@ -261,7 +267,7 @@ export default function AddEmergencyContactScreen() {
 
           <Text style={styles.sectionTitle}>Waiting period</Text>
           <Text style={styles.sectionHint}>
-            This is how long the contact must wait before emergency access becomes available.
+            Delay before access becomes available.
           </Text>
 
           <View style={styles.optionRow}>
@@ -291,10 +297,10 @@ export default function AddEmergencyContactScreen() {
             )}
 
             <PermissionRow
-              title="Secure notes"
+              title="SecureNotes"
               subtitle={
                 isPaid
-                  ? 'Allow access to emergency notes and secure notes.'
+                  ? 'Allow access to emergency notes and SecureNotes.'
                   : 'Included for Free users as emergency note access.'
               }
               value={effectiveAllowNotes}
@@ -334,7 +340,7 @@ export default function AddEmergencyContactScreen() {
 
           <Text style={styles.sectionTitle}>Emergency note</Text>
           <Text style={styles.sectionHint}>
-            Add instructions your trusted contact may need in an emergency. This is optional.
+            Optional instructions for your contact.
           </Text>
 
           <TextInput
@@ -410,7 +416,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     backgroundColor: C.backgroundSelected,
     borderRadius: 999,
     shadowColor: '#000',
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.03,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
@@ -506,7 +512,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     shadowColor: '#000',
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.035,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
@@ -543,10 +549,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.045,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
-    elevation: 3,
+    elevation: 2,
   },
   infoText: {
     flex: 1,
@@ -563,10 +569,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     padding: 16,
     marginBottom: 18,
     shadowColor: '#000',
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.045,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    elevation: 2,
   },
   label: {
     color: C.text,
@@ -610,7 +616,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.035,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
@@ -635,7 +641,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     gap: 9,
     marginBottom: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.06,
+    shadowOpacity: 0.035,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 2,
@@ -662,7 +668,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOpacity: 0.07,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
-    elevation: 3,
+    elevation: 2,
   },
   saveButton: {
     backgroundColor: C.backgroundbutton,
@@ -673,10 +679,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     shadowColor: C.primary,
-    shadowOpacity: 0.20,
+    shadowOpacity: 0.11,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    elevation: 3,
   },
   disabledButton: {
     opacity: 0.65,

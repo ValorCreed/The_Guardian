@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { BackHandler, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Stack, router, usePathname, type Href } from 'expo-router';
+import { Stack, router, useGlobalSearchParams, usePathname, type Href } from 'expo-router';
 import { BlurTargetView } from 'expo-blur';
 
 import { AppThemeProvider, useAppTheme } from '../context/ThemeContext';
@@ -11,8 +11,11 @@ import { useAutoLock } from '../hooks/useAutoLock';
 import FloatingTabBar from '../components/FloatingTabBar';
 import AnimatedBlurBackButton from '../components/AnimatedBlurBackButton';
 import { AnalyticsProvider, AnalyticsRouteTracker } from '../services/analytics';
+import { hasStoredAuthToken } from '../services/api';
+import { hasAcceptedLegalConsent } from '../services/legalConsent';
 
 const TAB_SCREENS = ['/home', '/vault', '/security', '/family', '/settings'];
+const LEGAL_REVIEW_SCREENS = ['/verification', '/privacy', '/terms'];
 
 const PUBLIC_AUTH_SCREENS = [
   '/',
@@ -25,14 +28,6 @@ const PUBLIC_AUTH_SCREENS = [
   '/verifyemail',
   '/twofactor',
   '/accountrecovery',
-];
-
-const AUTH_TOKEN_KEYS = [
-  'token',
-  'accessToken',
-  'authToken',
-  'jwt',
-  'jwtToken',
 ];
 
 const BACK_BUTTON_SCREENS = [
@@ -73,6 +68,7 @@ const BACK_BUTTON_SCREENS = [
   '/bugreport',
   '/privacy',
   '/terms',
+  '/editfamilyaccess'
 ];
 
 const AUTH_SCREEN_OPTIONS = {
@@ -107,21 +103,14 @@ function isPublicAuthScreen(pathname: string) {
 }
 
 async function getStoredAuthState() {
-  const pairs = await AsyncStorage.multiGet([...AUTH_TOKEN_KEYS, 'vaultLocked']);
-  const values: Record<string, string | null> = {};
-
-  pairs.forEach(([key, value]) => {
-    values[key] = value;
-  });
-
-  const hasToken = AUTH_TOKEN_KEYS.some((key) => {
-    const value = values[key];
-    return typeof value === 'string' && value.trim().length > 0;
-  });
+  const [hasToken, vaultLockedValue] = await Promise.all([
+    hasStoredAuthToken(),
+    AsyncStorage.getItem('vaultLocked'),
+  ]);
 
   return {
     hasToken,
-    vaultLocked: values.vaultLocked === 'true',
+    vaultLocked: vaultLockedValue === 'true',
   };
 }
 
@@ -159,12 +148,18 @@ function AppStack() {
   useAutoLock();
 
   const pathname = normalizePath(usePathname());
+  const routeParams = useGlobalSearchParams<{ from?: string; preview?: string }>();
   const blurTargetRef = useRef<View | null>(null);
   const authRedirectingRef = useRef(false);
   const { colors } = useAppTheme();
 
   const showTabBar = shouldShowTabBar(pathname);
-  const showBackButton = shouldShowBackButton(pathname);
+  const isVerificationPreview =
+    pathname === '/verification' &&
+    (routeParams.from === 'settings' || routeParams.preview === '1');
+  const showBackButton =
+    shouldShowBackButton(pathname) &&
+    (pathname !== '/verification' || isVerificationPreview);
 
   const goBackWithFallback = useCallback((fallbackRoute: Href) => {
     if (router.canGoBack()) {
@@ -191,12 +186,24 @@ function AppStack() {
       return resetToAuth('/login');
     }
 
+    if (pathname === '/verification') {
+      if (isVerificationPreview) {
+        return goBackWithFallback('/settings');
+      }
+
+      return;
+    }
+
     if (pathname === '/subscription') {
       return goBackWithFallback('/home');
     }
 
-    if (pathname === '/autofill' || pathname === '/recoverykit') {
+    if (pathname === '/autofill') {
       return router.replace('/settings');
+    }
+
+    if (pathname === '/recoverykit') {
+      return goBackWithFallback('/security');
     }
 
     if (pathname === '/accountrecovery') {
@@ -243,13 +250,35 @@ function AppStack() {
           return;
         }
 
+        let legalConsentAccepted = true;
+        const canCheckLegalConsent =
+          hasToken &&
+          !vaultLocked &&
+          !LEGAL_REVIEW_SCREENS.includes(pathname);
+
+        if (canCheckLegalConsent) {
+          const email = await AsyncStorage.getItem('userEmail');
+          legalConsentAccepted = await hasAcceptedLegalConsent(email);
+
+          if (cancelled) return;
+
+          if (!legalConsentAccepted && !isPublic) {
+            authRedirectingRef.current = true;
+            router.replace('/verification');
+            setTimeout(() => {
+              authRedirectingRef.current = false;
+            }, 250);
+            return;
+          }
+        }
+
         if (
           (pathname === '/login' || pathname === '/signin' || pathname === '/signup') &&
           hasToken &&
           !vaultLocked
         ) {
           authRedirectingRef.current = true;
-          router.replace('/home');
+          router.replace(legalConsentAccepted ? '/home' : '/verification');
           setTimeout(() => {
             authRedirectingRef.current = false;
           }, 250);
@@ -298,8 +327,20 @@ function AppStack() {
         return true;
       }
 
-      if (pathname === '/autofill' || pathname === '/recoverykit') {
+      if (pathname === '/verification') {
+        if (isVerificationPreview) {
+          goBackWithFallback('/settings');
+        }
+        return true;
+      }
+
+      if (pathname === '/autofill') {
         router.replace('/settings');
+        return true;
+      }
+
+      if (pathname === '/recoverykit') {
+        goBackWithFallback('/security');
         return true;
       }
 
@@ -317,7 +358,7 @@ function AppStack() {
     });
 
     return () => subscription.remove();
-  }, [pathname, showTabBar, goBackWithFallback]);
+  }, [pathname, showTabBar, goBackWithFallback, isVerificationPreview]);
 
   return (
     <BlurTargetProvider targetRef={blurTargetRef}>
@@ -350,7 +391,14 @@ function AppStack() {
               <Stack.Screen name="verifyemail" options={AUTH_SCREEN_OPTIONS} />
               <Stack.Screen name="twofactor" options={AUTH_SCREEN_OPTIONS} />
               <Stack.Screen name="twofasetup" options={{ headerShown: false }} />
-              <Stack.Screen name="verification" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="verification"
+                options={{
+                  headerShown: false,
+                  gestureEnabled: false,
+                  fullScreenGestureEnabled: false,
+                }}
+              />
 
               <Stack.Screen name="home" options={{ headerShown: false }} />
               <Stack.Screen name="vault" options={{ headerShown: false }} />
@@ -379,15 +427,16 @@ function AppStack() {
               <Stack.Screen name="emergencyvault" options={{ headerShown: false }} />
               <Stack.Screen name="emergencyvaultdetails" options={{ headerShown: false }} />
 
-              <Stack.Screen name="addpassword" options={{ headerShown: false }} />
-              <Stack.Screen name="addnote" options={{ headerShown: false }} />
+              <Stack.Screen name="addpassword" options={{ headerShown: false, animation: 'none' }} />
+              <Stack.Screen name="addnote" options={{ headerShown: false, animation: 'none' }} />
               <Stack.Screen name="notedetails" options={{ headerShown: false }} />
-              <Stack.Screen name="adddocument" options={{ headerShown: false }} />
-              <Stack.Screen name="addcard" options={{ headerShown: false }} />
+              <Stack.Screen name="adddocument" options={{ headerShown: false, animation: 'none' }} />
+              <Stack.Screen name="addcard" options={{ headerShown: false, animation: 'none' }} />
               <Stack.Screen name="newmember" options={{ headerShown: false }} />
               <Stack.Screen name="terms" options={{ headerShown: false }} />
               <Stack.Screen name="privacy" options={{ headerShown: false }} />
               <Stack.Screen name="bugreport" options={{ headerShown: false }} />
+              <Stack.Screen name="editfamilyaccess" options={{ headerShown: false }} />
             </Stack>
           </BlurTargetView>
 

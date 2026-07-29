@@ -247,7 +247,7 @@ export default function SharedVaultDetailsScreen() {
         setItem({
           id: data.id,
           itemType: 'NOTE',
-          title: cleanSharedValue(data.title) || 'Shared secure note',
+          title: cleanSharedValue(data.title) || 'Shared SecureNote',
           category: cleanSharedValue(data.category),
           encryptedContent: decryptSharedValue(data.encryptedContent),
           pinned: Boolean(data.pinned),
@@ -415,7 +415,7 @@ export default function SharedVaultDetailsScreen() {
       : itemType === 'DOCUMENT'
         ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
         : itemType === 'NOTE'
-          ? cleanSharedValue(item.title) || 'Shared secure note'
+          ? cleanSharedValue(item.title) || 'Shared SecureNote'
           : cleanSharedValue(item.title) || 'Shared password';
 
   return (
@@ -491,8 +491,7 @@ export default function SharedVaultDetailsScreen() {
         <View style={styles.readOnlyBox}>
           <Text style={styles.readOnlyTitle}>Read-only shared item</Text>
           <Text style={styles.readOnlyText}>
-            You can view and copy this item, but only the vault owner can edit or
-            delete it.
+            Only the owner can edit or delete this item.
           </Text>
         </View>
       </ScrollView>
@@ -732,9 +731,9 @@ function SharedNoteDetails({
 
       <InfoRow
         icon={<StickyNote size={19} color={C.primary} />}
-        label="Secure note"
+        label="SecureNote"
         value={content || 'No note content saved'}
-        onCopy={() => copyValue('Secure note', content)}
+        onCopy={() => copyValue('SecureNote', content)}
         styles={styles}
         C={C}
         multiline
@@ -832,10 +831,10 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 
      , shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     skeletonHeaderIcon: { width: 76, height: 76, borderRadius: 24, alignSelf: 'center', marginBottom: 18 },
     skeletonTitle: { width: '62%', height: 26, alignSelf: 'center', marginBottom: 10 },
     skeletonSubtitle: { width: '72%', height: 13, alignSelf: 'center', marginBottom: 22 },
@@ -879,10 +878,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     title: {
       fontSize: 30,
@@ -905,10 +904,10 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     infoRow: {
       flexDirection: 'row',
@@ -960,10 +959,10 @@ const makeStyles = (C: any) =>
       marginLeft: 8,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     fullDivider: {
       height: 1,
@@ -987,10 +986,10 @@ const makeStyles = (C: any) =>
       gap: 10,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     documentDownloadText: {
       flexShrink: 1,
@@ -1013,10 +1012,10 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     readOnlyTitle: {
       color: C.text,

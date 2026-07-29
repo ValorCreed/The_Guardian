@@ -18,6 +18,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, SecureNoteResponse } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
 import { findOfflineNote, isOfflineReadableError, loadOfflineVaultSnapshot } from '../services/offlineVault';
 import { decryptJson, encryptJson } from '../utils/vaultcrypto';
@@ -27,8 +28,13 @@ import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtect
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
 export default function NoteDetailsScreen() {
+  const requestApi = useCancelableApi(api);
   const router = useRouter();
-  const { id, returnTab } = useLocalSearchParams<{ id: string; returnTab?: 'Notes' | 'Passwords' | 'Documents' | 'Cards' }>();
+  const { id, returnTab, mode } = useLocalSearchParams<{
+    id: string;
+    returnTab?: 'Notes' | 'Passwords' | 'Documents' | 'Cards';
+    mode?: 'view' | 'edit';
+  }>();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -65,12 +71,13 @@ export default function NoteDetailsScreen() {
 
     setNote(data);
     setContent(plainContent);
-    setEditTitle(data.title || 'Secure Note');
+    setEditTitle(data.title || 'SecureNote');
     setEditCategory(data.category || 'General');
     setEditContent(plainContent);
     setEditPinned(Boolean(data.pinned));
     setOfflineMode(fromOffline);
     setOfflineSavedAt(savedAt || null);
+    setEditing(mode === 'edit' && !fromOffline);
   };
 
   const loadNote = async () => {
@@ -81,9 +88,10 @@ export default function NoteDetailsScreen() {
       setOfflineMode(false);
       setOfflineSavedAt(null);
 
-      const data = await api.getSecureNote(id);
+      const data = await requestApi.getSecureNote(id);
       applyNote(data, false, null);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       if (isOfflineReadableError(error)) {
         const [snapshot, offlineNote] = await Promise.all([
           loadOfflineVaultSnapshot(),
@@ -96,7 +104,7 @@ export default function NoteDetailsScreen() {
         }
       }
 
-      Alert.alert('Error', error.message || 'Could not load secure note.');
+      Alert.alert('Error', error.message || 'Could not load SecureNote.');
     } finally {
       setLoading(false);
     }
@@ -104,19 +112,19 @@ export default function NoteDetailsScreen() {
 
   useEffect(() => {
     loadNote();
-  }, [id]);
+  }, [id, mode]);
 
   const showOfflineWriteWarning = () => {
     Alert.alert(
       'Offline mode',
-      'This note is being shown from your saved offline vault. Editing and deleting will work again when the server is reachable.'
+      'Only this note’s title and category are stored in the offline item list. Its secret content, editing, and deleting will be available again when the server reconnects.'
     );
   };
 
   const copyContent = async () => {
     if (!content) return;
     await setSecureClipboard(content);
-    Alert.alert('Copied', getSecureClipboardMessage('Secure note'));
+    Alert.alert('Copied', getSecureClipboardMessage('SecureNote'));
   };
 
   const saveChanges = async () => {
@@ -139,7 +147,7 @@ export default function NoteDetailsScreen() {
 
     try {
       setSaving(true);
-      const updated = await api.updateSecureNote(note.id, {
+      const updated = await requestApi.updateSecureNote(note.id, {
         title: editTitle.trim(),
         category: editCategory,
         encryptedContent: encryptJson(editContent.trim()),
@@ -149,9 +157,10 @@ export default function NoteDetailsScreen() {
       setNote(updated);
       setContent(editContent.trim());
       setEditing(false);
-      Alert.alert('Updated', 'Secure note updated.');
+      Alert.alert('Updated', 'SecureNote updated.');
     } catch (error: any) {
-      Alert.alert('Update failed', error.message || 'Could not update secure note.');
+    if (isScreenRequestCancelled(error)) return;
+      Alert.alert('Update failed', error.message || 'Could not update SecureNote.');
     } finally {
       setSaving(false);
     }
@@ -166,7 +175,7 @@ export default function NoteDetailsScreen() {
     if (!note) return;
 
     Alert.alert(
-      'Delete secure note?',
+      'Delete SecureNote?',
       'This note will be permanently deleted. This cannot be undone.',
       [
         { text: 'Cancel', style: 'cancel' },
@@ -175,12 +184,13 @@ export default function NoteDetailsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await api.deleteSecureNote(note.id);
-              Alert.alert('Deleted', 'Secure note deleted.', [
+              await requestApi.deleteSecureNote(note.id);
+              Alert.alert('Deleted', 'SecureNote deleted.', [
                 { text: 'OK', onPress: goBackToVaultNotes },
               ]);
             } catch (error: any) {
-              Alert.alert('Delete failed', error.message || 'Could not delete secure note.');
+    if (isScreenRequestCancelled(error)) return;
+              Alert.alert('Delete failed', error.message || 'Could not delete SecureNote.');
             }
           },
         },
@@ -223,7 +233,7 @@ export default function NoteDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingBox}>
-          <Text style={styles.loadingText}>Secure note not found.</Text>
+          <Text style={styles.loadingText}>SecureNote not found.</Text>
           <TouchableOpacity style={styles.mainBtn} onPress={goBackToVaultNotes}>
             <Text style={styles.mainBtnText}>Go back</Text>
           </TouchableOpacity>
@@ -237,19 +247,19 @@ export default function NoteDetailsScreen() {
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
-            <View style={[styles.noteIcon, note.pinned && { backgroundColor: C.securityScoreBg }]}> 
+            <View style={[styles.noteIcon, note.pinned && { backgroundColor: C.securityScoreBg }]}>
               <Ionicons name={note.pinned ? 'pin' : 'reader-outline'} size={27} color={note.pinned ? C.warning : C.primary} />
             </View>
 
             <Text style={styles.title}>{note.title}</Text>
-            <Text style={styles.subtitle}>{note.category || 'General'} · encrypted secure note</Text>
+            <Text style={styles.subtitle}>{note.category || 'General'}</Text>
           </View>
 
           {offlineMode && (
             <OfflineBanner
               colors={C}
               savedAt={offlineSavedAt}
-              message="This note is available from your offline vault. Editing and deleting are disabled until the server is reachable."
+              message="Only the note title and category are available offline. The note content is not stored on this device and will appear again when the server reconnects."
               onRetry={loadNote}
             />
           )}
@@ -257,7 +267,13 @@ export default function NoteDetailsScreen() {
           {editing ? (
             <View style={styles.form}>
               <Text style={styles.label}>Title</Text>
-              <TextInput style={styles.input} value={editTitle} onChangeText={setEditTitle} placeholderTextColor={C.tabInactive} />
+              <TextInput
+                style={styles.input}
+                value={editTitle}
+                onChangeText={setEditTitle}
+                placeholderTextColor={C.tabInactive}
+                autoFocus={mode === 'edit'}
+              />
 
               <Text style={styles.label}>Category</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
@@ -287,7 +303,7 @@ export default function NoteDetailsScreen() {
                 />
               </View>
 
-              <Text style={styles.label}>Secure note</Text>
+              <Text style={styles.label}>SecureNote</Text>
               <TextInput style={styles.noteInput} value={editContent} onChangeText={setEditContent} multiline textAlignVertical="top" />
 
               <TouchableOpacity style={styles.mainBtn} onPress={saveChanges} disabled={saving}>
@@ -334,12 +350,12 @@ type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
 const makeStyles = (C: ThemeColors) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: C.background },
-    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     skeletonNoteIcon: { width: 74, height: 74, borderRadius: 24, marginBottom: 16 },
     skeletonTitle: { width: '62%', height: 26, marginBottom: 10 },
     skeletonSubtitle: { width: '48%', height: 13 },
@@ -365,34 +381,34 @@ const makeStyles = (C: ThemeColors) =>
     categoryChipActive: { backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
-    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18 
+    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     pinnedTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     pinnedSub: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
     noteInput: { minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
-    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18 
+    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     noteText: { color: C.text, fontSize: 15, lineHeight: 23 },
-    mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8 
+    mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     mainBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 },
-    secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10, flexDirection: 'row', gap: 8 
+    secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10, flexDirection: 'row', gap: 8
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     secondaryBtnText: { color: C.primary, fontWeight: '900', fontSize: 15 },
   });

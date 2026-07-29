@@ -38,7 +38,7 @@ export default function ForgotPasswordScreen() {
         >
           <GuardianLogoTile size={62} logoSize={50} radius={18} style={styles.logoBox} />
 
-          <Text style={styles.title}>Recover your account</Text>
+          <Text style={styles.title}>Account recovery</Text>
 
           <Text style={styles.subtitle}>
             Choose how you want to regain access. Your Recovery Kit is the safe way to reset your password without erasing your vault.
@@ -134,10 +134,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -150,10 +150,10 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     cardIcon: {
       width: 48,
       height: 48,
@@ -163,10 +163,10 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     dangerIcon: {
       width: 48,
       height: 48,
@@ -189,10 +189,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     warningText: {
       flex: 1,
       color: C.textSecondary,

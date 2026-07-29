@@ -198,19 +198,22 @@ export async function getAnalyticsDistinctId() {
 
 export async function getAnalyticsEnabledPreference() {
   try {
-    await AsyncStorage.removeItem(ANALYTICS_ENABLED_KEY);
-  } catch {
-    // Analytics cleanup must never affect the app.
-  }
+    const stored = await AsyncStorage.getItem(ANALYTICS_ENABLED_KEY);
 
-  return true;
+    // Existing users keep the previous behavior until they explicitly opt out.
+    if (stored === null) return true;
+    return stored !== 'false';
+  } catch {
+    // Preference read failures must never interrupt the app.
+    return true;
+  }
 }
 
-export async function setAnalyticsEnabledPreference(_enabled: boolean) {
+export async function setAnalyticsEnabledPreference(enabled: boolean) {
   try {
-    await AsyncStorage.removeItem(ANALYTICS_ENABLED_KEY);
+    await AsyncStorage.setItem(ANALYTICS_ENABLED_KEY, String(enabled));
   } catch {
-    // Kept as a no-op for backward compatibility.
+    // Preference persistence failures must never interrupt the app.
   }
 }
 
@@ -297,8 +300,8 @@ function normalizeScreenName(pathname: string) {
     '/addpassword': 'Add Password',
     '/addcard': 'Add Card',
     '/adddocument': 'Add Document',
-    '/addnote': 'Add Secure Note',
-    '/notedetails': 'Secure Note Details',
+    '/addnote': 'Add SecureNote',
+    '/notedetails': 'SecureNote Details',
     '/security': 'Security',
     '/securityhealth': 'Security Health',
     '/family': 'Family',
@@ -787,6 +790,9 @@ export function recordApiRequest(options: {
   durationMs?: number;
   success: boolean;
   code?: string;
+  transport?: string;
+  retryCount?: number;
+  networkStage?: string;
 }) {
   ensureAnalyticsSession();
 
@@ -817,7 +823,12 @@ export function recordApiRequest(options: {
       options.path,
       options.status,
       options.code,
-      durationMs
+      durationMs,
+      {
+        transport: options.transport,
+        retryCount: options.retryCount,
+        networkStage: options.networkStage,
+      }
     );
     return;
   }
@@ -831,6 +842,9 @@ export function recordApiRequest(options: {
         method: getMethod(options.method),
         status: options.status || 200,
         duration_bucket: getDurationBucket(durationMs),
+        transport: options.transport,
+        retry_count: options.retryCount,
+        network_stage: options.networkStage,
       },
       {
         cooldownKey: `slow:${route}:${getMethod(options.method)}`,
@@ -844,7 +858,12 @@ export function trackApiFailure(
   path: string,
   status?: number,
   code?: string,
-  durationMs?: number
+  durationMs?: number,
+  diagnostics: {
+    transport?: string;
+    retryCount?: number;
+    networkStage?: string;
+  } = {}
 ) {
   const route = normalizePath(path);
   const feature = inferFeatureFromPath(path);
@@ -858,6 +877,9 @@ export function trackApiFailure(
       status: status || 0,
       code: normalizedCode,
       duration_bucket: getDurationBucket(durationMs),
+      transport: diagnostics.transport,
+      retry_count: diagnostics.retryCount,
+      network_stage: diagnostics.networkStage,
     },
     {
       cooldownKey: `failure:${route}:${status || 0}:${normalizedCode}`,

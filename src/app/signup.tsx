@@ -14,19 +14,15 @@ import {
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import AsyncStorage from "@react-native-async-storage/async-storage";
-
-import {
-  api,
-  getEmailDeliveryWarning,
-  saveLoginSession,
-} from "../services/api";
+import { api } from "../services/api";
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from "../context/ThemeContext";
 
 const RegisterScreen = () => {
+  const requestApi = useCancelableApi(api);
   const router = useRouter();
 
-  const { colors: C, resetThemeForNewAccount } = useAppTheme();
+  const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
   const [fullName, setFullName] = useState("");
@@ -70,76 +66,25 @@ const RegisterScreen = () => {
 
       const cleanEmail = email.trim().toLowerCase();
 
-      await AsyncStorage.multiRemove([
-        "token",
-        "userName",
-        "userEmail",
-        "subscriptionPlan",
-        "emailVerified",
-        "twoFactorEnabled",
-        "vaultLocked",
-      ]);
-
-      const data = await api.register({
+      const pending = await requestApi.register({
         fullname: fullName.trim(),
         email: cleanEmail,
         password,
       });
 
-      await saveLoginSession(data as any);
-
-      await resetThemeForNewAccount(cleanEmail);
-
-      const verified = Boolean((data as any)?.emailVerified);
-      await AsyncStorage.setItem("emailVerified", String(verified));
-
-      const emailWarning = getEmailDeliveryWarning(data);
-
-      if (verified) {
-        Alert.alert("Account created", "Your account is ready.", [
-          {
-            text: "Continue",
-            onPress: () => router.replace("/verification"),
-          },
-        ]);
-        return;
-      }
-
-      if (emailWarning) {
-        Alert.alert(
-          "Account created",
-          "Your account was created, but we could not send the verification email right now. You can still sign in and use the app. For better account security, verify your email later from User Information.",
-          [
-            {
-              text: "Continue",
-              onPress: () => router.replace("/verification"),
-              style: "cancel",
-            },
-            {
-              text: "Verify later",
-              onPress: () => router.replace("/verification"),
-            },
-          ],
-        );
-        return;
-      }
-
       Alert.alert(
-        "Account created",
-        "We sent a verification code to your email. You can verify now, or continue and verify later from User Information.",
+        "Check your email",
+        pending.message ||
+          "We sent a 6-digit verification code. Your account will only be created after you confirm the code.",
         [
           {
-            text: "Continue",
-            onPress: () => router.replace("/verification"),
-            style: "cancel",
-          },
-          {
-            text: "Verify now",
+            text: "Enter code",
             onPress: () =>
               router.replace({
                 pathname: "/verifyemail",
                 params: {
-                  email: cleanEmail,
+                  email: pending.email || cleanEmail,
+                  mode: "registration",
                   next: "verification",
                 },
               }),
@@ -147,7 +92,12 @@ const RegisterScreen = () => {
         ],
       );
     } catch (error: any) {
-      Alert.alert("Registration failed", error.message || "Please try again.");
+      if (isScreenRequestCancelled(error)) return;
+      Alert.alert(
+        "Could not start registration",
+        error.message ||
+          "We could not send your verification code. No account has been created. Please try again.",
+      );
     } finally {
       setLoading(false);
     }
@@ -178,7 +128,7 @@ const RegisterScreen = () => {
 
             <Text style={styles.title}>Create your account</Text>
             <Text style={styles.subtitle}>
-              Set up your private vault with a master password only you know.
+              Create a private vault with one master password.
             </Text>
           </View>
 
@@ -374,10 +324,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     label: {
       fontSize: 13,
@@ -411,10 +361,10 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     passwordInput: {
       flex: 1,
@@ -442,10 +392,10 @@ const makeStyles = (C: any) =>
       marginTop: 2,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     disabledButton: {
       opacity: 0.7,

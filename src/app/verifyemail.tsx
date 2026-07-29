@@ -1,7 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,30 +14,73 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api } from '../services/api';
+import { api, saveLoginSession } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import { useAppAlert } from '../context/AppAlertContext';
+
+const AUTO_VERIFY_DELAY_MS = 260;
+
+const getFriendlyVerificationError = (error: any, registrationMode: boolean) => {
+  const message = String(error?.message || error?.rawMessage || '').trim();
+  const lower = message.toLowerCase();
+  const status = Number(error?.status || 0);
+
+  if (
+    status === 400 ||
+    status === 401 ||
+    lower.includes('invalid') ||
+    lower.includes('incorrect') ||
+    lower.includes('expired') ||
+    lower.includes('code')
+  ) {
+    return 'That verification code is incorrect or has expired. Check the six digits or request a new code.';
+  }
+
+  if (
+    lower.includes('network') ||
+    lower.includes('connect') ||
+    lower.includes('timeout') ||
+    lower.includes('taking too long')
+  ) {
+    return message || 'We could not reach The Guardian. Check your connection and try again.';
+  }
+
+  return registrationMode
+    ? 'We could not confirm this code, so your account has not been created yet. Please try again.'
+    : 'We could not verify that code right now. Please try again.';
+};
 
 export default function VerifyEmailScreen() {
-  const { isDark, colors: C } = useAppTheme();
+  const requestApi = useCancelableApi(api);
+  const { showAlert } = useAppAlert();
+  const { isDark, colors: C, resetThemeForNewAccount } = useAppTheme();
   const styles = makeStyles(C);
 
   const params = useLocalSearchParams<{
     email?: string;
     next?: string;
     autoSend?: string;
+    mode?: string;
   }>();
 
   const email = String(params.email || '').trim().toLowerCase();
   const next = String(params.next || 'verification');
   const autoSend = String(params.autoSend || 'false') === 'true';
+  const registrationMode = String(params.mode || '') === 'registration';
 
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [autoSent, setAutoSent] = useState(false);
   const [initialAutoSending, setInitialAutoSending] = useState(false);
+
+  const codeInputRef = useRef<TextInput>(null);
+  const lastAttemptedCodeRef = useRef('');
+  const verifyingRef = useRef(false);
 
   useEffect(() => {
     if (email && autoSend && !autoSent) {
@@ -47,7 +89,7 @@ export default function VerifyEmailScreen() {
     }
   }, [email, autoSend, autoSent]);
 
-  const goNext = () => {
+  const goNext = useCallback(() => {
     if (next === 'userinfo') {
       router.replace('/userinfo');
       return;
@@ -64,49 +106,130 @@ export default function VerifyEmailScreen() {
     }
 
     router.replace('/verification');
-  };
+  }, [next]);
 
-  const handleVerify = async () => {
-    const cleanCode = code.trim();
+  const verifyCode = useCallback(
+    async (rawCode: string, showIncompleteError = false) => {
+      const cleanCode = rawCode.replace(/\D/g, '').slice(0, 6);
 
-    if (!email) {
-      Alert.alert('Missing email', 'Go back and try again.');
+      if (!email) {
+        showAlert({
+          title: 'Email missing',
+          message: 'We could not identify the email for this verification request. Please go back and try again.',
+          type: 'error',
+        });
+        return;
+      }
+
+      if (cleanCode.length !== 6) {
+        if (showIncompleteError) {
+          showAlert({
+            title: 'Enter all six digits',
+            message: 'The verification code must contain exactly six numbers.',
+            type: 'info',
+            buttons: [
+              {
+                text: 'Continue typing',
+                onPress: () => codeInputRef.current?.focus(),
+              },
+            ],
+          });
+        }
+        return;
+      }
+
+      if (loading || verifyingRef.current) return;
+
+      verifyingRef.current = true;
+      lastAttemptedCodeRef.current = cleanCode;
+
+      try {
+        setLoading(true);
+
+        if (registrationMode) {
+          const account = await requestApi.verifyRegistration({
+            email,
+            code: cleanCode,
+          });
+
+          await saveLoginSession(account);
+          await AsyncStorage.setItem('emailVerified', 'true');
+          await resetThemeForNewAccount(email);
+          goNext();
+          return;
+        }
+
+        await requestApi.verifyEmail({
+          email,
+          code: cleanCode,
+        });
+        await AsyncStorage.setItem('emailVerified', 'true');
+        goNext();
+      } catch (error: any) {
+        if (isScreenRequestCancelled(error)) return;
+
+        setCode('');
+
+        showAlert({
+          title: 'Code not accepted',
+          message: getFriendlyVerificationError(error, registrationMode),
+          type: 'error',
+          buttons: [
+            {
+              text: 'Try again',
+              onPress: () => codeInputRef.current?.focus(),
+            },
+          ],
+        });
+      } finally {
+        verifyingRef.current = false;
+        setLoading(false);
+      }
+    },
+    [
+      email,
+      goNext,
+      loading,
+      registrationMode,
+      requestApi,
+      resetThemeForNewAccount,
+      showAlert,
+    ]
+  );
+
+  useEffect(() => {
+    const cleanCode = code.replace(/\D/g, '').slice(0, 6);
+
+    if (
+      cleanCode.length !== 6 ||
+      loading ||
+      sending ||
+      lastAttemptedCodeRef.current === cleanCode
+    ) {
       return;
     }
 
-    if (cleanCode.length !== 6) {
-      Alert.alert('Invalid code', 'Enter the 6-digit verification code.');
-      return;
+    const timer = setTimeout(() => {
+      void verifyCode(cleanCode);
+    }, AUTO_VERIFY_DELAY_MS);
+
+    return () => clearTimeout(timer);
+  }, [code, loading, sending, verifyCode]);
+
+  const handleCodeChange = (value: string) => {
+    const nextCode = value.replace(/[^0-9]/g, '').slice(0, 6);
+
+    if (nextCode.length < 6) {
+      lastAttemptedCodeRef.current = '';
     }
 
-    try {
-      setLoading(true);
-
-      await api.verifyEmail({
-        email,
-        code: cleanCode,
-      });
-
-      Alert.alert('Email verified', 'Your email has been verified successfully.', [
-        {
-          text: 'Continue',
-          onPress: goNext,
-        },
-      ]);
-    } catch (error: any) {
-      Alert.alert(
-        'Verification failed',
-        error.message || 'Could not verify your email.'
-      );
-    } finally {
-      setLoading(false);
-    }
+    setCode(nextCode);
   };
 
   const handleResendCode = async (silent = false) => {
     if (!email) {
       if (!silent) {
-        Alert.alert('Missing email', 'Go back and try again.');
+        showAlert({ title: 'Email missing', message: 'Go back and try again.', type: 'error' });
       }
       return;
     }
@@ -117,27 +240,39 @@ export default function VerifyEmailScreen() {
         setInitialAutoSending(true);
       }
 
-      await api.resendVerification({ email });
+      if (registrationMode) {
+        await requestApi.resendRegistrationCode({ email });
+      } else {
+        await requestApi.resendVerification({ email });
+      }
 
       if (!silent) {
-        Alert.alert(
-          'Code sent',
-          'A new verification code has been sent to your email.'
-        );
+        setCode('');
+        lastAttemptedCodeRef.current = '';
+        showAlert({
+          title: 'Code sent',
+          message: 'A new verification code has been sent to your email.',
+          type: 'success',
+          buttons: [
+            {
+              text: 'Enter code',
+              onPress: () => codeInputRef.current?.focus(),
+            },
+          ],
+        });
       }
     } catch (error: any) {
+      if (isScreenRequestCancelled(error)) return;
       if (!silent) {
-        Alert.alert(
-          'Could not send code',
-          'We could not send a verification code right now. You can still use the app, but your account is safer after email verification. You can try again later from User Information.',
-          [
-            { text: 'Stay here', style: 'cancel' },
-            {
-              text: next === 'userinfo' ? 'Back to account' : 'Continue',
-              onPress: goNext,
-            },
-          ]
-        );
+        showAlert({
+          title: 'Could not send code',
+          message:
+            error.message ||
+            (registrationMode
+              ? 'We could not send a new code. Your account has not been created.'
+              : 'We could not send a verification code right now.'),
+          type: 'error',
+        });
       }
     } finally {
       setSending(false);
@@ -191,22 +326,25 @@ export default function VerifyEmailScreen() {
 
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.iconBox}>
             <Ionicons name="mail-outline" size={44} color="#FFFFFF" />
           </View>
 
-          <Text style={styles.title}>Verify your email</Text>
+          <Text style={styles.title}>{registrationMode ? 'Confirm your email' : 'Verify your email'}</Text>
 
           <Text style={styles.subtitle}>
             Enter the 6-digit code sent to{' '}
-            <Text style={styles.emailText}>{email || 'your email'}</Text>. If sending fails, you can still continue and verify later from User Information.
+            <Text style={styles.emailText}>{email || 'your email'}</Text>.
           </Text>
 
           <View style={styles.infoCard}>
@@ -217,8 +355,9 @@ export default function VerifyEmailScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.infoTitle}>Why verification matters</Text>
               <Text style={styles.infoText}>
-                Email verification protects password reset, 2FA, and account
-                recovery features.
+                {registrationMode
+                  ? 'Your account, subscription, device session, and vault access are created only after this code is confirmed.'
+                  : 'Email verification protects sign-in, password reset, 2FA, and account recovery features.'}
               </Text>
             </View>
           </View>
@@ -226,23 +365,31 @@ export default function VerifyEmailScreen() {
           <Text style={styles.label}>Verification code</Text>
 
           <TextInput
+            ref={codeInputRef}
             style={styles.codeInput}
             value={code}
-            onChangeText={(value) =>
-              setCode(value.replace(/[^0-9]/g, '').slice(0, 6))
-            }
+            onChangeText={handleCodeChange}
             keyboardType="number-pad"
+            textContentType="oneTimeCode"
+            autoComplete="one-time-code"
             placeholder="000000"
             placeholderTextColor={C.tabInactive}
             maxLength={6}
             textAlign="center"
-            editable={!loading}
+            editable={!loading && !sending}
+            autoFocus
           />
+
+          <Text style={styles.autoVerifyText}>
+            {loading
+              ? 'Checking your code…'
+              : ''}
+          </Text>
 
           <TouchableOpacity
             style={[styles.primaryButton, loading && styles.disabledButton]}
             activeOpacity={0.85}
-            onPress={handleVerify}
+            onPress={() => void verifyCode(code, true)}
             disabled={loading}
           >
             {loading ? (
@@ -271,10 +418,28 @@ export default function VerifyEmailScreen() {
           <TouchableOpacity
             style={styles.secondaryButton}
             activeOpacity={0.75}
-            onPress={goNext}
+            onPress={() => {
+              if (registrationMode) {
+                router.replace('/signup');
+                return;
+              }
+
+              if (next === 'userinfo') {
+                router.replace('/userinfo');
+                return;
+              }
+
+              router.replace('/signin');
+            }}
             disabled={loading || sending}
           >
-            <Text style={styles.secondaryButtonText}>{next === 'userinfo' ? 'Back to account' : 'Continue without verifying now'}</Text>
+            <Text style={styles.secondaryButtonText}>
+              {registrationMode
+                ? 'Use another email'
+                : next === 'userinfo'
+                  ? 'Back to account'
+                  : 'Back to sign in'}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -311,9 +476,9 @@ const makeStyles = (C: any) =>
       marginBottom: 28,
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 12 },
-      shadowOpacity: 0.18,
+      shadowOpacity: 0.10,
       shadowRadius: 20,
-      elevation: 6,
+      elevation: 3,
     },
 
     title: {
@@ -349,10 +514,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     infoIcon: {
       width: 42,
@@ -395,7 +560,16 @@ const makeStyles = (C: any) =>
       fontSize: 30,
       fontWeight: '900',
       letterSpacing: 10,
-      marginBottom: 18,
+      marginBottom: 0,
+    },
+
+    autoVerifyText: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: 'center',
+      marginTop: 10,
+      marginBottom: 14,
     },
 
     primaryButton: {
@@ -408,10 +582,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     disabledButton: {
       opacity: 0.65,
@@ -422,10 +596,10 @@ const makeStyles = (C: any) =>
       borderRadius: 999,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     skeletonIconBox: {
       width: 96,

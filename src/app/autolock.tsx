@@ -135,11 +135,10 @@ export default function AutoLockScreen() {
         <Text style={styles.title}>Auto-lock</Text>
 
         <Text style={styles.subtitle}>
-          Auto-lock protects your vault when you leave the app. New accounts now
-          use 30 seconds by default unless the user chooses another option.
+          Auto-lock protects your vault when you leave the app.
         </Text>
 
-        <View style={styles.infoCard}>
+        {/* <View style={styles.infoCard}>
           <InfoRow
             icon={<Smartphone size={21} color={C.primary} />}
             title="What counts as leaving?"
@@ -164,7 +163,7 @@ export default function AutoLockScreen() {
             text="Choose 'When app closes' to lock immediately when the app goes to the background."
             styles={styles}
           />
-        </View>
+        </View> */}
 
         <Text style={styles.sectionLabel}>LOCK VAULT</Text>
 
@@ -286,10 +285,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     infoRow: {
       flexDirection: 'row',
@@ -344,10 +343,10 @@ const makeStyles = (C: any) =>
       marginBottom: 26,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     optionRow: {
       minHeight: 74,
@@ -406,10 +405,10 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: C.shadow,
-      shadowOpacity: 0.18,
+      shadowOpacity: 0.10,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     doneButtonText: {

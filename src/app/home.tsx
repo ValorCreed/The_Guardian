@@ -10,6 +10,8 @@ import {
   Animated,
   BackHandler,
   Easing,
+  KeyboardAvoidingView,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -27,6 +29,7 @@ import Svg, { Circle } from "react-native-svg";
 import { useAppTheme } from "../context/ThemeContext";
 import PulsingSkeleton from "../components/PulsingSkeleton";
 import { useSecurityScore } from "../hooks/useSecurityScore";
+import { scheduleIdleTask, type IdleTaskHandle } from "../services/securityScoreSync";
 import { api, VaultItem } from "../services/api";
 import GuardianLogoTile from "../components/GuardianLogoTitle";
 import * as Updates from "expo-updates";
@@ -34,12 +37,18 @@ import WhatsNewModal from "../components/WhatsNewModal";
 import OfflineBanner from "../components/OfflineBanner";
 import {
   isOfflineReadableError,
+  loadOfflineVaultSnapshot,
   saveOfflineVaultSnapshot,
 } from "../services/offlineVault";
 import { WHATS_NEW_VERSION } from "../constants/whatsNew";
 import { hapticLight, hapticMedium, hapticScoreSettled, hapticSelection, hapticWarning } from '../utils/haptics';
+import { syncGuardianAutofillCache, syncPendingGuardianAutofillSaves } from '../services/autofillSync';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const RECOVERY_ALERT_THROTTLE_MS = 10 * 60 * 1000;
+const HOME_NEEDS_SYNC_KEY = "homeNeedsInitialSync";
+const SECURITY_SCORE_NEEDS_SYNC_KEY = "securityScoreNeedsInitialSync";
+const HOME_FOCUS_REFRESH_DEDUP_MS = 5000;
+const HOME_FAST_REACHABILITY_TIMEOUT_MS = 1800;
 
 type VaultTab = "Passwords" | "Documents" | "Cards" | "Notes";
 
@@ -186,7 +195,7 @@ const getItemSubtitle = (item: VaultItem) => {
   }
 
   if (item.itemType === "NOTE") {
-    return safelyDecodeText(item.mimeType) || "Secure note";
+    return safelyDecodeText(item.mimeType) || "SecureNote";
   }
 
   return safelyDecodeText(item.usernameValue) || "Encrypted card";
@@ -207,137 +216,226 @@ const normalizePlan = (value?: string) => {
 type ScoreRingProps = {
   score: number;
   loading: boolean;
+  focusAnimationKey: number;
   styles: any;
 };
 
-const ScoreRing = React.memo(({ score, loading, styles }: ScoreRingProps) => {
-  const size = 92;
-  const strokeWidth = 8;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
+const ScoreRing = React.memo(
+  ({ score, loading, focusAnimationKey, styles }: ScoreRingProps) => {
+    const size = 92;
+    const strokeWidth = 8;
+    const radius = (size - strokeWidth) / 2;
+    const circumference = 2 * Math.PI * radius;
 
-  const animatedScore = useRef(new Animated.Value(0)).current;
-  const pulseAnim = useRef(new Animated.Value(0)).current;
-  const lastAnimatedScore = useRef<number | null>(null);
-  const [displayScore, setDisplayScore] = useState(0);
+    const initialScore = Math.max(0, Math.min(Number(score) || 0, 100));
+    const animatedScore = useRef(new Animated.Value(initialScore)).current;
+    const pulseAnim = useRef(new Animated.Value(0)).current;
+    const lastFocusAnimationKey = useRef(focusAnimationKey);
+    const lastDisplayedScore = useRef(initialScore);
+    const lastDisplayUpdateAt = useRef(0);
+    const loadingRef = useRef(loading);
+    const animationRunRef = useRef(0);
+    const activeScoreAnimationRef = useRef<Animated.CompositeAnimation | null>(null);
+    const [displayScore, setDisplayScore] = useState(initialScore);
 
-  useEffect(() => {
-    const listenerId = animatedScore.addListener(({ value }) => {
-      setDisplayScore(Math.round(value));
-    });
+    useEffect(() => {
+      loadingRef.current = loading;
+    }, [loading]);
 
-    return () => {
-      animatedScore.removeListener(listenerId);
-    };
-  }, [animatedScore]);
+    useEffect(() => {
+      const listenerId = animatedScore.addListener(({ value }) => {
+        const roundedValue = Math.round(value);
+        const now = Date.now();
 
-  useEffect(() => {
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1400,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0,
-          duration: 1400,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
+        if (roundedValue === lastDisplayedScore.current) {
+          return;
+        }
 
-    pulse.start();
-    return () => pulse.stop();
-  }, [pulseAnim]);
+        /*
+         * Keep the numeric count smooth without making React rerender the score
+         * text on every SVG animation frame.
+         */
+        if (now - lastDisplayUpdateAt.current < 72) {
+          return;
+        }
 
-  useEffect(() => {
-    const safeScore = Math.max(0, Math.min(Number(score) || 0, 100));
+        lastDisplayUpdateAt.current = now;
+        lastDisplayedScore.current = roundedValue;
+        setDisplayScore((current) =>
+          current === roundedValue ? current : roundedValue
+        );
+      });
 
-    if (lastAnimatedScore.current === safeScore) {
-      return;
-    }
+      return () => {
+        animatedScore.removeListener(listenerId);
+      };
+    }, [animatedScore]);
 
-    lastAnimatedScore.current = safeScore;
+    useEffect(() => {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1400,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+            isInteraction: false,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 0,
+            duration: 1400,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+            isInteraction: false,
+          }),
+        ]),
+      );
 
-    Animated.timing(animatedScore, {
-      toValue: safeScore,
-      duration: 1050,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: false,
-    }).start(({ finished }) => {
-      if (finished && !loading) {
-        hapticScoreSettled(safeScore);
+      pulse.start();
+      return () => pulse.stop();
+    }, [pulseAnim]);
+
+    useEffect(() => {
+      if (focusAnimationKey < 0) return;
+
+      const safeScore = Math.max(0, Math.min(Number(score) || 0, 100));
+      const focusChanged =
+        lastFocusAnimationKey.current !== focusAnimationKey;
+      const animationRun = animationRunRef.current + 1;
+
+      animationRunRef.current = animationRun;
+      lastFocusAnimationKey.current = focusAnimationKey;
+
+      /*
+       * Continue from the ring's current visual position when the server
+       * updates the score during the entrance animation. The previous version
+       * stopped and recreated the timing effect from React cleanup, which
+       * produced a visible hitch when Home was also hydrating cached data.
+       */
+      activeScoreAnimationRef.current?.stop();
+
+      let animationStart = lastDisplayedScore.current;
+
+      if (focusChanged) {
+        animationStart = 0;
+        animatedScore.setValue(0);
+        lastDisplayedScore.current = 0;
+        lastDisplayUpdateAt.current = Date.now();
+        setDisplayScore((current) => (current === 0 ? current : 0));
       }
+
+      const distance = Math.abs(safeScore - animationStart);
+      const duration = focusChanged
+        ? 920
+        : Math.max(360, Math.min(720, 360 + distance * 5));
+
+      const animation = Animated.timing(animatedScore, {
+        toValue: safeScore,
+        duration,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+        isInteraction: false,
+      });
+
+      activeScoreAnimationRef.current = animation;
+
+      animation.start(({ finished }) => {
+        if (
+          !finished ||
+          animationRunRef.current !== animationRun ||
+          activeScoreAnimationRef.current !== animation
+        ) {
+          return;
+        }
+
+        activeScoreAnimationRef.current = null;
+        lastDisplayedScore.current = safeScore;
+        lastDisplayUpdateAt.current = Date.now();
+        setDisplayScore((current) =>
+          current === safeScore ? current : safeScore
+        );
+
+        if (!loadingRef.current) {
+          hapticScoreSettled(safeScore);
+        }
+      });
+    }, [animatedScore, focusAnimationKey, score]);
+
+    useEffect(() => {
+      return () => {
+        animationRunRef.current += 1;
+        activeScoreAnimationRef.current?.stop();
+        activeScoreAnimationRef.current = null;
+      };
+    }, []);
+
+    const animatedDashOffset = animatedScore.interpolate({
+      inputRange: [0, 100],
+      outputRange: [circumference, 0],
+      extrapolate: "clamp",
     });
-  }, [animatedScore, score]);
 
-  const animatedDashOffset = animatedScore.interpolate({
-    inputRange: [0, 100],
-    outputRange: [circumference, 0],
-    extrapolate: "clamp",
-  });
+    const scoreColor =
+      score >= 80 ? "#FFFFFF" : score >= 50 ? "#FDE68A" : "#FCA5A5";
 
-  const scoreColor =
-    score >= 80 ? "#FFFFFF" : score >= 50 ? "#FDE68A" : "#FCA5A5";
+    const pulseScale = pulseAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [1, 1.18],
+    });
 
-  const pulseScale = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.18],
-  });
+    const pulseOpacity = pulseAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.12, 0.34],
+    });
 
-  const pulseOpacity = pulseAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.12, 0.34],
-  });
-
-  return (
-    <View style={styles.scoreRingWrapper}>
-      <Animated.View
-        pointerEvents="none"
-        style={[
-          styles.scoreRingPulse,
-          {
-            opacity: pulseOpacity,
-            transform: [{ scale: pulseScale }],
-          },
-        ]}
-      />
-
-      <Svg width={size} height={size}>
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke="rgba(255,255,255,0.22)"
-          strokeWidth={strokeWidth}
-          fill="none"
+    return (
+      <View style={styles.scoreRingWrapper}>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.scoreRingPulse,
+            {
+              opacity: pulseOpacity,
+              transform: [{ scale: pulseScale }],
+            },
+          ]}
         />
 
-        <AnimatedCircle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={scoreColor}
-          strokeWidth={strokeWidth}
-          fill="none"
-          strokeDasharray={`${circumference}`}
-          strokeDashoffset={animatedDashOffset as any}
-          strokeLinecap="round"
-          rotation="-90"
-          origin={`${size / 2}, ${size / 2}`}
-        />
-      </Svg>
+        <Svg width={size} height={size}>
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke="rgba(255,255,255,0.22)"
+            strokeWidth={strokeWidth}
+            fill="none"
+          />
 
-      <View style={styles.scoreTextOverlay}>
-        <Text style={styles.scoreNumber}>{displayScore}</Text>
-        <Text style={styles.scoreLabel}>{loading ? "Updating" : "Score"}</Text>
+          <AnimatedCircle
+            cx={size / 2}
+            cy={size / 2}
+            r={radius}
+            stroke={scoreColor}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={`${circumference}`}
+            strokeDashoffset={animatedDashOffset as any}
+            strokeLinecap="round"
+            rotation="-90"
+            origin={`${size / 2}, ${size / 2}`}
+          />
+        </Svg>
+
+        <View style={styles.scoreTextOverlay}>
+          <Text style={styles.scoreNumber}>{displayScore}</Text>
+          <Text style={styles.scoreLabel}>
+            {loading ? "Updating" : "Score"}
+          </Text>
+        </View>
       </View>
-    </View>
-  );
-});
+    );
+  },
+);
 
 const HomeScreen = () => {
   const router = useRouter();
@@ -352,28 +450,58 @@ const HomeScreen = () => {
     "FREE" | "PREMIUM" | "FAMILY"
   >("FREE");
   const [loadingVault, setLoadingVault] = useState(false);
+  const [vaultCountsReady, setVaultCountsReady] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
 
+  const homeRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const lastSuccessfulHomeRefreshAtRef = useRef(0);
+  const deferredSecurityRefreshRef = useRef<IdleTaskHandle | null>(null);
+  const deferredAutofillSyncRef = useRef<IdleTaskHandle | null>(null);
+  const reloadSecurityScoreSilentlyRef = useRef<() => Promise<any>>(
+    async () => undefined
+  );
+  const [scoreFocusAnimationKey, setScoreFocusAnimationKey] = useState(-1);
+
   const { colors: C } = useAppTheme();
   const {
     report,
     loading: securityScoreLoading,
+    syncing: securityScoreSyncing,
     reload: reloadSecurityScore,
+    reloadSilently: reloadSecurityScoreSilently,
   } = useSecurityScore();
-  const styles = makeStyles(C);
+  const styles = useMemo(() => makeStyles(C), [C]);
+  const securityScoreUpdating = securityScoreLoading || securityScoreSyncing;
 
+  /*
+   * useSecurityScore exposes convenience wrappers. Keep the latest silent
+   * reload in a ref so Home's focus callback does not become a new function
+   * merely because that wrapper received a new identity on a render.
+   */
   useEffect(() => {
-    const loadName = async () => {
-      const name = await AsyncStorage.getItem("userName");
-      if (name) setUserName(name);
-    };
+    reloadSecurityScoreSilentlyRef.current = reloadSecurityScoreSilently;
+  }, [reloadSecurityScoreSilently]);
 
-    loadName();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const loadName = async () => {
+        const name = await AsyncStorage.getItem("userName");
+        if (active) setUserName(name || "User");
+      };
+
+      void loadName();
+
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
 
   const getHomeCacheKey = async () => {
     const email = await AsyncStorage.getItem("userEmail");
@@ -388,6 +516,7 @@ const HomeScreen = () => {
     setSubscriptionPlan(normalizePlan(snapshot.subscriptionPlan));
     setUnreadNotifications(Number(snapshot.unreadNotifications || 0));
     setOfflineSavedAt(snapshot.savedAt || null);
+    setVaultCountsReady(true);
   }, []);
 
   const mapHomeData = (
@@ -399,7 +528,7 @@ const HomeScreen = () => {
     notificationCount: any,
   ) => {
     const fixedPasswords = passwordData.map((item: any) => ({
-      ...item,
+      id: item.id,
       itemType: "PASSWORD" as const,
       title: safelyDecodeText(item.title),
       website: safelyDecodeText(item.website),
@@ -443,8 +572,6 @@ const HomeScreen = () => {
         title: documentName,
         fileName: documentName,
         mimeType: documentType,
-        encryptedData: doc.encryptedFileUrl,
-        notes: doc.encryptedNotes,
         sizeBytes: getDocumentSizeFromResponse(doc),
         createdAt: doc.createdAt || doc.created_at || timestamp,
         updatedAt: timestamp,
@@ -465,7 +592,6 @@ const HomeScreen = () => {
         itemType: "CARD" as const,
         title: safelyDecodeText(card.cardName) || "Saved Card",
         usernameValue: cardholderName,
-        encryptedData: JSON.stringify(card),
         website: safelyDecodeText(card.last4) || "••••",
         createdAt: card.createdAt || card.created_at,
         updatedAt: getBestTimestamp(card),
@@ -475,10 +601,8 @@ const HomeScreen = () => {
     const fixedNotes = noteData.map((note: any) => ({
       id: note.id,
       itemType: "NOTE" as const,
-      title: note.title || "Secure Note",
+      title: note.title || "SecureNote",
       mimeType: note.category || "General",
-      encryptedData: note.encryptedContent,
-      notes: note.encryptedContent,
       createdAt: note.createdAt || note.created_at,
       updatedAt: getBestTimestamp(note),
     }));
@@ -509,97 +633,294 @@ const HomeScreen = () => {
     }
   }, [applyHomeSnapshot]);
 
+  const hydrateHomeFromOfflineVault = useCallback(async () => {
+    try {
+      const snapshot = await loadOfflineVaultSnapshot();
+      if (!snapshot) return false;
+
+      const cachedPlan = normalizePlan(
+        (await AsyncStorage.getItem("subscriptionPlan")) || undefined
+      );
+
+      applyHomeSnapshot({
+        passwords: (snapshot.passwords || []).map((item: any) => ({
+          id: item.id,
+          itemType: "PASSWORD" as const,
+          title: safelyDecodeText(item.title),
+          website: safelyDecodeText(item.website),
+          usernameValue: safelyDecodeText(item.usernameValue),
+          createdAt: item.createdAt,
+          updatedAt: getBestTimestamp(item),
+        })),
+        documents: (snapshot.documents || []).map((doc: any) => ({
+          id: doc.id,
+          itemType: "DOCUMENT" as const,
+          title:
+            safelyDecodeText(doc.documentName || doc.fileName || doc.title) ||
+            "Encrypted document",
+          fileName:
+            safelyDecodeText(doc.fileName || doc.documentName || doc.title) ||
+            "Encrypted document",
+          mimeType:
+            doc.mimeType ||
+            doc.documentType ||
+            "application/octet-stream",
+          sizeBytes: Number(doc.sizeBytes || 0),
+          createdAt: doc.createdAt,
+          updatedAt: getBestTimestamp(doc),
+        })),
+        cards: (snapshot.cards || []).map((card: any) => ({
+          id: card.id,
+          itemType: "CARD" as const,
+          title: safelyDecodeText(card.cardName) || "Saved Card",
+          usernameValue: "Cardholder",
+          website: safelyDecodeText(card.last4) || "••••",
+          createdAt: card.createdAt,
+          updatedAt: getBestTimestamp(card),
+        })),
+        notes: (snapshot.notes || []).map((note: any) => ({
+          id: note.id,
+          itemType: "NOTE" as const,
+          title: note.title || "SecureNote",
+          mimeType: note.category || "General",
+          createdAt: note.createdAt,
+          updatedAt: getBestTimestamp(note),
+        })),
+        subscriptionPlan: cachedPlan,
+        unreadNotifications: 0,
+        savedAt: snapshot.savedAt,
+      });
+
+      setOfflineSavedAt(snapshot.savedAt || null);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [applyHomeSnapshot]);
+
   const fetchHomeDataFromServer = useCallback(
-    async (force = false) => {
-      try {
-        if (force) {
-          api.clearCache?.();
-        }
+    (
+      options: {
+        force?: boolean;
+        silent?: boolean;
+      } = {},
+    ) => {
+      if (homeRefreshInFlightRef.current) {
+        return homeRefreshInFlightRef.current;
+      }
 
-        setLoadingVault(true);
+      const force = Boolean(options.force);
+      const silent = Boolean(options.silent);
 
-        const [
-          passwordData,
-          documentData,
-          cardData,
-          noteData,
-          subscription,
-          notificationCount,
-        ] = await Promise.all([
-          api.getVaultItems(),
-          api.getDocuments(),
-          api.getCards(),
-          api.getSecureNotes(),
-          api.getSubscription().catch(() => ({ plan: "FREE" as const })),
-          api.getUnreadNotificationCount().catch(() => ({ unreadCount: 0 })),
-        ]);
+      const refreshTask = (async () => {
+        try {
+          const serverReachable = await api
+            .checkServerReachability(HOME_FAST_REACHABILITY_TIMEOUT_MS)
+            .catch(() => false);
 
-        const snapshot = mapHomeData(
-          passwordData || [],
-          documentData || [],
-          cardData || [],
-          noteData || [],
-          subscription,
-          notificationCount,
-        );
+          if (!serverReachable) {
+            const hydrated =
+              (await hydrateHomeData()) ||
+              (await hydrateHomeFromOfflineVault());
 
-        applyHomeSnapshot(snapshot);
-        setOfflineMode(false);
-        setOfflineSavedAt(null);
-
-        await saveOfflineVaultSnapshot({
-          passwords: passwordData || [],
-          cards: cardData || [],
-          documents: documentData || [],
-          notes: noteData || [],
-        });
-
-        const cacheKey = await getHomeCacheKey();
-        await AsyncStorage.setItem(cacheKey, JSON.stringify(snapshot));
-        await AsyncStorage.removeItem("homeNeedsInitialSync");
-      } catch (error: any) {
-        console.log("HOME DATA ERROR:", error);
-
-        if (isOfflineReadableError(error)) {
-          const hydrated = await hydrateHomeData();
-          if (hydrated) {
             setOfflineMode(true);
+
+            if (!hydrated) {
+              setOfflineSavedAt(null);
+            }
+
             return;
           }
+
+          if (force) {
+            /*
+             * Every Home server refresh must bypass the API's short-lived GET
+             * cache. Otherwise the Home snapshot can be rebuilt from the same
+             * stale API values after a vault or notification mutation.
+             */
+            api.clearCache?.();
+          }
+
+          if (!silent) {
+            setLoadingVault(true);
+          }
+
+          const [
+            passwordData,
+            documentData,
+            cardData,
+            noteData,
+            subscription,
+            notificationCount,
+          ] = await Promise.all([
+            api.getVaultItems(),
+            api.getDocuments(),
+            api.getCards(),
+            api.getSecureNotes(),
+            api.getSubscription().catch(() => ({ plan: "FREE" as const })),
+            api
+              .getUnreadNotificationCount()
+              .catch(() => ({ unreadCount: 0 })),
+          ]);
+
+          const snapshot = mapHomeData(
+            passwordData || [],
+            documentData || [],
+            cardData || [],
+            noteData || [],
+            subscription,
+            notificationCount,
+          );
+
+          applyHomeSnapshot(snapshot);
+          void syncGuardianAutofillCache({
+            passwords: passwordData || [],
+            cards: cardData || [],
+          }).catch(() => undefined);
+          setOfflineMode(false);
+          setOfflineSavedAt(null);
+          lastSuccessfulHomeRefreshAtRef.current = Date.now();
+
+          await saveOfflineVaultSnapshot({
+            passwords: passwordData || [],
+            cards: cardData || [],
+            documents: documentData || [],
+            notes: noteData || [],
+          });
+
+          const cacheKey = await getHomeCacheKey();
+          await AsyncStorage.setItem(cacheKey, JSON.stringify(snapshot));
+          await AsyncStorage.removeItem(HOME_NEEDS_SYNC_KEY);
+        } catch (error: any) {
+          console.log("HOME DATA ERROR:", error);
+
+          if (isOfflineReadableError(error)) {
+            const hydrated =
+              (await hydrateHomeData()) ||
+              (await hydrateHomeFromOfflineVault());
+
+            if (hydrated) {
+              setOfflineMode(true);
+              return;
+            }
+          }
+        } finally {
+          setVaultCountsReady(true);
+          if (!silent) {
+            setLoadingVault(false);
+          }
         }
-      } finally {
-        setLoadingVault(false);
-      }
+      })();
+
+      homeRefreshInFlightRef.current = refreshTask;
+
+      void refreshTask.finally(() => {
+        if (homeRefreshInFlightRef.current === refreshTask) {
+          homeRefreshInFlightRef.current = null;
+        }
+      });
+
+      return refreshTask;
     },
-    [applyHomeSnapshot, hydrateHomeData],
+    [applyHomeSnapshot, hydrateHomeData, hydrateHomeFromOfflineVault],
   );
 
   const loadHomeData = useCallback(async () => {
-    const needsInitialSync = await AsyncStorage.getItem("homeNeedsInitialSync");
-
-    if (needsInitialSync === "true") {
-      await fetchHomeDataFromServer(true);
-      return;
-    }
-
+    /*
+     * Show the saved dashboard immediately, then refresh it from the server
+     * without replacing the visible cards with skeletons. Mutation flows set
+     * HOME_NEEDS_SYNC_KEY, while the normal focus refresh also catches changes
+     * created elsewhere, including new notification counts.
+     */
     const hydrated = await hydrateHomeData();
 
+    const [needsHomeSync, needsSecuritySync] = await Promise.all([
+      AsyncStorage.getItem(HOME_NEEDS_SYNC_KEY),
+      AsyncStorage.getItem(SECURITY_SCORE_NEEDS_SYNC_KEY),
+    ]);
+
     if (!hydrated) {
-      await fetchHomeDataFromServer(true);
+      await fetchHomeDataFromServer({ force: true, silent: false });
+    } else {
+      const recentlyRefreshed =
+        Date.now() - lastSuccessfulHomeRefreshAtRef.current <
+        HOME_FOCUS_REFRESH_DEDUP_MS;
+
+      if (needsHomeSync === "true" || !recentlyRefreshed) {
+        void fetchHomeDataFromServer({ force: true, silent: true });
+      }
+    }
+
+    if (needsSecuritySync === "true") {
+      /*
+       * Preserve the focus-time safety refresh, but keep it behind the Home
+       * entrance and ring animation so password analysis cannot steal frames.
+       */
+      deferredSecurityRefreshRef.current?.cancel();
+      deferredSecurityRefreshRef.current = scheduleIdleTask(
+        () => {
+          deferredSecurityRefreshRef.current = null;
+          void reloadSecurityScoreSilentlyRef.current();
+        },
+        {
+          delayMs: 1020,
+          timeoutMs: 1500,
+        }
+      );
     }
   }, [fetchHomeDataFromServer, hydrateHomeData]);
 
   useFocusEffect(
     useCallback(() => {
       /*
-       * Home should feel stable when users move around the app.
-       * Hydrate the dashboard from the local snapshot on focus, but do not force
-       * the security score to hit the server every time Home is visited.
-       * The security hook handles its own first sync, and pull-to-refresh is the
-       * intentional way to request fresh server data from Home.
+       * Replay the score-ring entrance every time Home becomes active while
+       * keeping cached dashboard data visible immediately.
        */
-      loadHomeData();
-    }, [loadHomeData]),
+      setScoreFocusAnimationKey((current) => current + 1);
+
+      const homeLoadPromise = loadHomeData();
+      void homeLoadPromise.catch(() => undefined);
+
+      /*
+       * Autofill reconciliation can decrypt and serialize several records.
+       * Keep the same synchronization behavior, but move it behind the ring's
+       * entrance so that work cannot interrupt the score animation.
+       */
+      deferredAutofillSyncRef.current?.cancel();
+      deferredAutofillSyncRef.current = scheduleIdleTask(
+        () => {
+          deferredAutofillSyncRef.current = null;
+
+          void homeLoadPromise
+            .then(async () => {
+              try {
+                const pendingResult = await syncPendingGuardianAutofillSaves();
+
+                if (pendingResult.saved > 0 || pendingResult.updated > 0) {
+                  await fetchHomeDataFromServer({
+                    force: true,
+                    silent: true,
+                  });
+                }
+              } catch {
+                // Pending saves remain encrypted for the next app focus.
+              }
+            })
+            .catch(() => undefined);
+        },
+        {
+          delayMs: 980,
+          timeoutMs: 1800,
+        }
+      );
+
+      return () => {
+        deferredSecurityRefreshRef.current?.cancel();
+        deferredSecurityRefreshRef.current = null;
+        deferredAutofillSyncRef.current?.cancel();
+        deferredAutofillSyncRef.current = null;
+      };
+    }, [fetchHomeDataFromServer, loadHomeData]),
   );
 
   /*
@@ -622,7 +943,10 @@ const HomeScreen = () => {
   const onRefresh = async () => {
     try {
       setRefreshing(true);
-      await Promise.all([fetchHomeDataFromServer(true), reloadSecurityScore()]);
+      await Promise.all([
+        fetchHomeDataFromServer({ force: true, silent: true }),
+        reloadSecurityScore(),
+      ]);
     } finally {
       setRefreshing(false);
     }
@@ -638,7 +962,10 @@ const HomeScreen = () => {
 
   const score = report.score;
   const recoveryKitMissing = report.issues.some((issue) => issue.type === 'RECOVERY_KIT_MISSING');
-  const allVaultItems = [...passwords, ...documents, ...cards, ...notes];
+  const allVaultItems = useMemo(
+    () => [...passwords, ...documents, ...cards, ...notes],
+    [passwords, documents, cards, notes]
+  );
   const totalItems = allVaultItems.length;
   const showUpgradeBanner = subscriptionPlan === "FREE";
 
@@ -751,7 +1078,7 @@ const HomeScreen = () => {
     hapticMedium();
     /*
      * When users add a vault item and return Home, Home should do one fresh
-     * sync so the new/updated item appears in Recently updated vault items.
+     * sync so the new/updated item appears in Recent items.
      * This keeps normal Home visits cache-first, but makes create flows feel
      * immediate after save.
      */
@@ -763,11 +1090,12 @@ const HomeScreen = () => {
     <View style={styles.statsGrid}>
       {[1, 2, 3, 4].map((item) => (
         <View key={`stat-skeleton-${item}`} style={styles.statCard}>
-          <PulsingSkeleton styles={styles} style={styles.skeletonIcon} />
-          <View style={{ flex: 1 }}>
-            <PulsingSkeleton styles={styles} style={styles.skeletonNumber} />
-            <PulsingSkeleton styles={styles} style={styles.skeletonSmallText} />
+          <View style={styles.statCardTop}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonIcon} />
+            <PulsingSkeleton styles={styles} style={styles.skeletonChevron} />
           </View>
+          <PulsingSkeleton styles={styles} style={styles.skeletonNumber} />
+          <PulsingSkeleton styles={styles} style={styles.skeletonSmallText} />
         </View>
       ))}
     </View>
@@ -869,9 +1197,17 @@ const HomeScreen = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 8 : 0}
+      >
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -927,71 +1263,79 @@ const HomeScreen = () => {
           <OfflineBanner
             colors={C}
             savedAt={offlineSavedAt}
-            message="The dashboard is showing your last saved vault snapshot because the server is unreachable. Pull down to try again."
-            onRetry={() => fetchHomeDataFromServer(true)}
+            message="The dashboard is showing your latest saved vault snapshot. Protected offline values remain available inside the Vault while editing and syncing wait for reconnection."
+            onRetry={() =>
+              fetchHomeDataFromServer({ force: true, silent: true })
+            }
           />
         )}
 
-        <View style={styles.heroCard}>
-          <View style={styles.heroTop}>
-            <View style={styles.heroCopy}>
-              <View style={styles.planPill}>
-                <Ionicons
-                  name={
-                    subscriptionPlan === "FREE"
-                      ? "leaf-outline"
-                      : "sparkles-outline"
-                  }
-                  size={13}
-                  color="#fff"
-                />
-                <Text style={styles.planPillText}>{subscriptionPlan} PLAN</Text>
+        <View style={styles.heroCardShell}>
+          <View style={styles.heroCard}>
+            <View style={styles.heroGlowLarge} />
+            <View style={styles.heroGlowSmall} />
+
+            <View style={styles.heroTop}>
+              <View style={styles.heroCopy}>
+                <View style={styles.planPill}>
+                  <Ionicons
+                    name={
+                      subscriptionPlan === "FREE"
+                        ? "leaf-outline"
+                        : "sparkles-outline"
+                    }
+                    size={13}
+                    color="#fff"
+                  />
+                  <Text style={styles.planPillText}>{subscriptionPlan} PLAN</Text>
+                </View>
+
+                <Text style={styles.heroKicker}>{scoreTitle}</Text>
+                <Text style={styles.heroTitle}>Vault overview</Text>
+                <Text style={styles.heroSubtitle}>
+                  {totalItems} encrypted item{totalItems === 1 ? "" : "s"}
+                  {securityScoreUpdating ? " · Updating score" : ""}
+                </Text>
               </View>
 
-              <Text style={styles.heroTitle}>Your vault is protected</Text>
-              <Text style={styles.heroSubtitle}>
-                {totalItems} encrypted item{totalItems === 1 ? "" : "s"} stored
-                safely.
-                {securityScoreLoading ? " Updating security score..." : ""}
-              </Text>
+              <ScoreRing
+                score={score}
+                loading={securityScoreUpdating}
+                focusAnimationKey={scoreFocusAnimationKey}
+                styles={styles}
+              />
             </View>
 
-            <ScoreRing
-              score={score}
-              loading={securityScoreLoading}
-              styles={styles}
-            />
-          </View>
+            <View style={styles.heroFooter}>
+              <View style={styles.heroMetric}>
+                <Text style={styles.heroMetricValue}>{report.issues.length}</Text>
+                <Text style={styles.heroMetricLabel}>Issues</Text>
+              </View>
 
-          <View style={styles.heroFooter}>
-            <View style={styles.heroMetric}>
-              <Text style={styles.heroMetricValue}>{report.issues.length}</Text>
-              <Text style={styles.heroMetricLabel}>Issues</Text>
+              <View style={styles.heroDivider} />
+
+              <View style={styles.heroMetric}>
+                <Text style={styles.heroMetricValue}>
+                  {report.isPremiumOrFamily
+                    ? report.breachedCount || 0
+                    : report.weakCount}
+                </Text>
+                <Text style={styles.heroMetricLabel}>
+                  {report.isPremiumOrFamily ? "Breached" : "Weak"}
+                </Text>
+              </View>
+
+              <View style={styles.heroDivider} />
+
+              <TouchableOpacity
+                style={styles.heroAction}
+                activeOpacity={0.8}
+                onPress={() => { hapticLight(); router.push("/security"); }}
+              >
+                <Text style={styles.heroActionText}>Review</Text>
+                <Ionicons name="arrow-forward" size={15} color="#fff" />
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.heroDivider} />
-
-            <View style={styles.heroMetric}>
-              <Text style={styles.heroMetricValue}>
-                {report.isPremiumOrFamily
-                  ? report.breachedCount || 0
-                  : report.weakCount}
-              </Text>
-              <Text style={styles.heroMetricLabel}>
-                {report.isPremiumOrFamily ? "Breached" : "Weak"}
-              </Text>
-            </View>
-
-            <View style={styles.heroDivider} />
-
-            <TouchableOpacity
-              style={styles.heroAction}
-              activeOpacity={0.8}
-              onPress={() => { hapticLight(); router.push("/security"); }}
-            >
-              <Text style={styles.heroActionText}>Review</Text>
-              <Ionicons name="arrow-forward" size={15} color="#fff" />
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -1007,7 +1351,7 @@ const HomeScreen = () => {
             <View style={{ flex: 1 }}>
               <Text style={styles.recoveryWarningTitle}>Recovery kit missing</Text>
               <Text style={styles.recoveryWarningText}>
-                Generate it now to protect yourself from permanent vault lockout.
+                Create one now so you can recover your account.
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color="#FFFFFF" />
@@ -1083,7 +1427,20 @@ const HomeScreen = () => {
           </View>
         )}
 
-        {loadingVault ? (
+        <View style={styles.sectionHeader}>
+          <View style={styles.sectionHeadingCopy}>
+            <Text style={styles.sectionTitleNoPadding}>Vault at a glance</Text>
+            <Text style={styles.sectionCaption}>
+              {totalItems} protected item{totalItems === 1 ? "" : "s"}
+            </Text>
+          </View>
+
+          <TouchableOpacity onPress={() => router.push("/vault")}>
+            {/* <Text style={styles.viewAll}>Open vault</Text> */}
+          </TouchableOpacity>
+        </View>
+
+        {loadingVault || !vaultCountsReady ? (
           renderStatsSkeleton()
         ) : (
           <View style={styles.statsGrid}>
@@ -1094,17 +1451,24 @@ const HomeScreen = () => {
                 activeOpacity={0.82}
                 onPress={() => openVaultTab(item.tab)}
               >
-                <View style={styles.statIconCircle}>
+                <View style={styles.statCardTop}>
+                  <View style={styles.statIconCircle}>
+                    <Ionicons
+                      name={item.icon as any}
+                      size={21}
+                      color={C.primary}
+                    />
+                  </View>
+
                   <Ionicons
-                    name={item.icon as any}
-                    size={20}
-                    color={C.primary}
+                    name="chevron-forward"
+                    size={18}
+                    color={C.tabInactive}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.statNumber}>{item.count}</Text>
-                  <Text style={styles.statLabel}>{item.label}</Text>
-                </View>
+
+                <Text style={styles.statNumber}>{item.count}</Text>
+                <Text style={styles.statLabel}>{item.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
@@ -1113,7 +1477,7 @@ const HomeScreen = () => {
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitleNoPadding}>Quick actions</Text>
           <TouchableOpacity onPress={() => router.push("/vault")}>
-            <Text style={styles.viewAll}>Open vault</Text>
+            {/* <Text style={styles.viewAll}>Open vault</Text> */}
           </TouchableOpacity>
         </View>
 
@@ -1126,15 +1490,18 @@ const HomeScreen = () => {
               onPress={() => openQuickAction(action.route)}
             >
               <View style={styles.actionBtn}>
-                <Ionicons name={action.icon as any} size={23} color="#fff" />
+                <Ionicons name={action.icon as any} size={27} color="#fff" />
               </View>
-              <Text style={styles.actionLabel}>{action.label}</Text>
+
+              <Text style={styles.actionLabel} numberOfLines={1}>
+                {action.label}
+              </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitleNoPadding}>Recently updated vault items</Text>
+          <Text style={styles.sectionTitleNoPadding}>Recent items</Text>
           <TouchableOpacity onPress={() => router.push("/vault")}>
             <Text style={styles.viewAll}>View all</Text>
           </TouchableOpacity>
@@ -1213,12 +1580,8 @@ const HomeScreen = () => {
             <Ionicons name="chevron-forward" size={20} color={C.tabInactive} />
           </TouchableOpacity>
         )}
-
-        <Text style={styles.securityHint}>
-          {scoreTitle}. Keep your vault healthy with unique passwords, breach
-          monitoring, and 2FA.
-        </Text>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       <WhatsNewModal visible={showWhatsNew} onClose={closeWhatsNewModal} />
     </SafeAreaView>
@@ -1258,9 +1621,9 @@ const makeStyles = (C: any) =>
     headerIcon: {
       shadowColor: "#000",
       shadowOffset: { width: 0, height: 2 },
-      shadowOpacity: 0.12,
+      shadowOpacity: 0.07,
       shadowRadius: 4,
-      elevation: 3,
+      elevation: 2,
     },
 
     greeting: {
@@ -1287,10 +1650,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     notificationBadge: {
@@ -1314,18 +1677,45 @@ const makeStyles = (C: any) =>
       fontWeight: "900",
     },
 
-    heroCard: {
+    heroCardShell: {
       marginHorizontal: 20,
-      marginBottom: 16,
+      marginBottom: 18,
+      borderRadius: 30,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 16 },
+      shadowOpacity: 0.16,
+      shadowRadius: 24,
+      elevation: 7,
+    },
+
+    heroCard: {
+      position: "relative",
       backgroundColor: C.primary,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 20,
       overflow: "hidden",
-      shadowColor: "#000",
-      shadowOffset: { width: 0, height: 14 },
-      shadowOpacity: 0.18,
-      shadowRadius: 22,
-      elevation: 8,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.12)",
+    },
+
+    heroGlowLarge: {
+      position: "absolute",
+      width: 190,
+      height: 190,
+      borderRadius: 95,
+      right: -82,
+      top: -108,
+      backgroundColor: "rgba(255,255,255,0.09)",
+    },
+
+    heroGlowSmall: {
+      position: "absolute",
+      width: 118,
+      height: 118,
+      borderRadius: 59,
+      left: -54,
+      bottom: -78,
+      backgroundColor: "rgba(0,0,0,0.10)",
     },
 
     heroTop: {
@@ -1336,6 +1726,8 @@ const makeStyles = (C: any) =>
 
     heroCopy: {
       flex: 1,
+      minWidth: 0,
+      paddingRight: 2,
     },
 
     planPill: {
@@ -1357,11 +1749,22 @@ const makeStyles = (C: any) =>
       letterSpacing: 0.6,
     },
 
+    heroKicker: {
+      color: "rgba(255,255,255,0.72)",
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: "900",
+      letterSpacing: 0.45,
+      textTransform: "uppercase",
+      marginBottom: 5,
+    },
+
     heroTitle: {
       color: "#fff",
       fontSize: 25,
       fontWeight: "900",
       lineHeight: 30,
+      letterSpacing: -0.4,
     },
 
     heroSubtitle: {
@@ -1470,10 +1873,10 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       gap: 12,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
     recoveryWarningIcon: {
       width: 46,
@@ -1509,10 +1912,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     searchInput: {
@@ -1531,10 +1934,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     sectionHeaderCompact: {
@@ -1584,48 +1987,58 @@ const makeStyles = (C: any) =>
     statsGrid: {
       flexDirection: "row",
       flexWrap: "wrap",
+      justifyContent: "space-between",
       paddingHorizontal: 20,
-      marginBottom: 22,
-      gap: 12,
+      marginBottom: 24,
+      rowGap: 12,
     },
 
     statCard: {
       width: "48%",
+      minHeight: 118,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
-      padding: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 12,
+      borderRadius: 24,
+      padding: 15,
       borderWidth: 1,
       borderColor: C.border,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
+      shadowColor: "#000",
+      shadowOpacity: 0.07,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 10 },
       elevation: 4,
     },
 
+    statCardTop: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 13,
+    },
+
     statIconCircle: {
-      width: 42,
-      height: 42,
-      borderRadius: 16,
+      width: 44,
+      height: 44,
+      borderRadius: 17,
       backgroundColor: C.actionCard,
       alignItems: "center",
       justifyContent: "center",
+      borderWidth: 1,
+      borderColor: C.border,
     },
 
     statNumber: {
-      fontSize: 20,
+      fontSize: 25,
+      lineHeight: 29,
       fontWeight: "900",
       color: C.text,
+      letterSpacing: -0.5,
     },
 
     statLabel: {
       fontSize: 12,
       color: C.textSecondary,
       marginTop: 2,
-      fontWeight: "700",
+      fontWeight: "800",
     },
 
     sectionHeader: {
@@ -1636,8 +2049,22 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
     },
 
+    sectionHeadingCopy: {
+      flex: 1,
+      minWidth: 0,
+      paddingRight: 12,
+    },
+
+    sectionCaption: {
+      color: C.textSecondary,
+      fontSize: 11,
+      lineHeight: 15,
+      fontWeight: "700",
+      marginTop: 2,
+    },
+
     sectionTitleNoPadding: {
-      fontSize: 18,
+      fontSize: 23,
       fontWeight: "900",
       color: C.text,
     },
@@ -1650,30 +2077,35 @@ const makeStyles = (C: any) =>
 
     quickActions: {
       flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "space-between",
       paddingHorizontal: 20,
-      marginBottom: 24,
-      gap: 10,
+      marginBottom: 26,
+      rowGap: 12,
     },
 
     actionItem: {
-      flex: 1,
+      width: "48%",
+      minHeight: 110,
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
-      paddingVertical: 14,
+      borderRadius: 22,
+      padding: 13,
       alignItems: "center",
-      gap: 9,
+      justifyContent: "center",
+      gap: 11,
       borderWidth: 1,
       borderColor: C.border,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      shadowColor: "#000",
+      shadowOpacity: 0.065,
+      shadowRadius: 17,
+      shadowOffset: { width: 0, height: 9 },
+      elevation: 3,
     },
 
     actionBtn: {
-      width: 46,
-      height: 46,
+      width: 48,
+      height: 48,
+      flexShrink: 0,
       backgroundColor: C.actionIconBg || C.primary,
       borderRadius: 18,
       justifyContent: "center",
@@ -1681,37 +2113,37 @@ const makeStyles = (C: any) =>
     },
 
     actionLabel: {
-      fontSize: 12,
+      width: "100%",
+      fontSize: 14,
+      lineHeight: 18,
       color: C.text,
-      fontWeight: "800",
+      fontWeight: "900",
+      textAlign: "center",
     },
 
     recentList: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 24,
       marginHorizontal: 20,
-      marginBottom: 14,
-      overflow: "hidden",
-      borderWidth: 1,
-      borderColor: C.border,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      marginBottom: 16,
+      gap: 10,
     },
 
     recentCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 21,
       padding: 14,
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: "#000",
+      shadowOpacity: 0.06,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
     },
 
-    recentDivider: {
-      borderBottomWidth: 1,
-      borderBottomColor: C.border,
-    },
+    recentDivider: {},
 
     recentAvatar: {
       width: 44,
@@ -1754,26 +2186,32 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
       shadowColor: '#000',
-      shadowOpacity: 0.06,
+      shadowOpacity: 0.035,
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 5 },
       elevation: 2,
     },
 
     skeletonIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: 16,
+      width: 44,
+      height: 44,
+      borderRadius: 17,
+    },
+
+    skeletonChevron: {
+      width: 18,
+      height: 18,
+      borderRadius: 9,
     },
 
     skeletonNumber: {
-      width: 42,
-      height: 18,
+      width: 52,
+      height: 23,
       marginBottom: 7,
     },
 
     skeletonSmallText: {
-      width: 66,
+      width: 74,
       height: 11,
     },
 
@@ -1805,10 +2243,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     emptyText: {
@@ -1830,10 +2268,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.securityScore,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     upgradeIcon: {

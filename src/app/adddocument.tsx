@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,12 +14,12 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useAppTheme } from '../context/ThemeContext';
+import AddScreenEntrance from '../components/AddScreenEntrance';
 import { hapticLight, hapticMedium, hapticWarning, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api } from '../services/api';
@@ -186,6 +188,40 @@ const UploadDocumentScreen = () => {
     return 'application/octet-stream';
   };
 
+  const getFriendlyFileType = (name: string, mimeType?: string) => {
+    const lowerName = String(name || '').trim().toLowerCase();
+    const cleanMime = String(mimeType || '').trim().toLowerCase();
+    const extension = lowerName.includes('.')
+      ? String(lowerName.split('.').pop() || '').replace(/[^a-z0-9]/g, '')
+      : '';
+
+    const supportedExtensions = new Set([
+      'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+      'txt', 'csv', 'zip', 'jpg', 'jpeg', 'png', 'heic', 'webp',
+    ]);
+
+    if (supportedExtensions.has(extension)) {
+      return extension === 'jpeg' ? 'JPG' : extension.toUpperCase();
+    }
+
+    if (cleanMime === 'application/pdf') return 'PDF';
+    if (cleanMime.includes('wordprocessingml')) return 'DOCX';
+    if (cleanMime === 'application/msword') return 'DOC';
+    if (cleanMime.includes('spreadsheetml')) return 'XLSX';
+    if (cleanMime === 'application/vnd.ms-excel') return 'XLS';
+    if (cleanMime.includes('presentationml')) return 'PPTX';
+    if (cleanMime === 'application/vnd.ms-powerpoint') return 'PPT';
+    if (cleanMime === 'text/plain') return 'TXT';
+    if (cleanMime === 'text/csv') return 'CSV';
+    if (cleanMime.includes('zip')) return 'ZIP';
+    if (cleanMime.startsWith('image/')) {
+      const subtype = cleanMime.split('/')[1] || 'IMAGE';
+      return subtype === 'jpeg' ? 'JPG' : subtype.toUpperCase();
+    }
+
+    return 'FILE';
+  };
+
   const sanitizeFileName = (name: string) => {
     const safeName = String(name || `document_${Date.now()}`)
       .replace(/[^a-zA-Z0-9._-]/g, '_')
@@ -264,18 +300,24 @@ const UploadDocumentScreen = () => {
 
 
   const cancelActiveUpload = async () => {
-    if (!saving) return;
+    if (!saving || uploadCancelledRef.current) return;
 
     uploadCancelledRef.current = true;
     hapticWarning();
 
+    /*
+     * The upload task can take a moment to be created while its auth token and
+     * device headers are prepared. Keep the screen in its busy state until
+     * handleSave reaches its own finally block; otherwise a second upload can
+     * begin before the first cancellation request has finished.
+     */
+    const cancel = activeUploadCancelRef.current;
+    if (!cancel) return;
+
     try {
-      await activeUploadCancelRef.current?.();
+      await cancel();
     } finally {
       activeUploadCancelRef.current = null;
-      if (mountedRef.current) {
-        setSaving(false);
-      }
     }
   };
 
@@ -333,6 +375,11 @@ const UploadDocumentScreen = () => {
         documentTitle: documentTitle.trim() || selectedFile.name,
       });
 
+      if (uploadCancelledRef.current) {
+        await uploadTask.cancel();
+        return;
+      }
+
       activeUploadCancelRef.current = uploadTask.cancel;
       await uploadTask.start();
       activeUploadCancelRef.current = null;
@@ -364,7 +411,10 @@ const UploadDocumentScreen = () => {
   const isImage = selectedFile?.type.startsWith('image/');
 
   const renderPlanSkeleton = () => (
-    <SafeAreaView style={styles.container}>
+    <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.skeletonScroll}>
         <PulsingSkeleton styles={styles} style={styles.skeletonTitle} />
         <PulsingSkeleton styles={styles} style={styles.skeletonPlanText} />
@@ -390,7 +440,7 @@ const UploadDocumentScreen = () => {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </AddScreenEntrance>
   );
 
   if (checkingPlan) {
@@ -399,7 +449,10 @@ const UploadDocumentScreen = () => {
 
   if (!canUploadDocuments) {
     return (
-      <SafeAreaView style={styles.container}>
+      <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
         <View style={styles.lockedContent}>
           <View style={styles.premiumIcon}>
             <Ionicons name="document-lock-outline" size={42} color="#fff" />
@@ -446,17 +499,29 @@ const UploadDocumentScreen = () => {
             <Text style={styles.notNowText}>Not now</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </AddScreenEntrance>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+    <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+      >
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Upload Document</Text>
-            <Text style={styles.planText}>{plan} plan feature</Text>
+            <Text style={styles.title}>Add document</Text>
           </View>
         </View>
 
@@ -536,10 +601,18 @@ const UploadDocumentScreen = () => {
                     {selectedFile.name}
                   </Text>
 
-                  <Text style={styles.previewSize}>
-                    {formatSize(selectedFile.size)}
-                    {selectedFile.type ? ` · ${selectedFile.type}` : ''}
-                  </Text>
+                  <View style={styles.previewMetaRow}>
+                    {!!formatSize(selectedFile.size) && (
+                      <Text style={styles.previewSize}>
+                        {formatSize(selectedFile.size)}
+                      </Text>
+                    )}
+                    <View style={styles.fileTypePill}>
+                      <Text style={styles.fileTypeText}>
+                        {getFriendlyFileType(selectedFile.name, selectedFile.type)}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
                 <TouchableOpacity
@@ -558,36 +631,31 @@ const UploadDocumentScreen = () => {
                 />
               )}
 
-              <View style={styles.statusRow}>
-                <Ionicons name="lock-closed-outline" size={16} color={C.primary} />
-                <Text style={styles.statusText}>
+              <View>
+                {/* <Ionicons name="lock-closed-outline" size={16} color={C.primary} /> */}
+                {/* <Text style={styles.statusText}>
                   Will be encrypted before sending to our servers.
-                </Text>
+                </Text> */}
               </View>
+
+              {saving && (
+                <TouchableOpacity
+                  style={styles.inlineCancelUploadBtn}
+                  onPress={cancelActiveUpload}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Cancel document upload"
+                >
+                  <Ionicons name="close-circle-outline" size={18} color={C.danger} />
+                  <Text style={styles.cancelUploadText}>Cancel upload</Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
-
-          <View style={styles.noticeBox}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={C.primary} />
-            <Text style={styles.noticeText}>
-              Documents are uploaded securely to our servers and stored for later download.
-            </Text>
-          </View>
         </View>
 
         <View style={{ height: 120 }} />
       </ScrollView>
-
-      {saving && (
-        <TouchableOpacity
-          style={styles.cancelUploadBtn}
-          onPress={cancelActiveUpload}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="close-circle-outline" size={18} color={C.danger} />
-          <Text style={styles.cancelUploadText}>Cancel upload</Text>
-        </TouchableOpacity>
-      )}
 
       {selectedFile && (
         <TouchableOpacity
@@ -602,11 +670,12 @@ const UploadDocumentScreen = () => {
           )}
 
           <Text style={styles.saveBtnText}>
-            {saving ? 'Saving...' : 'Save Document'}
+            {saving ? 'Uploading...' : 'Save Document'}
           </Text>
         </TouchableOpacity>
       )}
-    </SafeAreaView>
+      </KeyboardAvoidingView>
+    </AddScreenEntrance>
   );
 };
 
@@ -619,10 +688,10 @@ const makeStyles = (C: ThemeColors) =>
     container: { flex: 1, backgroundColor: C.background },
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     skeletonScroll: { paddingBottom: 150 },
     skeletonTitle: { width: 190, height: 28, marginHorizontal: 20, marginTop: 96, marginBottom: 8 },
     skeletonPlanText: { width: 118, height: 12, marginHorizontal: 20, marginBottom: 20 },
@@ -639,10 +708,10 @@ const makeStyles = (C: ThemeColors) =>
     lockedHeader: { paddingHorizontal: 20, paddingTop: 94 },
     backBtn: { width: 38, height: 38, backgroundColor: C.backgroundSelected, borderRadius: 16, justifyContent: 'center', alignItems: 'center' ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     title: { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.4 },
     planText: { marginTop: 4, fontSize: 12, color: C.primary, fontWeight: '900' },
     options: { paddingHorizontal: 20, gap: 14 },
@@ -656,7 +725,7 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.045,
+      shadowOpacity: 0.025,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 6 },
       elevation: 2,
@@ -673,38 +742,70 @@ const makeStyles = (C: ThemeColors) =>
       borderColor: C.primary,
       gap: 12,
       shadowColor: C.primary,
-      shadowOpacity: 0.09,
+      shadowOpacity: 0.05,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      elevation: 2,
     },
     previewHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
     previewName: { fontSize: 14, fontWeight: '900', color: C.text },
-    previewSize: { fontSize: 12, color: C.textSecondary, marginTop: 3, fontWeight: '600' },
+    previewMetaRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flexWrap: 'wrap',
+      gap: 8,
+      marginTop: 4,
+    },
+    previewSize: { fontSize: 12, color: C.textSecondary, fontWeight: '700' },
+    fileTypePill: {
+      borderRadius: 999,
+      backgroundColor: C.actionCard || C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: C.border,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
+    },
+    fileTypeText: {
+      color: C.primary,
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.4,
+    },
     imagePreview: { width: '100%', height: 190, borderRadius: 16, marginTop: 8 },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
     statusText: { color: C.primary, fontSize: 12, fontWeight: '800', flex: 1, lineHeight: 18 },
     noticeBox: { backgroundColor: C.actionCard || C.backgroundSelected, borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, borderWidth: 1, borderColor: C.border ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     noticeText: { flex: 1, fontSize: 13, color: C.primary, lineHeight: 20, fontWeight: '700' },
-    saveBtn: { position: 'absolute', left: 20, right: 20, bottom: 20, backgroundColor: C.backgroundbutton, paddingVertical: 18, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, shadowColor: C.primary, shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+    saveBtn: { position: 'absolute', left: 20, right: 20, bottom: 20, backgroundColor: C.backgroundbutton, paddingVertical: 18, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, shadowColor: C.primary, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 3 },
     saveBtnDisabled: { backgroundColor: C.tabInactive ,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
-    cancelUploadBtn: { position: 'absolute', left: 20, right: 20, bottom: 92, backgroundColor: C.alertDangerBg || C.backgroundSelected, paddingVertical: 14, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.danger ,
+    inlineCancelUploadBtn: {
+      width: '100%',
+      backgroundColor: C.alertDangerBg || C.backgroundSelected,
+      paddingVertical: 13,
+      borderRadius: 18,
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 8,
+      borderWidth: 1,
+      borderColor: C.danger,
       shadowColor: '#000',
-      shadowOpacity: 0.065,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      shadowOpacity: 0.06,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 3,
+    },
     cancelUploadText: { color: C.danger, fontSize: 14, fontWeight: '900' },
     label: { fontSize: 13, color: C.text, fontWeight: '900', marginBottom: 7 },
     input: { backgroundColor: C.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
@@ -714,18 +815,18 @@ const makeStyles = (C: ThemeColors) =>
     lockedSubtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 20, fontWeight: '600' },
     featureBox: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 17, borderWidth: 1, borderColor: C.border, marginBottom: 24, gap: 13 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     featureText: { flex: 1, color: C.text, fontSize: 14, fontWeight: '800' },
     upgradeBtn: { backgroundColor: C.backgroundbutton, borderRadius: 50, paddingVertical: 17, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     upgradeBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
     notNowBtn: { marginTop: 14, alignItems: 'center', paddingVertical: 12 },
     notNowText: { color: C.textSecondary, fontSize: 15, fontWeight: '800' },

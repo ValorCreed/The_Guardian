@@ -41,19 +41,19 @@ export default function GlassCard({
   const { isDark, colors: C } = useAppTheme();
 
   const borderColor = isDark
-    ? 'rgba(255,255,255,0.14)'
+    ? 'rgba(255,255,255,0.09)'
     : 'rgba(255,255,255,0.78)';
 
   const fallbackBackground = isDark
-    ? 'rgba(10, 15, 20, 0.72)'
+    ? 'rgba(10, 15, 20, 0.92)'
     : 'rgba(255, 255, 255, 0.78)';
 
   const overlayBackground = isDark
-    ? 'rgba(2, 6, 10, 0.20)'
+    ? 'rgba(2, 6, 10, 0.08)'
     : 'rgba(255, 255, 255, 0.18)';
 
   const highlightBackground = isDark
-    ? 'rgba(255,255,255,0.08)'
+    ? 'rgba(255,255,255,0.04)'
     : 'rgba(255,255,255,0.38)';
 
   const cardStyle = [
@@ -144,9 +144,9 @@ const styles = StyleSheet.create({
   shadow: {
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.14,
+    shadowOpacity: 0.08,
     shadowRadius: 24,
-    elevation: 8,
+    elevation: 4,
   },
 
   surface: {

@@ -12,12 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import AddScreenEntrance from '../components/AddScreenEntrance';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 
@@ -28,9 +30,12 @@ const FREE_SECURE_NOTE_LIMIT = 5;
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
 export default function AddNoteScreen() {
+  const requestApi = useCancelableApi(api);
   const router = useRouter();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
+
+  useSensitiveScreenProtection(true);
 
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('General');
@@ -51,8 +56,8 @@ export default function AddNoteScreen() {
         const [subscription, notes] = await Promise.all([
           api
             .getSubscriptionFresh()
-            .catch(() => api.getSubscription().catch(() => ({ plan: 'FREE' as const }))),
-          api.getSecureNotes().catch(() => []),
+            .catch(() => requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const }))),
+          requestApi.getSecureNotes().catch(() => []),
         ]);
         setPlan((subscription.plan || 'FREE') as Plan);
         setNoteCount(notes.length || 0);
@@ -66,8 +71,8 @@ export default function AddNoteScreen() {
 
   const showUpgradeAlert = () => {
     Alert.alert(
-      'Secure note limit reached',
-      `Free accounts can save up to ${FREE_SECURE_NOTE_LIMIT} secure notes. Upgrade to Premium or Family for unlimited secure notes.`,
+      'SecureNotes limit reached',
+      `Free accounts can save up to ${FREE_SECURE_NOTE_LIMIT} SecureNotes. Upgrade to Premium or Family for unlimited SecureNotes.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Upgrade', onPress: () => router.push('/subscription?from=addnote') },
@@ -84,7 +89,7 @@ export default function AddNoteScreen() {
     }
 
     if (!title.trim()) {
-      Alert.alert('Missing title', 'Please enter a title for this secure note.');
+      Alert.alert('Missing title', 'Please enter a title for this SecureNote.');
       return;
     }
 
@@ -96,18 +101,19 @@ export default function AddNoteScreen() {
     try {
       setSaving(true);
 
-      await api.createSecureNote({
+      await requestApi.createSecureNote({
         title: title.trim(),
         category,
         encryptedContent: encryptJson(content.trim()),
         pinned,
       });
 
-      Alert.alert('Saved', 'Secure note saved to your vault.', [
+      Alert.alert('Saved', 'SecureNote saved to your vault.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
-      const message = String(error?.message || 'Could not save secure note.');
+    if (isScreenRequestCancelled(error)) return;
+      const message = String(error?.message || 'Could not save SecureNote.');
 
       if (message.toUpperCase().includes('PLAN_LIMIT_REACHED') || message.toLowerCase().includes('limit')) {
         showUpgradeAlert();
@@ -122,18 +128,24 @@ export default function AddNoteScreen() {
 
   if (checking) {
     return (
-      <SafeAreaView style={styles.container}>
+      <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
         <View style={styles.centered}>
           <ActivityIndicator color={C.primary} />
           <Text style={styles.loadingText}>Checking note access...</Text>
         </View>
-      </SafeAreaView>
+      </AddScreenEntrance>
     );
   }
 
   if (freeLimitReached) {
     return (
-      <SafeAreaView style={styles.container}>
+      <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
         <View style={styles.lockedContent}>
           <View style={styles.noteIconLarge}>
             <Ionicons name="reader-outline" size={42} color="#fff" />
@@ -141,7 +153,7 @@ export default function AddNoteScreen() {
 
           <Text style={styles.lockedTitle}>Free note limit reached</Text>
           <Text style={styles.lockedSubtitle}>
-            You have used {noteCount}/{FREE_SECURE_NOTE_LIMIT} secure notes on the Free plan. Upgrade to Premium or Family for unlimited secure notes, categories, and pinned notes.
+            You have used {noteCount}/{FREE_SECURE_NOTE_LIMIT} SecureNotes on the Free plan. Upgrade to Premium or Family for unlimited SecureNotes, categories, and pinned notes.
           </Text>
 
           <TouchableOpacity style={styles.saveBtn} onPress={() => router.push('/subscription?from=addnote')}>
@@ -153,21 +165,33 @@ export default function AddNoteScreen() {
             <Text style={styles.notNowText}>Not now</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </AddScreenEntrance>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scrollContent}>
+    <AddScreenEntrance
+        style={styles.container}
+        backgroundColor={C.background}
+      >
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+          contentContainerStyle={styles.scrollContent}
+        >
           <View style={styles.header}>
             <View style={styles.noteIcon}>
               <Ionicons name="reader-outline" size={26} color={C.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Add SecureNote</Text>
-              <Text style={styles.subTitle}>{isPaid ? 'Unlimited notes' : `${noteCount}/${FREE_SECURE_NOTE_LIMIT} notes used on Free plan`}</Text>
             </View>
           </View>
 
@@ -198,7 +222,6 @@ export default function AddNoteScreen() {
             <View style={styles.pinnedRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.pinnedTitle}>Pin note</Text>
-                <Text style={styles.pinnedSub}>Pinned notes appear first in your vault.</Text>
               </View>
               <Switch
                 value={pinned}
@@ -212,7 +235,7 @@ export default function AddNoteScreen() {
               />
             </View>
 
-            <Text style={styles.label}>Secure note</Text>
+            <Text style={styles.label}>SecureNote</Text>
             <TextInput
               style={styles.noteInput}
               placeholder="Write your private note here..."
@@ -223,21 +246,21 @@ export default function AddNoteScreen() {
               textAlignVertical="top"
             />
 
-            <View style={styles.noticeBox}>
-              <Ionicons name="lock-closed-outline" size={18} color={C.primary} />
-              <Text style={styles.noticeText}>The note content is encrypted before it is saved.</Text>
+            <View>
+              {/* <Ionicons name="lock-closed-outline" size={18} color={C.primary} /> */}
+              {/* <Text style={styles.noticeText}>The note content is encrypted before it is saved.</Text> */}
             </View>
           </View>
 
           <TouchableOpacity style={[styles.saveBtn, saving && styles.disabledBtn]} onPress={handleSave} disabled={saving}>
             {saving ? <ActivityIndicator color="#fff" /> : <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />}
-            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Secure Note'}</Text>
+            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save SecureNote'}</Text>
           </TouchableOpacity>
 
           <View style={{ height: 90 }} />
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </AddScreenEntrance>
   );
 }
 
@@ -261,28 +284,28 @@ const makeStyles = (C: ThemeColors) =>
     categoryChipActive: { backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
-    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18 
+    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     pinnedTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     pinnedSub: { color: C.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 17 },
     noteInput: { minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
-    noticeBox: { backgroundColor: C.actionCard, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 
+    noticeBox: { backgroundColor: C.actionCard, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     noticeText: { color: C.primary, fontSize: 13, fontWeight: '800', flex: 1, lineHeight: 18 },
-    saveBtn: { backgroundColor: C.backgroundbutton, borderRadius: 999, minHeight: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, marginHorizontal: 20, marginTop: 4 
+    saveBtn: { backgroundColor: C.backgroundbutton, borderRadius: 999, minHeight: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, marginHorizontal: 20, marginTop: 4
       ,shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
     disabledBtn: { opacity: 0.7 },
     lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },

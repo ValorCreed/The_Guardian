@@ -12,8 +12,10 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
@@ -23,13 +25,15 @@ import javax.crypto.spec.GCMParameterSpec;
 class GuardianAutofillStore {
     private static final String PREFS = "guardian_autofill_store";
     private static final String ENCRYPTED_CREDENTIALS = "encrypted_credentials";
+    private static final String ENCRYPTED_CARDS = "encrypted_cards";
+    private static final String ENCRYPTED_PENDING_CREDENTIALS = "encrypted_pending_credentials";
     private static final String KEY_ALIAS = "guardian_autofill_credentials_key";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
     private static final int IV_SIZE_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
 
     static void saveCredentials(Context context, String credentialsJson) throws Exception {
-        JSONArray incoming = new JSONArray(credentialsJson == null ? "[]" : credentialsJson);
+        JSONArray incoming = parseArray(credentialsJson);
         JSONArray sanitized = new JSONArray();
 
         for (int i = 0; i < incoming.length(); i++) {
@@ -37,46 +41,121 @@ class GuardianAutofillStore {
             if (object == null) continue;
 
             GuardianAutofillCredential credential = GuardianAutofillCredential.fromJson(object);
-            if (credential.username.trim().isEmpty() || credential.password.trim().isEmpty()) continue;
+            if (credential.password.isEmpty()) continue;
             sanitized.put(credential.toJson());
         }
 
-        String encrypted = encrypt(sanitized.toString());
-        prefs(context).edit().putString(ENCRYPTED_CREDENTIALS, encrypted).apply();
+        saveEncryptedArray(context, ENCRYPTED_CREDENTIALS, sanitized);
+    }
+
+    static void saveCards(Context context, String cardsJson) throws Exception {
+        JSONArray incoming = parseArray(cardsJson);
+        JSONArray sanitized = new JSONArray();
+
+        for (int i = 0; i < incoming.length(); i++) {
+            JSONObject object = incoming.optJSONObject(i);
+            if (object == null) continue;
+
+            GuardianAutofillCard card = GuardianAutofillCard.fromJson(object);
+            if (card.cardNumber.length() < 12) continue;
+            sanitized.put(card.toJson());
+        }
+
+        saveEncryptedArray(context, ENCRYPTED_CARDS, sanitized);
     }
 
     static void clearCredentials(Context context) {
-        prefs(context).edit().remove(ENCRYPTED_CREDENTIALS).apply();
+        prefs(context).edit()
+                .remove(ENCRYPTED_CREDENTIALS)
+                .remove(ENCRYPTED_CARDS)
+                .remove(ENCRYPTED_PENDING_CREDENTIALS)
+                .apply();
     }
 
     static List<GuardianAutofillCredential> loadCredentials(Context context) {
-        List<GuardianAutofillCredential> credentials = new ArrayList<>();
+        Map<String, GuardianAutofillCredential> merged = new LinkedHashMap<>();
 
-        try {
-            String encrypted = prefs(context).getString(ENCRYPTED_CREDENTIALS, "");
-            if (encrypted == null || encrypted.trim().isEmpty()) return credentials;
-
-            String decrypted = decrypt(encrypted);
-            JSONArray array = new JSONArray(decrypted);
-
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject object = array.optJSONObject(i);
-                if (object == null) continue;
-
-                GuardianAutofillCredential credential = GuardianAutofillCredential.fromJson(object);
-                if (!credential.username.trim().isEmpty() && !credential.password.trim().isEmpty()) {
-                    credentials.add(credential);
-                }
-            }
-        } catch (Exception ignored) {
-            return new ArrayList<>();
+        for (GuardianAutofillCredential credential : loadCredentialArray(context, ENCRYPTED_CREDENTIALS)) {
+            merged.put(credential.matchKey(), credential);
         }
 
-        return credentials;
+        /*
+         * Credentials captured by Android's SaveInfo flow are immediately usable
+         * even before React Native next opens and synchronizes them to the backend.
+         */
+        for (GuardianAutofillCredential credential : loadPendingCredentials(context)) {
+            merged.put(credential.matchKey(), credential);
+        }
+
+        return new ArrayList<>(merged.values());
+    }
+
+    static List<GuardianAutofillCard> loadCards(Context context) {
+        List<GuardianAutofillCard> cards = new ArrayList<>();
+
+        for (JSONObject object : loadObjects(context, ENCRYPTED_CARDS)) {
+            GuardianAutofillCard card = GuardianAutofillCard.fromJson(object);
+            if (card.cardNumber.length() >= 12) cards.add(card);
+        }
+
+        return cards;
     }
 
     static int countCredentials(Context context) {
         return loadCredentials(context).size();
+    }
+
+    static int countCards(Context context) {
+        return loadCards(context).size();
+    }
+
+    static void enqueuePendingCredential(
+            Context context,
+            GuardianAutofillCredential credential
+    ) throws Exception {
+        List<GuardianAutofillCredential> pending = loadPendingCredentials(context);
+        Map<String, GuardianAutofillCredential> merged = new LinkedHashMap<>();
+
+        for (GuardianAutofillCredential existing : pending) {
+            merged.put(existing.matchKey(), existing);
+        }
+        merged.put(credential.matchKey(), credential);
+
+        JSONArray array = new JSONArray();
+        for (GuardianAutofillCredential item : merged.values()) {
+            array.put(item.toJson());
+        }
+
+        saveEncryptedArray(context, ENCRYPTED_PENDING_CREDENTIALS, array);
+    }
+
+    static List<GuardianAutofillCredential> loadPendingCredentials(Context context) {
+        return loadCredentialArray(context, ENCRYPTED_PENDING_CREDENTIALS);
+    }
+
+    static String pendingCredentialsJson(Context context) {
+        JSONArray array = new JSONArray();
+        try {
+            for (GuardianAutofillCredential credential : loadPendingCredentials(context)) {
+                array.put(credential.toJson());
+            }
+        } catch (Exception ignored) {
+            return "[]";
+        }
+        return array.toString();
+    }
+
+    static void removePendingCredential(Context context, String id) throws Exception {
+        String cleanId = id == null ? "" : id.trim();
+        JSONArray remaining = new JSONArray();
+
+        for (GuardianAutofillCredential credential : loadPendingCredentials(context)) {
+            if (!credential.id.equals(cleanId)) {
+                remaining.put(credential.toJson());
+            }
+        }
+
+        saveEncryptedArray(context, ENCRYPTED_PENDING_CREDENTIALS, remaining);
     }
 
     static List<GuardianAutofillCredential> filterCredentials(
@@ -91,20 +170,83 @@ class GuardianAutofillStore {
 
         for (GuardianAutofillCredential credential : credentials) {
             String website = normalizeDomain(credential.website);
-            String haystack = safeLower(credential.title + " " + credential.website);
+            String credentialDomain = normalizeDomain(credential.webDomain);
+            String credentialPackage = safeLower(credential.packageName);
+            String titleDomain = normalizeDomain(credential.title);
+            String targetText = safeLower(credential.website + " " + credential.webDomain);
 
-            boolean domainMatches = !cleanDomain.trim().isEmpty()
-                    && (!website.trim().isEmpty() && (website.contains(cleanDomain) || cleanDomain.contains(website))
-                    || haystack.contains(cleanDomain));
+            boolean domainMatches = !cleanDomain.isEmpty()
+                    && ((!website.isEmpty() && domainsOverlap(website, cleanDomain))
+                    || (!credentialDomain.isEmpty() && domainsOverlap(credentialDomain, cleanDomain))
+                    || (!titleDomain.isEmpty() && domainsOverlap(titleDomain, cleanDomain)));
 
-            boolean packageMatches = packageMatches(cleanPackage, haystack);
+            boolean packageMatches = !cleanPackage.isEmpty()
+                    && (cleanPackage.equals(credentialPackage)
+                    || packageMatches(cleanPackage, targetText));
 
             if (domainMatches || packageMatches) {
                 matches.add(credential);
             }
         }
 
-        return matches.isEmpty() ? credentials : matches;
+        return matches;
+    }
+
+    private static boolean domainsOverlap(String first, String second) {
+        return first.equals(second)
+                || first.endsWith("." + second)
+                || second.endsWith("." + first);
+    }
+
+    private static List<GuardianAutofillCredential> loadCredentialArray(
+            Context context,
+            String key
+    ) {
+        List<GuardianAutofillCredential> credentials = new ArrayList<>();
+
+        for (JSONObject object : loadObjects(context, key)) {
+            GuardianAutofillCredential credential = GuardianAutofillCredential.fromJson(object);
+            if (!credential.password.isEmpty()) credentials.add(credential);
+        }
+
+        return credentials;
+    }
+
+    private static List<JSONObject> loadObjects(Context context, String key) {
+        List<JSONObject> objects = new ArrayList<>();
+
+        try {
+            String encrypted = prefs(context).getString(key, "");
+            if (encrypted == null || encrypted.trim().isEmpty()) return objects;
+
+            JSONArray array = new JSONArray(decrypt(encrypted));
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject object = array.optJSONObject(i);
+                if (object != null) objects.add(object);
+            }
+        } catch (Exception ignored) {
+            return new ArrayList<>();
+        }
+
+        return objects;
+    }
+
+    private static JSONArray parseArray(String json) {
+        try {
+            return new JSONArray(json == null ? "[]" : json);
+        } catch (Exception ignored) {
+            return new JSONArray();
+        }
+    }
+
+    private static void saveEncryptedArray(Context context, String key, JSONArray array) throws Exception {
+        if (array.length() == 0) {
+            prefs(context).edit().remove(key).apply();
+            return;
+        }
+
+        String encrypted = encrypt(array.toString());
+        prefs(context).edit().putString(key, encrypted).apply();
     }
 
     private static SharedPreferences prefs(Context context) {
@@ -112,22 +254,10 @@ class GuardianAutofillStore {
     }
 
     private static String encrypt(String plainText) throws Exception {
-        /*
-         * Android Keystore keys created with randomized encryption enabled do not allow
-         * us to pass our own IV during ENCRYPT_MODE. If we do, Android throws:
-         * "Caller-provided IV not permitted".
-         *
-         * Correct flow:
-         * 1. Initialize encryption without a GCMParameterSpec.
-         * 2. Let Android Keystore generate a secure random IV.
-         * 3. Read the generated IV using cipher.getIV().
-         * 4. Store IV + ciphertext together so decrypt() can use that IV later.
-         */
         Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
         cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey());
 
         byte[] iv = cipher.getIV();
-
         if (iv == null || iv.length != IV_SIZE_BYTES) {
             throw new IllegalStateException("Android Keystore did not return a valid encryption IV.");
         }
@@ -142,6 +272,7 @@ class GuardianAutofillStore {
 
     private static String decrypt(String encryptedText) throws Exception {
         byte[] input = Base64.decode(encryptedText, Base64.NO_WRAP);
+        if (input.length <= IV_SIZE_BYTES) throw new IllegalArgumentException("Invalid encrypted autofill payload.");
 
         byte[] iv = new byte[IV_SIZE_BYTES];
         byte[] cipherText = new byte[input.length - IV_SIZE_BYTES];
@@ -187,13 +318,16 @@ class GuardianAutofillStore {
         int slashIndex = result.indexOf('/');
         if (slashIndex >= 0) result = result.substring(0, slashIndex);
 
+        int portIndex = result.indexOf(':');
+        if (portIndex >= 0) result = result.substring(0, portIndex);
+
         return result.trim();
     }
 
     private static boolean packageMatches(String packageName, String haystack) {
         if (packageName.trim().isEmpty() || haystack.trim().isEmpty()) return false;
 
-        String[] ignored = {"com", "org", "net", "android", "app", "mobile", "google"};
+        String[] ignored = {"com", "org", "net", "android", "app", "mobile", "google", "chrome"};
         String[] parts = packageName.split("\\.");
 
         for (String part : parts) {

@@ -3,7 +3,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
+  Easing,
+  type GestureResponderEvent,
   KeyboardAvoidingView,
   Platform,
   RefreshControl,
@@ -15,11 +18,20 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAppTheme } from '../context/ThemeContext';
+import { useAppAlert } from '../context/AppAlertContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import VaultItemActionMenu, {
+  type VaultActionMenuAnchor,
+  type VaultActionMenuFocusRect,
+  type VaultActionMenuPreview,
+} from '../components/VaultItemActionMenu';
+import ExpandingAddButton from '../components/ExpandingAddButton';
 import { API_BASE_URL, api, SecureNoteResponse, VaultItem } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
 import {
   createOfflineVaultSnapshot,
@@ -28,22 +40,27 @@ import {
   isOfflineReadableError,
   isOfflineVaultStale,
   loadOfflineVaultSnapshot,
+  markOfflineVaultStale,
   saveOfflineVaultSnapshot,
 } from '../services/offlineVault';
 import { hapticLight, hapticMedium, hapticSelection, hapticWarning } from '../utils/haptics';
 import CardBrandLogo from '../components/CardBrandLogo';
 import { detectCardBrand } from '../utils/cardBrand';
+import { syncGuardianAutofillCache } from '../services/autofillSync';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
 const SCREEN_PADDING = 20;
 const DOC_CARD_WIDTH = (width - SCREEN_PADDING * 2 - CARD_GAP) / 2;
+const DOC_CARD_HEIGHT = 190;
 
 const VAULT_AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
 
-const fastServerProbe = async (timeoutMs = 2500) => {
+const fastServerProbe = async (timeoutMs = 1800, externalSignal?: AbortSignal) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const abortFromScreen = () => controller.abort();
+  externalSignal?.addEventListener('abort', abortFromScreen, { once: true });
 
   try {
     /*
@@ -58,9 +75,11 @@ const fastServerProbe = async (timeoutMs = 2500) => {
 
     return true;
   } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
     return false;
   } finally {
     clearTimeout(timeoutId);
+    externalSignal?.removeEventListener('abort', abortFromScreen);
   }
 };
 
@@ -71,6 +90,7 @@ type PreparedVaultScreenData = {
   notes: SecureNoteResponse[];
   offlineMode: boolean;
   offlineSavedAt: string | null;
+  offlineSecretsAvailable: boolean;
   loadedAt: number;
 };
 
@@ -79,6 +99,16 @@ let lastOnlineVaultSyncAt = 0;
 
 type VaultTab = 'Passwords' | 'Documents' | 'Cards' | 'Notes';
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
+
+type VaultActionTarget = {
+  id: number | string;
+  itemKey: string;
+  itemType: 'PASSWORD' | 'DOCUMENT' | 'CARD' | 'NOTE';
+  title: string;
+  anchor: VaultActionMenuAnchor;
+  focusRect: VaultActionMenuFocusRect | null;
+  preview: VaultActionMenuPreview;
+};
 
 const tabs: { label: VaultTab; icon: string }[] = [
   { label: 'Passwords', icon: 'key-outline' },
@@ -108,11 +138,49 @@ const getFileExtension = (fileName?: string | null) => {
   return String(parts.pop() || '').trim().toLowerCase();
 };
 
+const IMAGE_FORMAT_LABELS: Record<string, string> = {
+  jpeg: 'JPG',
+  jpg: 'JPG',
+  png: 'PNG',
+  gif: 'GIF',
+  webp: 'WEBP',
+  heic: 'HEIC',
+  heif: 'HEIF',
+  avif: 'AVIF',
+  bmp: 'BMP',
+  svg: 'SVG',
+  tif: 'TIFF',
+  tiff: 'TIFF',
+};
+
+const isImageDocumentFile = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  return mime.startsWith('image/') || Boolean(IMAGE_FORMAT_LABELS[extension]);
+};
+
+const getImageDocumentFormat = (mimeType?: string | null, fileName?: string | null) => {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  const extension = getFileExtension(fileName);
+
+  if (IMAGE_FORMAT_LABELS[extension]) return IMAGE_FORMAT_LABELS[extension];
+
+  if (mime.startsWith('image/')) {
+    const subtype = mime.slice('image/'.length).split(';')[0].split('+')[0].trim();
+    return IMAGE_FORMAT_LABELS[subtype] || subtype.toUpperCase() || 'IMAGE';
+  }
+
+  return 'IMAGE';
+};
+
 const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | null) => {
   const mime = String(mimeType || '').trim().toLowerCase();
   const extension = getFileExtension(fileName);
 
-  if (mime.startsWith('image/')) return 'Image';
+  if (isImageDocumentFile(mimeType, fileName)) {
+    return getImageDocumentFormat(mimeType, fileName);
+  }
   if (mime.startsWith('video/')) return 'Video';
   if (mime.startsWith('audio/')) return 'Audio';
 
@@ -160,7 +228,8 @@ const getDocumentSize = (doc: any) => {
 
   try {
     return JSON.parse(doc.encryptedNotes || '{}').sizeBytes || 0;
-  } catch {
+  } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
     return 0;
   }
 };
@@ -190,7 +259,8 @@ const cleanVaultDisplayValue = (value?: string | null) => {
       const decoded = decodeURIComponent(cleaned);
       if (decoded === cleaned) break;
       cleaned = decoded.trim();
-    } catch {
+    } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
       break;
     }
   }
@@ -198,7 +268,8 @@ const cleanVaultDisplayValue = (value?: string | null) => {
   try {
     const parsed = JSON.parse(cleaned);
     if (typeof parsed === 'string') cleaned = parsed.trim();
-  } catch {
+  } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
     // Keep the cleaned string when it is not JSON.
   }
 
@@ -228,9 +299,12 @@ const getFulfilledValue = <T,>(
 };
 
 const VaultScreen = () => {
+  const requestApi = useCancelableApi(api);
+  const runCancelable = useCancelableRequest();
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
   const { colors: C } = useAppTheme();
+  const { showAlert } = useAppAlert();
   const styles = makeStyles(C);
 
   const [activeTab, setActiveTab] = useState<VaultTab>('Passwords');
@@ -241,12 +315,31 @@ const VaultScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
+  const [offlineSecretsAvailable, setOfflineSecretsAvailable] = useState(false);
   const [plan, setPlan] = useState<Plan>('FREE');
   const [checkingPlan, setCheckingPlan] = useState(true);
+  const [actionTarget, setActionTarget] = useState<VaultActionTarget | null>(null);
+  const [actionMenuVisible, setActionMenuVisible] = useState(false);
+  const [deletingAction, setDeletingAction] = useState(false);
 
   const lastLoadAttemptRef = useRef(0);
   const activeLoadSequenceRef = useRef(0);
   const currentEmailRef = useRef<string | null>(null);
+  const suppressNextItemPressRef = useRef(false);
+  const suppressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const actionMenuOpenTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sourceTransitionOpacity = useRef(new Animated.Value(1)).current;
+  const vaultItemRefs = useRef<Record<string, any>>({});
+
+  const setVaultItemRef = useCallback((key: string, node: any) => {
+    if (node) {
+      vaultItemRefs.current[key] = node;
+      return;
+    }
+
+    delete vaultItemRefs.current[key];
+  }, []);
 
 
   const isPaidPlan = plan === 'PREMIUM' || plan === 'FAMILY';
@@ -255,9 +348,27 @@ const VaultScreen = () => {
   const loadSubscriptionPlan = async () => {
     try {
       setCheckingPlan(true);
+
+      const serverReachable = await api
+        .checkServerReachability(1800)
+        .catch(() => false);
+
+      if (!serverReachable) {
+        const cachedPlan = String(
+          (await AsyncStorage.getItem('subscriptionPlan')) || 'FREE'
+        ).toUpperCase();
+
+        setPlan(
+          cachedPlan === 'PREMIUM' || cachedPlan === 'FAMILY'
+            ? (cachedPlan as Plan)
+            : 'FREE'
+        );
+        return;
+      }
+
       const subscription = await api
         .getSubscriptionFresh()
-        .catch(() => api.getSubscription().catch(() => ({ plan: 'FREE' as const })));
+        .catch(() => requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const })));
 
       setPlan((subscription?.plan || 'FREE') as Plan);
     } finally {
@@ -272,7 +383,8 @@ const VaultScreen = () => {
     noteData: SecureNoteResponse[] = [],
     fromOffline = false,
     savedAt?: string | null,
-    ownerEmail?: string | null
+    ownerEmail?: string | null,
+    secureSecretsAvailable = false
   ): PreparedVaultScreenData => {
     const fixedPasswords = passwords.map((item: any) => ({
       ...item,
@@ -322,6 +434,7 @@ const VaultScreen = () => {
       notes: noteData || [],
       offlineMode: fromOffline,
       offlineSavedAt: savedAt || null,
+      offlineSecretsAvailable: fromOffline && secureSecretsAvailable,
       loadedAt: Date.now(),
     };
   };
@@ -332,6 +445,7 @@ const VaultScreen = () => {
     setNotes(data.notes);
     setOfflineMode(data.offlineMode);
     setOfflineSavedAt(data.offlineSavedAt);
+    setOfflineSecretsAvailable(data.offlineSecretsAvailable);
   };
 
   const applyVaultData = (
@@ -341,10 +455,13 @@ const VaultScreen = () => {
     noteData: SecureNoteResponse[] = [],
     fromOffline = false,
     savedAt?: string | null,
-    ownerEmail?: string | null
+    ownerEmail?: string | null,
+    secureSecretsAvailable = false
   ) => {
     applyPreparedVaultData(
-      buildVaultScreenData(passwords, cards, documents, noteData, fromOffline, savedAt, ownerEmail)
+      buildVaultScreenData(
+        passwords, cards, documents, noteData, fromOffline, savedAt, ownerEmail, secureSecretsAvailable
+      )
     );
   };
 
@@ -361,7 +478,8 @@ const VaultScreen = () => {
       snapshot.notes,
       markAsOffline,
       snapshot.savedAt,
-      snapshot.email
+      snapshot.email,
+      snapshot.secureSecretsAvailable
     );
 
     return true;
@@ -385,6 +503,7 @@ const VaultScreen = () => {
       setNotes([]);
       setOfflineMode(false);
       setOfflineSavedAt(null);
+      setOfflineSecretsAvailable(false);
     }
 
     currentEmailRef.current = currentEmail;
@@ -427,7 +546,7 @@ const VaultScreen = () => {
      * If the laptop/Render server is unreachable, show the local encrypted snapshot
      * immediately instead of waiting for every vault request to timeout.
      */
-    const serverReachable = await fastServerProbe(2500);
+    const serverReachable = await runCancelable((signal) => fastServerProbe(1800, signal));
 
     if (serverReachable === false) {
       const loaded = await applyOfflineSnapshotInstantly(true);
@@ -448,10 +567,10 @@ const VaultScreen = () => {
       }
 
       const results = await Promise.allSettled([
-        api.getVaultItems(),
-        api.getCards(),
-        api.getDocuments(),
-        api.getSecureNotes(),
+        requestApi.getVaultItems(),
+        requestApi.getCards(),
+        requestApi.getDocuments(),
+        requestApi.getSecureNotes(),
       ]);
 
       if (loadSequence !== activeLoadSequenceRef.current) {
@@ -459,6 +578,10 @@ const VaultScreen = () => {
       }
 
       const failedReason = getRejectedReason(results);
+
+      if (isScreenRequestCancelled(failedReason)) {
+        return;
+      }
 
       if (failedReason) {
         console.log('VAULT SERVER SYNC FAILED', failedReason);
@@ -509,6 +632,7 @@ const VaultScreen = () => {
 
       await saveOfflineVaultSnapshot(snapshot);
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       console.log('VAULT LOAD FAILED', error);
 
       if (!hasVisibleData && isOfflineReadableError(error)) {
@@ -578,6 +702,310 @@ const VaultScreen = () => {
     });
   };
 
+  const closeActionMenu = useCallback(() => {
+    if (deletingAction) return;
+
+    if (actionMenuOpenTimerRef.current) {
+      clearTimeout(actionMenuOpenTimerRef.current);
+      actionMenuOpenTimerRef.current = null;
+    }
+
+    setActionMenuVisible(false);
+  }, [deletingAction]);
+
+  const handleActionMenuDismissed = useCallback(() => {
+    sourceTransitionOpacity.stopAnimation();
+    sourceTransitionOpacity.setValue(0);
+
+    Animated.timing(sourceTransitionOpacity, {
+      toValue: 1,
+      duration: 120,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setActionTarget(null);
+      }
+    });
+  }, [sourceTransitionOpacity]);
+
+  const handleRegularItemPress = useCallback((open: () => void) => {
+    if (suppressNextItemPressRef.current) {
+      suppressNextItemPressRef.current = false;
+      return;
+    }
+
+    open();
+  }, []);
+
+  const showItemActionMenu = useCallback(
+    (
+      event: GestureResponderEvent,
+      itemKey: string,
+      borderRadius: number,
+      target: Omit<VaultActionTarget, 'anchor' | 'focusRect' | 'itemKey'>
+    ) => {
+      if (deletingAction) return;
+
+      hapticMedium();
+
+      suppressNextItemPressRef.current = true;
+
+      if (suppressResetTimerRef.current) {
+        clearTimeout(suppressResetTimerRef.current);
+      }
+
+      suppressResetTimerRef.current = setTimeout(() => {
+        suppressNextItemPressRef.current = false;
+      }, 850);
+
+      const pageX = Number(event.nativeEvent.pageX || width / 2);
+      const pageY = Number(event.nativeEvent.pageY || 260);
+      const anchor = { x: pageX, y: pageY };
+      const node = vaultItemRefs.current[itemKey];
+
+      const openMenu = (focusRect: VaultActionMenuFocusRect | null) => {
+        if (actionMenuCloseTimerRef.current) {
+          clearTimeout(actionMenuCloseTimerRef.current);
+          actionMenuCloseTimerRef.current = null;
+        }
+
+        setActionTarget({
+          ...target,
+          itemKey,
+          anchor,
+          focusRect,
+        });
+
+        if (actionMenuOpenTimerRef.current) {
+          clearTimeout(actionMenuOpenTimerRef.current);
+        }
+
+        sourceTransitionOpacity.stopAnimation();
+        sourceTransitionOpacity.setValue(1);
+
+        Animated.timing(sourceTransitionOpacity, {
+          toValue: 0,
+          duration: 95,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }).start(() => {
+          actionMenuOpenTimerRef.current = setTimeout(() => {
+            setActionMenuVisible(true);
+            actionMenuOpenTimerRef.current = null;
+          }, Platform.OS === 'android' ? 45 : 10);
+        });
+      };
+
+      if (!node || typeof node.measureInWindow !== 'function') {
+        openMenu(null);
+        return;
+      }
+
+      node.measureInWindow(
+        (x: number, y: number, measuredWidth: number, measuredHeight: number) => {
+          if (
+            !Number.isFinite(x) ||
+            !Number.isFinite(y) ||
+            measuredWidth <= 0 ||
+            measuredHeight <= 0
+          ) {
+            openMenu(null);
+            return;
+          }
+
+          openMenu({
+            x,
+            y,
+            width: measuredWidth,
+            height: measuredHeight,
+            borderRadius,
+          });
+        }
+      );
+    },
+    [deletingAction, sourceTransitionOpacity]
+  );
+
+  const openTargetForEdit = useCallback(() => {
+    const target = actionTarget;
+    if (!target) return;
+
+    if (offlineMode) {
+      hapticWarning();
+      showOfflineWriteWarning();
+      return;
+    }
+
+    if (target.itemType === 'DOCUMENT') {
+      return;
+    }
+
+    hapticLight();
+
+    if (target.itemType === 'NOTE') {
+      router.push({
+        pathname: '/notedetails',
+        params: {
+          id: String(target.id),
+          returnTab: 'Notes',
+          mode: 'edit',
+        },
+      });
+      return;
+    }
+
+    router.push({
+      pathname: '/vaultdetails',
+      params: {
+        id: String(target.id),
+        type: target.itemType,
+        returnTab: activeTab,
+        mode: 'edit',
+      },
+    });
+  }, [actionTarget, activeTab, offlineMode, router]);
+
+  const removeDeletedTargetFromVisibleData = useCallback(
+    (target: VaultActionTarget) => {
+      const nextVaultItems =
+        target.itemType === 'NOTE'
+          ? vaultItems
+          : vaultItems.filter(
+              (item) =>
+                !(
+                  String(item.id) === String(target.id) &&
+                  item.itemType === target.itemType
+                )
+            );
+
+      const nextNotes =
+        target.itemType === 'NOTE'
+          ? notes.filter((note) => String(note.id) !== String(target.id))
+          : notes;
+
+      setVaultItems(nextVaultItems);
+      setNotes(nextNotes);
+
+      const email = currentEmailRef.current || vaultScreenMemoryCache?.email || '';
+
+      vaultScreenMemoryCache = {
+        email,
+        vaultItems: nextVaultItems,
+        notes: nextNotes,
+        offlineMode: false,
+        offlineSavedAt: null,
+        offlineSecretsAvailable: false,
+        loadedAt: Date.now(),
+      };
+
+      lastOnlineVaultSyncAt = 0;
+    },
+    [notes, vaultItems]
+  );
+
+  const deleteTarget = useCallback(
+    async (target: VaultActionTarget) => {
+      if (deletingAction) return;
+
+      /*
+       * Dismiss the action menu before starting the network request. The target
+       * is captured in this function, so the exit animation can safely clear
+       * the selected source while deletion continues. This also guarantees the
+       * user is never trapped behind a deleting modal if a follow-up cache or
+       * storage operation is slow.
+       */
+      if (actionMenuOpenTimerRef.current) {
+        clearTimeout(actionMenuOpenTimerRef.current);
+        actionMenuOpenTimerRef.current = null;
+      }
+      setActionMenuVisible(false);
+
+      try {
+        setDeletingAction(true);
+
+        if (target.itemType === 'PASSWORD') {
+          await requestApi.deleteVaultItem(target.id);
+        } else if (target.itemType === 'DOCUMENT') {
+          await requestApi.deleteDocument(target.id);
+        } else if (target.itemType === 'CARD') {
+          await requestApi.deleteCard(target.id);
+        } else {
+          await requestApi.deleteSecureNote(target.id);
+        }
+
+        removeDeletedTargetFromVisibleData(target);
+
+
+        await Promise.allSettled([
+          markOfflineVaultStale(),
+          AsyncStorage.multiSet([
+            ['homeNeedsInitialSync', 'true'],
+            ['securityScoreNeedsInitialSync', 'true'],
+          ]),
+        ]);
+
+        /*
+         * Keep the optimistic list visible, then silently rebuild the encrypted
+         * offline snapshot and in-memory vault cache from the server.
+         */
+        void loadVaultItems({ background: true });
+        void syncGuardianAutofillCache().catch(() => undefined);
+
+        showAlert({
+          title: 'Deleted',
+          message: `${target.title} was removed from your vault.`,
+          type: 'success',
+        });
+      } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
+        showAlert({
+          title: 'Delete failed',
+          message: error?.message || 'The item could not be deleted. Please try again.',
+          type: 'error',
+        });
+      } finally {
+        setDeletingAction(false);
+      }
+    },
+    [
+      deletingAction,
+      loadVaultItems,
+      removeDeletedTargetFromVisibleData,
+      showAlert,
+    ]
+  );
+
+  const requestTargetDelete = useCallback(() => {
+    const target = actionTarget;
+    if (!target) return;
+
+    if (offlineMode) {
+      hapticWarning();
+      showOfflineWriteWarning();
+      return;
+    }
+
+    hapticWarning();
+
+    showAlert({
+      title: `Delete ${target.itemType.toLowerCase()}?`,
+      message: `This permanently removes "${target.title}" from your vault.`,
+      type: 'warning',
+      cancelable: true,
+      buttons: [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void deleteTarget(target);
+          },
+        },
+      ],
+    });
+  }, [actionTarget, deleteTarget, offlineMode, showAlert]);
+
   const searchText = search.trim().toLowerCase();
 
   const passwords = useMemo(() => {
@@ -615,7 +1043,7 @@ const VaultScreen = () => {
     if (activeTab === 'Passwords') return `${passwords.length} login${passwords.length === 1 ? '' : 's'}`;
     if (activeTab === 'Documents') return `${documents.length} encrypted file${documents.length === 1 ? '' : 's'}`;
     if (activeTab === 'Cards') return `${cards.length} saved card${cards.length === 1 ? '' : 's'}`;
-    return `${filteredNotes.length} secure note${filteredNotes.length === 1 ? '' : 's'}`;
+    return `${filteredNotes.length} SecureNote${filteredNotes.length === 1 ? '' : 's'}`;
   };
 
   const getAddRoute = () => {
@@ -630,7 +1058,9 @@ const VaultScreen = () => {
   const showOfflineWriteWarning = () => {
     Alert.alert(
       'Offline mode',
-      'You can view your saved vault while offline. Add, edit, and delete will work again when The Guardian can reach the server.'
+      offlineSecretsAvailable
+        ? 'Your encrypted offline copy lets you view passwords, card details, and SecureNote contents. Adding, editing, deleting, and document downloads require The Guardian to reconnect.'
+        : 'Only vault metadata is available on this device right now. Reconnect and refresh the vault to create the protected offline copy of secret values.'
     );
   };
 
@@ -647,24 +1077,34 @@ const VaultScreen = () => {
     );
   };
 
-  const handleAddPress = () => {
+  const getAddNavigationAction = () => {
     if (offlineMode) {
       hapticWarning();
       showOfflineWriteWarning();
-      return;
+      return null;
     }
 
     if (activeTab === 'Documents') {
-      if (checkingPlan) return;
+      if (checkingPlan) return null;
 
       if (!isPaidPlan) {
         showDocumentUpgradePrompt();
-        return;
+        return null;
       }
     }
 
+    const route = getAddRoute();
+
     hapticMedium();
-    router.push(getAddRoute() as any);
+
+    return () => {
+      router.push(route as any);
+    };
+  };
+
+  const handleAddPress = () => {
+    const navigate = getAddNavigationAction();
+    navigate?.();
   };
 
   const renderDocumentUpgradeCard = () => (
@@ -723,7 +1163,7 @@ const VaultScreen = () => {
 
         <Text style={styles.emptyTitle}>No {type}s found</Text>
         <Text style={styles.emptySub}>
-          Add your first {type} or adjust your search.
+          Add your first {type}.
         </Text>
 
         {!offlineMode && (
@@ -746,12 +1186,42 @@ const VaultScreen = () => {
         ? renderEmpty('password')
         : passwords.map((item) => {
             const title = item.title || item.website || 'Untitled login';
+            const itemKey = `password-${item.id}`;
+            const selected = actionTarget?.itemKey === itemKey;
 
             return (
+              <Animated.View
+                key={itemKey}
+                style={[
+                  styles.listItemTransitionWrap,
+                  selected && { opacity: sourceTransitionOpacity },
+                ]}
+              >
               <TouchableOpacity
-                key={`password-${item.id}`}
+                ref={(node) => setVaultItemRef(itemKey, node)}
                 style={styles.itemCard}
-                onPress={() => openItem(item)}
+                onPress={() => handleRegularItemPress(() => openItem(item))}
+                onLongPress={(event) =>
+                  showItemActionMenu(
+                    event,
+                    itemKey,
+                    22,
+                    {
+                      id: item.id,
+                      itemType: 'PASSWORD',
+                      title,
+                      preview: {
+                        kind: 'password',
+                        title,
+                        subtitle: item.usernameValue || item.website || 'Login details',
+                        leadingText: title.charAt(0).toUpperCase(),
+                        leadingColor: getAvatarColor(title),
+                        meta: normalizeDate(item.updatedAt || item.createdAt),
+                      },
+                    }
+                  )
+                }
+                delayLongPress={430}
                 activeOpacity={0.76}
               >
                 <View style={[styles.avatar, { backgroundColor: getAvatarColor(title) }]}>
@@ -774,6 +1244,7 @@ const VaultScreen = () => {
                   <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
                 </View>
               </TouchableOpacity>
+              </Animated.View>
             );
           })}
     </View>
@@ -783,33 +1254,72 @@ const VaultScreen = () => {
     <View style={styles.documentGrid}>
       {documents.length === 0
         ? renderEmpty('document')
-        : documents.map((item) => (
-            <TouchableOpacity
-              key={`document-${item.id}`}
-              style={styles.documentCard}
-              onPress={() => openItem(item)}
-              activeOpacity={0.78}
-            >
-              <View style={styles.documentTop}>
-                <View style={styles.documentIcon}>
-                  <Ionicons
-                    name={(item.mimeType || '').startsWith('image/') ? 'image-outline' : 'document-text-outline'}
-                    size={23}
-                    color={C.primary}
-                  />
-                </View>
-                <Ionicons name="lock-closed-outline" size={15} color={C.tabInactive} />
-              </View>
+        : documents.map((item) => {
+            const itemKey = `document-${item.id}`;
+            const selected = actionTarget?.itemKey === itemKey;
 
-              <Text style={styles.documentName}>
-                {item.fileName || item.title || 'Document'}
-              </Text>
-              <Text style={styles.documentCategory}>
-                {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
-              </Text>
-              <Text style={styles.documentSize}>{formatSize(item.sizeBytes)}</Text>
-            </TouchableOpacity>
-          ))}
+            return (
+              <Animated.View
+                key={itemKey}
+                style={[
+                  styles.documentItemTransitionWrap,
+                  selected && { opacity: sourceTransitionOpacity },
+                ]}
+              >
+              <TouchableOpacity
+                ref={(node) => setVaultItemRef(itemKey, node)}
+                style={styles.documentCard}
+                onPress={() => handleRegularItemPress(() => openItem(item))}
+                onLongPress={(event) =>
+                  showItemActionMenu(
+                    event,
+                    itemKey,
+                    24,
+                    {
+                      id: item.id,
+                      itemType: 'DOCUMENT',
+                      title: item.fileName || item.title || 'Document',
+                      preview: {
+                        kind: 'document',
+                        title: item.fileName || item.title || 'Document',
+                        category: getFriendlyDocumentType(item.mimeType, item.fileName || item.title),
+                        size: formatSize(item.sizeBytes),
+                        isImage: isImageDocumentFile(item.mimeType, item.fileName || item.title),
+                      },
+                    }
+                  )
+                }
+                delayLongPress={430}
+                activeOpacity={0.78}
+              >
+                <View style={styles.documentTop}>
+                  <View style={styles.documentIcon}>
+                    <Ionicons
+                      name={isImageDocumentFile(item.mimeType, item.fileName || item.title) ? 'image-outline' : 'document-text-outline'}
+                      size={23}
+                      color={C.primary}
+                    />
+                  </View>
+                  <Ionicons name="lock-closed-outline" size={15} color={C.tabInactive} />
+                </View>
+
+                <Text
+                  style={styles.documentName}
+                  numberOfLines={2}
+                  ellipsizeMode="tail"
+                >
+                  {item.fileName || item.title || 'Document'}
+                </Text>
+                <Text style={styles.documentCategory} numberOfLines={1}>
+                  {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
+                </Text>
+                <Text style={styles.documentSize} numberOfLines={1}>
+                  {formatSize(item.sizeBytes)}
+                </Text>
+              </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
     </View>
   );
 
@@ -819,12 +1329,45 @@ const VaultScreen = () => {
         ? renderEmpty('card')
         : cards.map((item) => {
             const brand = detectCardBrand(item.title || 'Card', item.encryptedData || item.website || '');
+            const itemKey = `card-${item.id}`;
+            const selected = actionTarget?.itemKey === itemKey;
 
             return (
+              <Animated.View
+                key={itemKey}
+                style={[
+                  styles.cardItemTransitionWrap,
+                  selected && { opacity: sourceTransitionOpacity },
+                ]}
+              >
               <TouchableOpacity
-                key={`card-${item.id}`}
-                style={[styles.creditCard, { backgroundColor: getAvatarColor(item.title || 'Card') }]}
-                onPress={() => openItem(item)}
+                ref={(node) => setVaultItemRef(itemKey, node)}
+                style={[
+                  styles.creditCard,
+                  { backgroundColor: getAvatarColor(item.title || 'Card') },
+                ]}
+                onPress={() => handleRegularItemPress(() => openItem(item))}
+                onLongPress={(event) =>
+                  showItemActionMenu(
+                    event,
+                    itemKey,
+                    28,
+                    {
+                      id: item.id,
+                      itemType: 'CARD',
+                      title: item.title || 'Saved Card',
+                      preview: {
+                        kind: 'card',
+                        title: item.title || 'Saved Card',
+                        cardholder: item.usernameValue || 'Cardholder',
+                        last4: item.website || '••••',
+                        backgroundColor: getAvatarColor(item.title || 'Card'),
+                        brand,
+                      },
+                    }
+                  )
+                }
+                delayLongPress={430}
                 activeOpacity={0.85}
               >
                 <View style={styles.creditCardTop}>
@@ -846,6 +1389,7 @@ const VaultScreen = () => {
                   </View>
                 </View>
               </TouchableOpacity>
+              </Animated.View>
             );
           })}
     </View>
@@ -855,36 +1399,69 @@ const VaultScreen = () => {
     <View style={styles.list}>
       {filteredNotes.length === 0
         ? renderEmpty('note')
-        : filteredNotes.map((note) => (
-            <TouchableOpacity
-              key={`note-${note.id}`}
-              style={styles.noteCard}
-              onPress={() => openNote(note)}
-              activeOpacity={0.78}
-            >
-              <View style={[styles.avatar, { backgroundColor: note.pinned ? C.warning : C.primary }]}>
-                <Ionicons name={note.pinned ? 'pin' : 'reader-outline'} size={19} color="#fff" />
-              </View>
+        : filteredNotes.map((note) => {
+            const itemKey = `note-${note.id}`;
+            const selected = actionTarget?.itemKey === itemKey;
 
-              <View style={styles.cardText}>
-                <Text style={styles.cardName}>
-                  {note.title || 'Secure Note'}
-                </Text>
-                <Text style={styles.cardSub}>
-                  {note.category || 'General'} · encrypted
-                </Text>
-              </View>
+            return (
+              <Animated.View
+                key={itemKey}
+                style={[
+                  styles.listItemTransitionWrap,
+                  selected && { opacity: sourceTransitionOpacity },
+                ]}
+              >
+              <TouchableOpacity
+                ref={(node) => setVaultItemRef(itemKey, node)}
+                style={styles.noteCard}
+                onPress={() => handleRegularItemPress(() => openNote(note))}
+                onLongPress={(event) =>
+                  showItemActionMenu(
+                    event,
+                    itemKey,
+                    22,
+                    {
+                      id: note.id,
+                      itemType: 'NOTE',
+                      title: note.title || 'SecureNote',
+                      preview: {
+                        kind: 'note',
+                        title: note.title || 'SecureNote',
+                        subtitle: `${note.category || 'General'}`,
+                        leadingColor: note.pinned ? C.warning : C.primary,
+                        pinned: Boolean(note.pinned),
+                      },
+                    }
+                  )
+                }
+                delayLongPress={430}
+                activeOpacity={0.78}
+              >
+                <View style={[styles.avatar, { backgroundColor: note.pinned ? C.warning : C.primary }]}>
+                  <Ionicons name={note.pinned ? 'pin' : 'reader-outline'} size={19} color="#fff" />
+                </View>
 
-              <View style={styles.noteRight}>
-                {note.pinned && (
-                  <View style={styles.pinnedPill}>
-                    <Text style={styles.pinnedText}>PINNED</Text>
-                  </View>
-                )}
-                <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
-              </View>
-            </TouchableOpacity>
-          ))}
+                <View style={styles.cardText}>
+                  <Text style={styles.cardName}>
+                    {note.title || 'SecureNote'}
+                  </Text>
+                  <Text style={styles.cardSub}>
+                    {note.category || 'General'}
+                  </Text>
+                </View>
+
+                <View style={styles.noteRight}>
+                  {note.pinned && (
+                    <View style={styles.pinnedPill}>
+                      <Text style={styles.pinnedText}>PINNED</Text>
+                    </View>
+                  )}
+                  <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+                </View>
+              </TouchableOpacity>
+              </Animated.View>
+            );
+          })}
     </View>
   );
 
@@ -942,7 +1519,7 @@ const VaultScreen = () => {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboardAvoider}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
       >
       <ScrollView
@@ -958,12 +1535,13 @@ const VaultScreen = () => {
         }
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
+        keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.eyebrow}>{offlineMode ? 'Offline encrypted vault' : 'Encrypted vault'}</Text>
             <Text style={styles.headerTitle}>My Vault</Text>
+            <Text style={styles.headerSubtitle}>{headerCount()}</Text>
           </View>
 
           {activeTab === 'Documents' && !isPaidPlan ? (
@@ -983,31 +1561,22 @@ const VaultScreen = () => {
               )}
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity
+            <ExpandingAddButton
+              color={C.background}
               style={styles.addBtn}
-              activeOpacity={0.82}
-              onPress={handleAddPress}
-            >
-              <Ionicons name="add" size={28} color="#fff" />
-            </TouchableOpacity>
+              accessibilityLabel={`Add ${activeTab.toLowerCase().replace(/s$/, '')}`}
+              onRequestOpen={() => getAddNavigationAction()}
+            />
           )}
-        </View>
-
-        <View style={styles.overviewCard}>
-          <View style={styles.overviewIcon}>
-            <Ionicons name={activeTabIcon as any} size={25} color="#fff" />
-          </View>
-
-          <View style={{ flex: 1 }}>
-            <Text style={styles.overviewLabel}>{activeTab}</Text>
-            <Text style={styles.overviewTitle}>{headerCount()}</Text>
-          </View>
         </View>
 
         {offlineMode && (
           <OfflineBanner
             colors={C}
             savedAt={offlineSavedAt}
+            message={offlineSecretsAvailable
+              ? "Showing the encrypted offline vault saved on this device. Items might take longer to access in this mode."
+              : "Showing offline vault metadata. Reconnect and refresh to restore protected offline access to passwords, card details, and SecureNotes."}
             onRetry={() => { hapticLight(); loadVaultItems({ force: true }); }}
           />
         )}
@@ -1071,6 +1640,20 @@ const VaultScreen = () => {
         )}
       </ScrollView>
       </KeyboardAvoidingView>
+
+      <VaultItemActionMenu
+        visible={actionMenuVisible}
+        anchor={actionTarget?.anchor || null}
+        focusRect={actionTarget?.focusRect || null}
+        preview={actionTarget?.preview || null}
+        title={actionTarget?.title || 'Vault item'}
+        deleting={deletingAction}
+        showEdit={actionTarget?.itemType !== 'DOCUMENT'}
+        onClose={closeActionMenu}
+        onDismissed={handleActionMenuDismissed}
+        onEdit={openTargetForEdit}
+        onDelete={requestTargetDelete}
+      />
     </SafeAreaView>
   );
 };
@@ -1088,6 +1671,19 @@ const makeStyles = (C: ThemeColors) =>
 
     keyboardAvoider: {
       flex: 1,
+    },
+
+    listItemTransitionWrap: {
+      width: '100%',
+    },
+
+    documentItemTransitionWrap: {
+      width: DOC_CARD_WIDTH,
+      height: DOC_CARD_HEIGHT,
+    },
+
+    cardItemTransitionWrap: {
+      width: '100%',
     },
 
     scrollContent: {
@@ -1111,10 +1707,17 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     headerTitle: {
-      fontSize: 34,
+      fontSize: 32,
       fontWeight: '900',
       color: C.text,
       letterSpacing: -0.5,
+    },
+
+    headerSubtitle: {
+      marginTop: 3,
+      color: C.textSecondary,
+      fontSize: 13,
+      fontWeight: '700',
     },
 
     addBtn: {
@@ -1126,9 +1729,9 @@ const makeStyles = (C: ThemeColors) =>
       alignItems: 'center',
       shadowColor: C.primary,
       shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.25,
+      shadowOpacity: 0.14,
       shadowRadius: 16,
-      elevation: 7,
+      elevation: 4,
     },
 
 
@@ -1144,9 +1747,9 @@ const makeStyles = (C: ThemeColors) =>
       paddingHorizontal: 14,
       shadowColor: C.primary,
       shadowOffset: { width: 0, height: 10 },
-      shadowOpacity: 0.25,
+      shadowOpacity: 0.14,
       shadowRadius: 16,
-      elevation: 7,
+      elevation: 4,
     },
 
     headerUpgradeText: {
@@ -1165,10 +1768,10 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 28,
       padding: 18,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     overviewIcon: {
@@ -1215,10 +1818,10 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     searchInput: {
@@ -1239,10 +1842,10 @@ const makeStyles = (C: ThemeColors) =>
       borderColor: C.border,
       gap: 4,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     tab: {
@@ -1283,10 +1886,10 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     noteCard: {
@@ -1299,10 +1902,10 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     avatar: {
@@ -1364,17 +1967,17 @@ const makeStyles = (C: ThemeColors) =>
 
     documentCard: {
       width: DOC_CARD_WIDTH,
+      height: DOC_CARD_HEIGHT,
       backgroundColor: C.backgroundElement,
       borderRadius: 24,
       padding: 16,
-      marginBottom: 4,
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     documentTop: {
@@ -1394,11 +1997,12 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     documentName: {
+      height: 38,
       fontSize: 14,
       fontWeight: '900',
       color: C.text,
       lineHeight: 19,
-      flexShrink: 1,
+      flexShrink: 0,
     },
 
     documentCategory: {
@@ -1425,10 +2029,10 @@ const makeStyles = (C: ThemeColors) =>
       padding: 22,
       alignItems: 'center',
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     documentUpgradeIcon: {
@@ -1486,10 +2090,10 @@ const makeStyles = (C: ThemeColors) =>
       overflow: 'hidden',
       gap: 18,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     creditCardTop: {
@@ -1583,7 +2187,7 @@ const makeStyles = (C: ThemeColors) =>
       borderRadius: 999,
       opacity: 0.85,
       shadowColor: '#000',
-      shadowOpacity: 0.06,
+      shadowOpacity: 0.035,
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 5 },
       elevation: 2,
@@ -1593,7 +2197,7 @@ const makeStyles = (C: ThemeColors) =>
       backgroundColor: 'rgba(255,255,255,0.18)',
       borderRadius: 999,
       shadowColor: '#000',
-      shadowOpacity: 0.05,
+      shadowOpacity: 0.03,
       shadowRadius: 8,
       shadowOffset: { width: 0, height: 4 },
       elevation: 2,
@@ -1641,10 +2245,10 @@ const makeStyles = (C: ThemeColors) =>
       backgroundColor: C.primary,
       opacity: 0.88,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
+      shadowOpacity: 0.045,
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      elevation: 2,
     },
 
     skeletonCardTitle: {
@@ -1673,11 +2277,7 @@ const makeStyles = (C: ThemeColors) =>
       alignItems: 'center',
       width: '100%',
       paddingHorizontal: 30,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 4,
+      backgroundColor: 'transparent',
     },
 
     emptyIcon: {

@@ -17,6 +17,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, DeviceSession, logout } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
+import { clearBiometricCredentials, setBiometricEnabled } from '../utils/secureAuth';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -53,7 +55,8 @@ const resetToSignedOut = () => {
    */
   try {
     (router as any).dismissAll?.();
-  } catch {
+  } catch (error) {
+    if (isScreenRequestCancelled(error)) return;
     // Older Expo Router builds may not support dismissAll.
   }
 
@@ -61,6 +64,8 @@ const resetToSignedOut = () => {
 };
 
 export default function DevicesScreen() {
+  const requestApi = useCancelableApi(api);
+  const runCancelable = useCancelableRequest();
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -90,7 +95,7 @@ export default function DevicesScreen() {
     try {
       if (showLoader) setLoading(true);
 
-      const data = await api.getDeviceSessions();
+      const data = await requestApi.getDeviceSessions();
 
       /*
        * The backend now returns active sessions only, but this extra frontend
@@ -98,6 +103,7 @@ export default function DevicesScreen() {
        */
       setSessions((data || []).filter((session) => session.active));
     } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
       Alert.alert('Could not load devices', error.message || 'Please try again.');
     } finally {
       setLoading(false);
@@ -135,11 +141,13 @@ export default function DevicesScreen() {
           onPress: async () => {
             try {
               setWorkingId(session.id);
-              await api.revokeDeviceSession(session.id);
-              api.clearCache?.();
+              await requestApi.revokeDeviceSession(session.id);
+              requestApi.clearCache?.();
 
               if (isCurrent) {
-                await logout();
+                await clearBiometricCredentials();
+                await setBiometricEnabled(false);
+                await runCancelable(() => logout());
                 resetToSignedOut();
                 return;
               }
@@ -150,6 +158,7 @@ export default function DevicesScreen() {
               // Then silently confirm with the server.
               await loadSessions(false);
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Could not remove device', error.message || 'Please try again.');
             } finally {
               setWorkingId(null);
@@ -177,10 +186,11 @@ export default function DevicesScreen() {
           onPress: async () => {
             try {
               setLoggingOutOthers(true);
-              await api.logoutOtherDevices();
-              api.clearCache?.();
+              await requestApi.logoutOtherDevices();
+              requestApi.clearCache?.();
               await loadSessions(false);
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Could not log out devices', error.message || 'Please try again.');
             } finally {
               setLoggingOutOthers(false);
@@ -203,10 +213,13 @@ export default function DevicesScreen() {
           onPress: async () => {
             try {
               setLoggingOutAll(true);
-              await api.logoutAllDevices();
-              await logout();
+              await requestApi.logoutAllDevices();
+              await clearBiometricCredentials();
+              await setBiometricEnabled(false);
+              await runCancelable(() => logout());
               resetToSignedOut();
             } catch (error: any) {
+    if (isScreenRequestCancelled(error)) return;
               Alert.alert('Could not log out everywhere', error.message || 'Please try again.');
             } finally {
               setLoggingOutAll(false);
@@ -317,7 +330,6 @@ export default function DevicesScreen() {
           />
         }
       >
-        <Text style={styles.eyebrow}>Account security</Text>
         <Text style={styles.title}>Trusted Devices</Text>
 
         <View style={styles.heroCard}>
@@ -330,7 +342,7 @@ export default function DevicesScreen() {
               {activeSessions.length} active session{activeSessions.length === 1 ? '' : 's'}
             </Text>
             <Text style={styles.heroText}>
-              Review devices signed in to your account. Remove anything you do not recognize.
+              Remove sessions you do not recognize.
             </Text>
           </View>
         </View>
@@ -348,7 +360,6 @@ export default function DevicesScreen() {
               <Ionicons name="phone-portrait-outline" size={22} color={C.primary} />
             )}
             <Text style={styles.actionTitle}>Log out others</Text>
-            <Text style={styles.actionSub}>Keep this device signed in</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -363,7 +374,6 @@ export default function DevicesScreen() {
               <Ionicons name="log-out-outline" size={22} color={C.danger} />
             )}
             <Text style={[styles.actionTitle, { color: C.danger }]}>Log out all</Text>
-            <Text style={styles.actionSub}>Require sign in again</Text>
           </TouchableOpacity>
         </View>
 
@@ -402,12 +412,12 @@ const makeStyles = (C: any) =>
     skeletonBlock: {
       backgroundColor: C.backgroundSelected,
       borderRadius: 999,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     skeletonSectionTitle: {
       width: 120,
@@ -483,12 +493,12 @@ const makeStyles = (C: any) =>
       gap: 14,
       alignItems: 'center',
       marginBottom: 14,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     heroIcon: {
       width: 54,
@@ -526,22 +536,22 @@ const makeStyles = (C: any) =>
       padding: 15,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     dangerActionCard: {
       borderColor: C.alertDangerBg,
       backgroundColor: C.alertDangerBg,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     actionTitle: {
       color: C.text,
@@ -573,12 +583,12 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     deviceTopRow: {
       flexDirection: 'row',
@@ -639,12 +649,12 @@ const makeStyles = (C: any) =>
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     metaRow: {
       flexDirection: 'row',
@@ -661,12 +671,12 @@ const makeStyles = (C: any) =>
       borderRadius: 999,
       paddingHorizontal: 10,
       paddingVertical: 6,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     metaText: {
       color: C.textSecondary,
@@ -682,12 +692,12 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
       borderWidth: 1,
       borderColor: C.border,
-    
+
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     emptyTitle: {
       color: C.text,

@@ -20,6 +20,7 @@ import { AlertTriangle, Bug, CheckCircle2, Send, ShieldAlert } from 'lucide-reac
 import { useAppTheme } from '../context/ThemeContext';
 import { useAppAlert } from '../context/AppAlertContext';
 import { api } from '../services/api';
+import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import {
   hapticError,
   hapticLight,
@@ -34,6 +35,7 @@ const CATEGORIES = ['Vault', 'Documents', 'Family', 'Security', 'Payment', 'UI',
 const SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
 
 export default function BugReportScreen() {
+  const requestApi = useCancelableApi(api);
   const { colors: C, isDark } = useAppTheme();
   const { showAlert } = useAppAlert();
   const styles = makeStyles(C);
@@ -81,7 +83,7 @@ export default function BugReportScreen() {
       setSubmitting(true);
       hapticLight();
 
-      await api.submitBugReport({
+      await requestApi.submitBugReport({
         title,
         category,
         severity,
@@ -105,6 +107,7 @@ export default function BugReportScreen() {
         ],
       });
     } catch (error: any) {
+      if (isScreenRequestCancelled(error)) return;
       hapticError();
       showAlert({
         title: 'Could not send report',
@@ -121,21 +124,28 @@ export default function BugReportScreen() {
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <Text style={styles.kicker}>SUPPORT</Text>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        >
+          <Text style={styles.kicker}></Text>
           <Text style={styles.title}>Report a Bug</Text>
           <Text style={styles.subtitle}>
-            Tell us what broke. Please do not include passwords, card numbers, recovery codes, secure notes, or document contents.
+            Tell us what broke. Please do not include passwords, card numbers, recovery codes, SecureNotes, or document contents.
           </Text>
 
-          <View style={styles.warningCard}>
+          {/* <View style={styles.warningCard}>
             <ShieldAlert size={20} color={C.warning} />
             <Text style={styles.warningText}>
-              Bug reports are for app problems only. Sensitive vault data should never be pasted here.
+              Describe the problem without including vault secrets.
             </Text>
-          </View>
+          </View> */}
 
           <View style={styles.card}>
             <Text style={styles.label}>Bug title</Text>
@@ -249,8 +259,8 @@ export default function BugReportScreen() {
           </TouchableOpacity>
 
           <View style={styles.statusRow}>
-            <CheckCircle2 size={16} color={C.success} />
-            <Text style={styles.statusText}>Reports are attached to your account for follow-up.</Text>
+            {/* <CheckCircle2 size={16} color={C.success} />
+            <Text style={styles.statusText}>Reports are attached to your account for follow-up.</Text> */}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

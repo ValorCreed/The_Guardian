@@ -210,23 +210,8 @@ const WelcomeScreen = () => {
             {/* <Text style={styles.eyebrow}>Encrypted life vault</Text> */}
             <Text style={styles.title}>The Guardian</Text>
             <Text style={styles.subtitle}>
-              Store your most sensitive life data in one secure place protected by zero-knowledge encryption.
+              Your private vault for passwords, cards, documents and notes.
             </Text>
-          </View>
-
-          <View style={styles.trustRow}>
-            <View style={styles.trustPill}>
-              <Ionicons name="shield-checkmark" size={16} color={palette.primary} />
-              <Text style={styles.trustText}>Private</Text>
-            </View>
-            <View style={styles.trustPill}>
-              <Ionicons name="lock-closed" size={16} color={palette.primary} />
-              <Text style={styles.trustText}>Encrypted</Text>
-            </View>
-            <View style={styles.trustPill}>
-              <Ionicons name="finger-print" size={16} color={palette.primary} />
-              <Text style={styles.trustText}>Secure</Text>
-            </View>
           </View>
         </View>
 
@@ -401,10 +386,10 @@ const makeStyles = (P: any) => {
       borderColor: P.border,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     trustText: {
       color: P.text,
@@ -429,7 +414,7 @@ const makeStyles = (P: any) => {
       shadowOffset: { width: 0, height: 14 },
       shadowOpacity: P.dark ? 0.24 : 0.28,
       shadowRadius: 24,
-      elevation: 8,
+      elevation: 4,
     },
 
     createButtonText: {
@@ -449,10 +434,10 @@ const makeStyles = (P: any) => {
       borderColor: P.border,
     
       shadowColor: '#000',
-      shadowOpacity: 0.065,
+      shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 3,},
+      elevation: 2,},
 
     signInButtonText: {
       color: P.text,
