@@ -1,0 +1,33 @@
+### IntelliJ IDEA ###
+.idea/
+*.iml
+
+### VS Code ###
+.vscode/
+
+### Maven ###
+target/
+
+### Java ###
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+### Environment and secrets ###
+.env
+.env.*
+!.env.example
+
+### Logs ###
+*.log
+logs/
+
+### Operating systems ###
+.DS_Store
+Thumbs.db
+
+### Spring Boot ###
+spring.log

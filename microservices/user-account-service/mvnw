@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+BASE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PROPS="$BASE_DIR/.mvn/wrapper/maven-wrapper.properties"
+
+if command -v mvn >/dev/null 2>&1; then
+  exec mvn "$@"
+fi
+
+DIST_URL=$(sed -n 's/^distributionUrl=//p' "$PROPS" | tail -n 1)
+if [ -z "$DIST_URL" ]; then
+  echo "distributionUrl is missing from $PROPS" >&2
+  exit 1
+fi
+
+ARCHIVE_NAME=${DIST_URL##*/}
+MAVEN_DIR_NAME=${ARCHIVE_NAME%-bin.zip}
+WRAPPER_HOME="$BASE_DIR/.mvn/wrapper/dists"
+MAVEN_HOME="$WRAPPER_HOME/$MAVEN_DIR_NAME"
+ARCHIVE_PATH="$WRAPPER_HOME/$ARCHIVE_NAME"
+
+if [ ! -x "$MAVEN_HOME/bin/mvn" ]; then
+  mkdir -p "$WRAPPER_HOME"
+  if [ ! -f "$ARCHIVE_PATH" ]; then
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "$DIST_URL" -o "$ARCHIVE_PATH"
+    elif command -v wget >/dev/null 2>&1; then
+      wget -q "$DIST_URL" -O "$ARCHIVE_PATH"
+    else
+      echo "Install Maven, curl, or wget before running ./mvnw." >&2
+      exit 1
+    fi
+  fi
+
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -q -o "$ARCHIVE_PATH" -d "$WRAPPER_HOME"
+  else
+    echo "The unzip command is required to unpack Maven." >&2
+    exit 1
+  fi
+fi
+
+exec "$MAVEN_HOME/bin/mvn" "$@"

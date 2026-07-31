@@ -1,204 +1,192 @@
-# The Guardian Mobile Frontend
+# The Guardian Backend
 
-The Guardian is a secure digital vault mobile app built with **Expo React Native**. It helps users store and manage passwords, encrypted documents, cards, secure notes, family sharing, emergency access, recovery kits, backup/restore, security-health checks, device sessions, legal pages, and bug reporting.
+The Guardian backend is a Java/Spring Boot REST API for a secure digital vault mobile application. It powers authentication, JWT sessions, encrypted vault records, document storage, subscriptions, Paystack payments, family sharing, emergency access, recovery kits, notifications, backups, and bug reporting.
 
-This README covers the **frontend/mobile app** only. Backend documentation should live separately in `docs/backend-technical-documentation.md`.
-
-------------------
-
-## Tech stack
-
-- Expo React Native
-- Expo Router
-- TypeScript
-- AsyncStorage
-- Expo SecureStore
-- Expo Document Picker / File System / Sharing
-- Expo Haptics
-- Expo Updates and EAS Build
-- React Native SVG
-- Expo Vector Icons / Lucide Icons
-
---------------------------
-
-## Project structure
+## Tech Stack
 
 ```txt
-mobile/
-├── app/                         # Expo Router screens
-├── components/                  # Shared UI components
-├── context/ or contexts/         # Theme, alerts, blur target providers
-├── hooks/                        # Auto-lock, security score, network hooks
-├── services/                     # API and offline vault services
-├── utils/                        # Haptics, clipboard, crypto helpers, card brand helpers
-├── constants/                    # What's New content and constants
-├── assets/                       # Icons, splash images, brand graphics
-├── app.json
-├── eas.json
-├── package.json
-└── tsconfig.json
+Java 26
+Spring Boot 4.1.0
+Spring Security
+Spring Data JPA / Hibernate
+PostgreSQL
+Flyway
+JWT / JJWT
+BCrypt
+Gmail API
+Paystack
+Backblaze B2 / S3-compatible storage
+Docker
 ```
 
---------------------------------------
+## Main Features
 
-## Core features
+```txt
+User registration and login
+Email verification
+Two-factor authentication
+Password reset
+JWT authentication
+Device session management
+Encrypted password vault
+Encrypted card vault
+Encrypted document upload/download
+Encrypted secure notes
+Subscription plans: Free, Premium, Family
+Paystack payment verification
+Family sharing
+Emergency access and audit logs
+Recovery kit account recovery
+Encrypted backup and restore
+In-app notifications
+Bug reporting with admin email notification
+```
 
-- Authentication: register, sign in, email verification, password reset, 2FA challenge.
-- Protected navigation: route guard, vault lock, logout/back-navigation protection.
-- Vault: passwords, documents, cards, and secure notes.
-- Plan gates: free-plan limits and upgrade prompts for paid features.
-- Documents: encrypted document upload/download flow through backend API.
-- Security center: security score, account security actions, recovery kit reminders.
-- Family sharing: member lookup, permission-based sharing, shared vault item details.
-- Emergency access: trusted contacts, emergency requests, approval/denial, emergency vault viewing.
-- Backup and recovery: backup status, create backup, restore backup, recovery kit.
-- Offline vault metadata snapshots.
-- Secure clipboard clearing helper.
-- Light, Dark, and OLED themes.
-- Haptic feedback toggle and centralized haptic helpers.
-- Legal: Privacy Policy and Terms of Service screens.
-- Support: authenticated bug report submission.
+## Project Structure
 
-----------------------------------------
+The uploaded documentation files are flattened, but the code is organized by Java packages such as:
 
-## Getting started
+```txt
+com.vault.theguardian.auth
+com.vault.theguardian.security
+com.vault.theguardian.user
+com.vault.theguardian.vault
+com.vault.theguardian.cards
+com.vault.theguardian.documents
+com.vault.theguardian.notes
+com.vault.theguardian.subscription
+com.vault.theguardian.payment
+com.vault.theguardian.family
+com.vault.theguardian.emergency
+com.vault.theguardian.recovery
+com.vault.theguardian.backup
+com.vault.theguardian.notification
+com.vault.theguardian.session
+com.vault.theguardian.support
+```
 
-Install dependencies:
+## Environment Variables
+
+Set these in local environment or Render:
+
+```txt
+DATABASE_URL
+DATABASE_USERNAME
+DATABASE_PASSWORD
+JWT_SECRET
+JWT_EXPIRATION
+VAULT_PASSWORD_SECRET
+VAULT_DOCUMENT_SECRET
+BACKUP_SECRET
+GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET
+GMAIL_REFRESH_TOKEN
+GMAIL_FROM
+DEMO_MODE
+B2_ENABLED
+B2_ENDPOINT
+B2_REGION
+B2_BUCKET
+B2_KEY_ID
+B2_APPLICATION_KEY
+ADMIN_SUPPORT_EMAIL
+PORT
+```
+
+Paystack service also expects:
+
+```txt
+paystack.secret.key
+paystack.callback.url
+```
+
+Do not commit real secrets.
+
+## Running Locally
 
 ```bash
-npm install
+mvn clean install
+mvn spring-boot:run
 ```
 
-Start Expo:
+Default local URL:
 
-```bash
-npx expo start
+```txt
+http://localhost:8080
 ```
 
-Run Android locally if using a development build:
+For a physical phone running the Expo app, use the laptop LAN IP instead of `localhost`.
 
-```bash
-npx expo run:android
+## Important Endpoints
+
+```txt
+POST /vault/auth/register
+POST /vault/auth/login
+GET  /vault/api/subscriptions/me
+POST /api/vault
+GET  /api/vault
+POST /vault/cards
+GET  /vault/cards
+POST /vault/documents/upload
+GET  /vault/documents/{id}/download
+POST /vault/notes
+GET  /vault/family
+GET  /vault/emergency/overview
+POST /vault/payments/initialize
+POST /vault/payments/verify
+POST /vault/support/bug-reports
 ```
 
----
+Most endpoints require:
 
-## API configuration
-
-The frontend talks to the Guardian backend through `services/api.ts`.
-
-For production, use an Expo public environment variable instead of a hardcoded LAN IP:
-
-```bash
-EXPO_PUBLIC_API_BASE_URL='your-api-bas-url'
+```http
+Authorization: Bearer <token>
 ```
-
-Recommended `api.ts` pattern:
-
-```ts
-export const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL || 'your-api-base-url';
-```
-
-Do not put backend secrets in the frontend. The mobile app must never contain database credentials, JWT signing secrets, encryption keys, Gmail credentials, Backblaze keys, or payment secret keys.
-
---------------------------------
-
-## EAS builds
-
-Preview/internal Android APK:
-
-```bash
-eas build --profile preview --platform android
-```
-
-Production Android build:
-
-```bash
-eas build --profile production --platform android
-```
-
-Publish a JS-only update to preview:
-
-```bash
-eas update --channel preview --message "Frontend update"
-```
-
-Use a fresh EAS build when changing native modules, app icons, splash screen, native permissions, or runtime-version-related configuration.
-
---------------------------------------------
-
-## Important files
-
-| File | Purpose |
-|---|---|
-| `app/_layout.tsx` | Root navigation shell, route guard, tab bar, back button, providers. |
-| `services/api.ts` | API wrapper, tokens, device headers, caching, errors, upload/download. |
-| `services/offlineVault.ts` | Offline metadata snapshot support. |
-| `context/ThemeContext.tsx` | Light/Dark/OLED theme provider. |
-| `context/AppAlertContext.tsx` | Global themed alert modal system. |
-| `hooks/useAutoLock.ts` | Auto-lock behavior. |
-| `hooks/useSecurityScore.ts` | Security score calculation and sync. |
-| `utils/secureClipboard.ts` | Secure clipboard copy and timed clearing. |
-| `utils/haptics.ts` | Centralized haptic feedback helpers. |
-| `utils/cardBrand.ts` | Card brand detection helper. |
-| `app/vault.tsx` | Main vault list screen. |
-| `app/home.tsx` | Main dashboard screen. |
-| `app/settings.tsx` | Settings, legal, support, and account actions. |
-
----------------------------------------
 
 ## Documentation
 
-Full frontend documentation should be stored here:
+Full backend documentation is available here:
 
 ```txt
-docs/frontend-technical-documentation.md
+docs/backend-technical-documentation.md
+docs/backend-api-reference.md
 ```
 
-Suggested docs folder:
+## Deployment
+
+The backend includes a Dockerfile that builds with Java 26 and Maven, then runs the compiled JAR with Eclipse Temurin JRE.
+
+Render-compatible runtime config:
+
+```properties
+server.address=0.0.0.0
+server.port=${PORT:8080}
+```
+
+## Security Notes
 
 ```txt
-docs/
-├── frontend-technical-documentation.md
-├── backend-technical-documentation.md
-├── api-documentation.md
-├── deployment-guide.md
-└── security-overview.md
+Passwords are BCrypt hashed.
+Vault/card/note values are encrypted before storage.
+Document files are encrypted before storage.
+B2 bucket should stay private.
+Recovery keys are hashed, not stored in plaintext.
+JWT and encryption secrets must be strong and private.
 ```
 
--------------------------------
+## Current Latest Migration
 
-## Testing checklist
+```txt
+V20__create_bug_reports.sql
+```
 
-Before releasing a preview build, test:
+## Recommended Next Improvements
 
-- Register and sign in.
-- Email verification and legal acceptance flow.
-- Logout and Android back-button protection.
-- Vault lock and auto-lock behavior.
-- Free-plan password/card/note limits.
-- Free-user document upgrade prompt.
-- Premium/Family document upload and download.
-- Secure clipboard clearing behavior.
-- Security score refresh.
-- Recovery kit generate/revoke.
-- Family member lookup/add/remove.
-- Emergency access request/approval/denial.
-- Bug report submission.
-- Light, Dark, and OLED themes.
-
-----------------------------------------
-
-## Security notes
-
-- The frontend should never be trusted to enforce plan limits alone. Backend services must enforce all subscription and authorization rules.
-- Do not log passwords, card numbers, CVVs, secure note contents, document contents, recovery codes, JWT tokens, or encryption secrets.
-- Keep sensitive functionality behind authenticated routes and backend authorization checks.
-- Expo Go is useful for development, but final security-sensitive behavior should be tested in an EAS preview build.
-
--------------------------------
-
-## License
-
-Maven Apache Licence 2.0
+```txt
+Add Swagger/OpenAPI docs.
+Add rate limiting for auth and recovery endpoints.
+Add automated tests.
+Add admin bug report dashboard.
+Add backend card-count plan limits if required.
+Add audit logs for sensitive read/download events.
+```

@@ -1,0 +1,306 @@
+name: theguardian
+
+x-common-environment: &common-environment
+  INTERNAL_SERVICE_KEY: ${INTERNAL_SERVICE_KEY:?Set INTERNAL_SERVICE_KEY in .env}
+  SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+  SERVER_ERROR_INCLUDE_STACKTRACE: never
+  SERVER_ERROR_INCLUDE_MESSAGE: never
+  MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+
+x-database-environment: &database-environment
+  <<: *common-environment
+  DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+  DATABASE_USERNAME: ${DATABASE_USERNAME:?Set DATABASE_USERNAME in .env}
+  DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+
+services:
+  database-migration-runner:
+    build:
+      context: ./microservices/database-migration-runner
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:?Set DATABASE_USERNAME in .env}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Set DATABASE_PASSWORD in .env}
+    restart: "no"
+    networks: [guardian-network]
+
+  email-delivery-service:
+    build:
+      context: ./microservices/email-delivery-service
+    environment:
+      <<: *common-environment
+      PORT: 8091
+      GMAIL_CLIENT_ID: ${GMAIL_CLIENT_ID:?Set GMAIL_CLIENT_ID in .env}
+      GMAIL_CLIENT_SECRET: ${GMAIL_CLIENT_SECRET:?Set GMAIL_CLIENT_SECRET in .env}
+      GMAIL_REFRESH_TOKEN: ${GMAIL_REFRESH_TOKEN:?Set GMAIL_REFRESH_TOKEN in .env}
+      GMAIL_FROM: ${GMAIL_FROM:?Set GMAIL_FROM in .env}
+      DEMO_MODE: ${DEMO_MODE:-true}
+    ports:
+      - "8091:8091"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  auth-service:
+    build:
+      context: ./microservices/auth-service
+    environment:
+      <<: *database-environment
+      PORT: 8081
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_EXPIRATION: ${JWT_EXPIRATION:-86400000}
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      EMAIL_SERVICE_URL: http://email-delivery-service:8091
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      email-delivery-service:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./microservices/notification-service
+    environment:
+      <<: *database-environment
+      PORT: 8082
+      AUTH_SERVICE_URL: http://auth-service:8081
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  subscription-service:
+    build:
+      context: ./microservices/subscription-service
+    environment:
+      <<: *database-environment
+      PORT: 8083
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY:?Set PAYSTACK_SECRET_KEY in .env}
+      PAYSTACK_CALLBACK_URL: ${PAYSTACK_CALLBACK_URL:-http://localhost:8080/vault/payments/callback}
+      MANUAL_SUBSCRIPTION_UPGRADE_ENABLED: ${MANUAL_SUBSCRIPTION_UPGRADE_ENABLED:-false}
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  vault-service:
+    build:
+      context: ./microservices/vault-service
+    environment:
+      <<: *database-environment
+      PORT: 8084
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+      VAULT_PASSWORD_SECRET: ${VAULT_PASSWORD_SECRET:?Set VAULT_PASSWORD_SECRET in .env}
+      VAULT_DOCUMENT_SECRET: ${VAULT_DOCUMENT_SECRET:?Set VAULT_DOCUMENT_SECRET in .env}
+      B2_ENABLED: ${B2_ENABLED:-false}
+      B2_ENDPOINT: ${B2_ENDPOINT:-https://s3.us-east-005.backblazeb2.com}
+      B2_REGION: ${B2_REGION:-us-east-005}
+      B2_BUCKET: ${B2_BUCKET:-}
+      B2_KEY_ID: ${B2_KEY_ID:-}
+      B2_APPLICATION_KEY: ${B2_APPLICATION_KEY:-}
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  access-sharing-service:
+    build:
+      context: ./microservices/access-sharing-service
+    environment:
+      <<: *database-environment
+      PORT: 8085
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+      VAULT_SERVICE_URL: http://vault-service:8084
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      vault-service:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  backup-recovery-service:
+    build:
+      context: ./microservices/backup-recovery-service
+    environment:
+      <<: *database-environment
+      PORT: 8086
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+      VAULT_SERVICE_URL: http://vault-service:8084
+      ACCESS_SHARING_SERVICE_URL: http://access-sharing-service:8085
+      BACKUP_SECRET: ${BACKUP_SECRET:?Set BACKUP_SECRET in .env}
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      vault-service:
+        condition: service_healthy
+      access-sharing-service:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  user-account-service:
+    build:
+      context: ./microservices/user-account-service
+    environment:
+      <<: *common-environment
+      PORT: 8087
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+      VAULT_SERVICE_URL: http://vault-service:8084
+      ACCESS_SHARING_SERVICE_URL: http://access-sharing-service:8085
+      BACKUP_RECOVERY_SERVICE_URL: http://backup-recovery-service:8086
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      vault-service:
+        condition: service_healthy
+      access-sharing-service:
+        condition: service_healthy
+      backup-recovery-service:
+        condition: service_healthy
+    ports:
+      - "8087:8087"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  security-health-service:
+    build:
+      context: ./microservices/security-health-service
+    environment:
+      <<: *common-environment
+      PORT: 8088
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+    ports:
+      - "8088:8088"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  support-service:
+    build:
+      context: ./microservices/support-service
+    environment:
+      <<: *database-environment
+      PORT: 8090
+      AUTH_SERVICE_URL: http://auth-service:8081
+      EMAIL_SERVICE_URL: http://email-delivery-service:8091
+      ADMIN_SUPPORT_EMAIL: ${ADMIN_SUPPORT_EMAIL:-}
+    depends_on:
+      database-migration-runner:
+        condition: service_completed_successfully
+      auth-service:
+        condition: service_healthy
+      email-delivery-service:
+        condition: service_healthy
+    ports:
+      - "8090:8090"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: ./microservices/gateway
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SERVER_ERROR_INCLUDE_STACKTRACE: never
+      SERVER_ERROR_INCLUDE_MESSAGE: never
+      MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS: never
+      PORT: 8080
+      AUTH_SERVICE_URL: http://auth-service:8081
+      NOTIFICATION_SERVICE_URL: http://notification-service:8082
+      SUBSCRIPTION_SERVICE_URL: http://subscription-service:8083
+      VAULT_SERVICE_URL: http://vault-service:8084
+      ACCESS_SHARING_SERVICE_URL: http://access-sharing-service:8085
+      BACKUP_RECOVERY_SERVICE_URL: http://backup-recovery-service:8086
+      USER_ACCOUNT_SERVICE_URL: http://user-account-service:8087
+      SECURITY_HEALTH_SERVICE_URL: http://security-health-service:8088
+      SUPPORT_SERVICE_URL: http://support-service:8090
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      subscription-service:
+        condition: service_healthy
+      vault-service:
+        condition: service_healthy
+      access-sharing-service:
+        condition: service_healthy
+      backup-recovery-service:
+        condition: service_healthy
+      user-account-service:
+        condition: service_healthy
+      security-health-service:
+        condition: service_healthy
+      support-service:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    networks: [guardian-network]
+    restart: unless-stopped
+
+networks:
+  guardian-network:
+    driver: bridge
