@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "The Guardian",
+    "slug": "guardian",
+    "version": "3.0.1(Beta)",
+    "orientation": "portrait",
+    "scheme": "theguardian",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "icon": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#061A12",
+        "backgroundImage": "./src/assets/BackgroundImage.png",
+        "foregroundImage": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
+        "monochromeImage": "./src/assets/GuardianMonochrome_safe_55.png"
+      },
+      "predictiveBackGestureEnabled": true,
+      "package": "com.vault.theguardian",
+      "runtimeVersion": "1.0.0"
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./src/assets/GuardianAdaptiveForeground_safe_50.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#154B2D",
+          "image": "./src/assets/GuardianSplashNativeIcon.png",
+          "imageWidth": 220
+        }
+      ],
+      "expo-font",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "0d781bbf-3d4c-4af8-abd5-43a09edea95d"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/0d781bbf-3d4c-4af8-abd5-43a09edea95d"
+    }
+  }
+}
