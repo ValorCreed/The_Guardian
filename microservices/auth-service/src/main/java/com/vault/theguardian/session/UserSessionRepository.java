@@ -18,6 +18,7 @@ public interface UserSessionRepository extends JpaRepository<UserSession, Long> 
     List<UserSession> findByUserAndActiveTrue(User user);
 
     long countByUserAndActiveTrue(User user);
+    long countByUserAndSessionModeAndActiveTrue(User user, String sessionMode);
 
     List<UserSession> findByUserAndActiveTrueOrderByLastSeenAtDesc(User user);
 
@@ -25,10 +26,13 @@ public interface UserSessionRepository extends JpaRepository<UserSession, Long> 
      * Same account + same device/app installation ID = same trusted device.
      * IP address is intentionally NOT part of this lookup.
      */
-    List<UserSession> findByUserAndDeviceIdHashAndActiveTrueOrderByLastSeenAtDesc(
+    List<UserSession> findByUserAndDeviceIdHashAndSessionModeAndActiveTrueOrderByLastSeenAtDesc(
             User user,
-            String deviceIdHash
+            String deviceIdHash,
+            String sessionMode
     );
+
+    List<UserSession> findByUserAndSessionModeAndActiveTrue(User user, String sessionMode);
 
     Optional<UserSession> findByIdAndUser(Long id, User user);
 

@@ -44,4 +44,22 @@ public class AccessSharingClient {
             );
         }
     }
+    public List<RecoveryContactOption> getRecoveryContacts(Long ownerId) {
+        try {
+            RecoveryContactOption[] response = restClient.get()
+                    .uri("/internal/emergency/recovery-contacts/owners/{ownerId}", ownerId)
+                    .header(INTERNAL_KEY_HEADER, internalServiceKey)
+                    .retrieve()
+                    .body(RecoveryContactOption[].class);
+
+            return response == null ? List.of() : List.of(response);
+        } catch (RestClientException exception) {
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Access Sharing Service is temporarily unavailable.",
+                    exception
+            );
+        }
+    }
+
 }

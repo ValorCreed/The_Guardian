@@ -30,12 +30,12 @@ spring:
             - id: access-sharing-service
               uri: "${ACCESS_SHARING_SERVICE_URL:http://localhost:8085}"
               predicates:
-                - Path=/vault/family,/vault/family/**,/vault/emergency,/vault/emergency/**
+                - Path=/vault/family,/vault/family/**,/vault/emergency,/vault/emergency/**,/vault/safety-check,/vault/safety-check/**,/vault/estate-playbooks,/vault/estate-playbooks/**,/vault/continuity-drill,/vault/continuity-drill/**
 
             - id: backup-recovery-service
               uri: "${BACKUP_RECOVERY_SERVICE_URL:http://localhost:8086}"
               predicates:
-                - Path=/vault/backup,/vault/backup/**,/vault/recovery-kit,/vault/recovery-kit/**
+                - Path=/vault/backup,/vault/backup/**,/vault/recovery-kit,/vault/recovery-kit/**,/vault/recovery-circle,/vault/recovery-circle/**
 
             - id: user-account-service
               uri: "${USER_ACCOUNT_SERVICE_URL:http://localhost:8087}"

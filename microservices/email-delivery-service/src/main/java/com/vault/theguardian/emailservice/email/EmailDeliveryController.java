@@ -46,6 +46,20 @@ public class EmailDeliveryController {
         return emailDeliveryService.sendTwoFactorCode(request.toEmail(), request.code());
     }
 
+    @PostMapping("/duress-alert")
+    public EmailDeliveryResponse sendDuressAlert(
+            @Valid @RequestBody DuressAlertEmailRequest request
+    ) {
+        return emailDeliveryService.sendDuressAlert(request);
+    }
+
+    @PostMapping("/continuity-drill")
+    public EmailDeliveryResponse sendContinuityDrill(
+            @Valid @RequestBody ContinuityDrillEmailRequest request
+    ) {
+        return emailDeliveryService.sendContinuityDrillNotice(request);
+    }
+
     @PostMapping("/bug-report")
     public EmailDeliveryResponse sendBugReport(
             @Valid @RequestBody BugReportEmailRequest request

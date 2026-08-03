@@ -110,6 +110,79 @@ public class EmailDeliveryService {
         );
     }
 
+    public EmailDeliveryResponse sendDuressAlert(DuressAlertEmailRequest request) {
+        String safeOwnerName = escapeHtml(fallback(request.ownerName(), "A trusted Guardian user"));
+        String safeOwnerEmail = escapeHtml(fallback(request.ownerEmail(), "their Guardian account"));
+        String safeTriggeredAt = escapeHtml(
+                request.triggeredAt() == null ? "Unknown time" : request.triggeredAt().toString()
+        );
+
+        String html = """
+                <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
+                    <div style="max-width: 560px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px; border: 1px solid #d9eee5;">
+                        <h2 style="color: #154B2D; margin: 0 0 8px;">The Guardian</h2>
+                        <p style="color: #333333; font-size: 16px;"><strong>Delayed safety alert</strong></p>
+                        <p style="color: #555555; font-size: 15px; line-height: 1.6;">
+                            %s may have opened Guardian under coercion. This alert was deliberately delayed to reduce the chance of being visible during the event.
+                        </p>
+                        <div style="background: #FFF6E5; border: 1px solid #F2D394; border-radius: 14px; padding: 16px; margin: 20px 0;">
+                            <p style="margin: 0 0 8px; color: #5C4314;"><strong>Guardian account:</strong> %s</p>
+                            <p style="margin: 0; color: #5C4314;"><strong>Duress session began:</strong> %s</p>
+                        </div>
+                        <p style="color: #555555; font-size: 14px; line-height: 1.6;">
+                            Contact the person through a safe, independent channel. Do not confront a suspected coercer, do not reply with passwords, and contact local emergency services only when appropriate and safe.
+                        </p>
+                        <p style="color: #888888; font-size: 13px; margin-top: 24px;">
+                            Guardian did not send any vault secrets with this alert.
+                        </p>
+                    </div>
+                </div>
+                """.formatted(safeOwnerName, safeOwnerEmail, safeTriggeredAt);
+
+        return sendHtmlEmail(
+                request.toEmail(),
+                "Guardian Delayed Safety Alert",
+                html,
+                null
+        );
+    }
+
+    public EmailDeliveryResponse sendContinuityDrillNotice(ContinuityDrillEmailRequest request) {
+        String safeOwnerName = escapeHtml(fallback(request.ownerName(), "A trusted Guardian user"));
+        String safeRoles = escapeHtml(fallback(request.roles(), "Trusted contact"));
+        String safeExpiry = escapeHtml(request.expiresAt().toString());
+
+        String html = """
+                <div style="font-family: Arial, sans-serif; background-color: #f5f7f6; padding: 24px;">
+                    <div style="max-width: 560px; margin: auto; background: #ffffff; padding: 28px; border-radius: 16px; border: 1px solid #d9eee5;">
+                        <h2 style="color: #154B2D; margin: 0 0 8px;">The Guardian</h2>
+                        <p style="color: #333333; font-size: 16px; margin-top: 0;"><strong>Continuity Drill notice</strong></p>
+                        <p style="color: #555555; font-size: 15px; line-height: 1.6;">
+                            %s is safely testing their Guardian continuity plan. Open Guardian and acknowledge the simulated request before it expires.
+                        </p>
+                        <div style="background: #E8F8F3; border: 1px solid #BFE9D8; border-radius: 14px; padding: 16px; margin: 20px 0;">
+                            <p style="margin: 0 0 8px; color: #154B2D;"><strong>Your role:</strong> %s</p>
+                            <p style="margin: 0; color: #154B2D;"><strong>Expires:</strong> %s</p>
+                        </div>
+                        <p style="color: #555555; font-size: 14px; line-height: 1.6;">
+                            This drill did not release passwords, cards, documents, secure notes, recovery codes or estate instructions.
+                        </p>
+                        <p style="color: #888888; font-size: 13px; margin-top: 24px;">
+                            Do not reply with secrets. Sign in to Guardian through your normal app to acknowledge the request.
+                        </p>
+                        <p style="color: #154B2D; font-size: 13px; font-weight: bold; margin-top: 24px;">Your Life. Protected.</p>
+                    </div>
+                </div>
+                """.formatted(safeOwnerName, safeRoles, safeExpiry);
+
+        return sendHtmlEmail(
+                request.toEmail(),
+                "Guardian Continuity Drill Notice",
+                html,
+                null
+        );
+    }
+
     public EmailDeliveryResponse sendBugReportNotification(BugReportEmailRequest request) {
         String recipient = fallback(request.toEmail(), gmailFrom);
         String safeTitle = escapeHtml(fallback(request.title(), "Untitled bug report"));

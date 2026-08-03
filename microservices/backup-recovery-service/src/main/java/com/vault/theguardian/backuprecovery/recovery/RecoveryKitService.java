@@ -143,7 +143,7 @@ public class RecoveryKitService {
         // Flush the local revocation before calling Auth Service. If the Auth call
         // fails, the surrounding transaction rolls this change back so the user can retry.
         recoveryKitRepository.saveAndFlush(kit);
-        authClient.resetPassword(kit.getUserId(), request.newPassword());
+        authClient.resetPassword(kit.getUserId(), request.newPassword(), "RECOVERY_KIT");
         notificationClient.notifyRecoveryKitUsed(kit.getUserId());
 
         return new MessageResponse(

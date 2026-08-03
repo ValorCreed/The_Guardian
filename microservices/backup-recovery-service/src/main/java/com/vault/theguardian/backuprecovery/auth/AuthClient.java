@@ -40,7 +40,7 @@ public class AuthClient {
                     .body(TokenIntrospectionResponse.class);
 
             return response == null
-                    ? new TokenIntrospectionResponse(false, null, null)
+                    ? new TokenIntrospectionResponse(false, null, null, null, null, false, false)
                     : response;
         } catch (RestClientException exception) {
             throw new AuthServiceUnavailableException(
@@ -65,6 +65,26 @@ public class AuthClient {
             throw translate(exception, "Auth Service could not resolve the user account.");
         } catch (ResponseStatusException exception) {
             throw exception;
+        } catch (RestClientException exception) {
+            throw unavailable(exception);
+        }
+    }
+
+    public InternalUserResponse findByEmail(String email) {
+        try {
+            return restClient.get()
+                    .uri(uriBuilder -> uriBuilder
+                            .path("/internal/users/by-email")
+                            .queryParam("email", email)
+                            .build())
+                    .header(INTERNAL_KEY_HEADER, internalServiceKey)
+                    .retrieve()
+                    .body(InternalUserResponse.class);
+        } catch (RestClientResponseException exception) {
+            if (exception.getStatusCode().value() == HttpStatus.NOT_FOUND.value()) {
+                return null;
+            }
+            throw translate(exception, "Auth Service could not resolve the user account.");
         } catch (RestClientException exception) {
             throw unavailable(exception);
         }
@@ -103,12 +123,12 @@ public class AuthClient {
         }
     }
 
-    public void resetPassword(Long userId, String newPassword) {
+    public void resetPassword(Long userId, String newPassword, String recoveryMethod) {
         try {
             restClient.post()
                     .uri("/internal/recovery/users/{userId}/reset-password", userId)
                     .header(INTERNAL_KEY_HEADER, internalServiceKey)
-                    .body(new ResetPasswordRequest(newPassword))
+                    .body(new ResetPasswordRequest(newPassword, recoveryMethod))
                     .retrieve()
                     .toBodilessEntity();
         } catch (RestClientResponseException exception) {
@@ -168,7 +188,7 @@ public class AuthClient {
 
     private record VerifyPasswordRequest(String password) {}
     private record ValidateAccountResetRequest(String email, String resetCode) {}
-    private record ResetPasswordRequest(String newPassword) {}
+    private record ResetPasswordRequest(String newPassword, String recoveryMethod) {}
     private record CompleteAccountResetRequest(
             String email,
             String resetCode,

@@ -8,5 +8,6 @@ public record AuthResponse(
         String plan,
         boolean emailVerified,
         boolean twoFactorEnabled,
-        boolean requiresTwoFactor
+        boolean requiresTwoFactor,
+        String sessionMode
 ) {}

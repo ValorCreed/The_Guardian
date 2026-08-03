@@ -22,12 +22,12 @@ public class DocumentController {
     @PostMapping
     public DocumentResponse create(@AuthenticationPrincipal AuthenticatedUser user,
                                    @Valid @RequestBody DocumentRequest request) {
-        return service.createDocument(user.userId(), request);
+        return service.createDocument(user.userId(), user.isDuress(), request);
     }
 
     @GetMapping
     public List<DocumentResponse> list(@AuthenticationPrincipal AuthenticatedUser user) {
-        return service.getMyDocuments(user.userId());
+        return service.getMyDocuments(user.userId(), user.isDuress());
     }
 
     @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -38,20 +38,20 @@ public class DocumentController {
             @RequestParam("documentType") String documentType,
             @RequestParam("sizeBytes") Long sizeBytes
     ) throws IOException {
-        return service.uploadDocument(user.userId(), file, documentName, documentType, sizeBytes);
+        return service.uploadDocument(user.userId(), user.isDuress(), file, documentName, documentType, sizeBytes);
     }
 
     @GetMapping("/{id}")
     public DocumentResponse get(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable Long id) {
-        return service.getDocument(user.userId(), id);
+        return service.getDocument(user.userId(), user.isDuress(), id);
     }
 
     @GetMapping("/{id}/download")
     public ResponseEntity<byte[]> download(@AuthenticationPrincipal AuthenticatedUser user,
                                            @PathVariable Long id) {
-        byte[] bytes = service.getDocumentBytes(user.userId(), id);
-        String fileName = service.getDownloadFileName(user.userId(), id);
-        String contentType = service.getDownloadContentType(user.userId(), id);
+        byte[] bytes = service.getDocumentBytes(user.userId(), user.isDuress(), id);
+        String fileName = service.getDownloadFileName(user.userId(), user.isDuress(), id);
+        String contentType = service.getDownloadContentType(user.userId(), user.isDuress(), id);
         MediaType mediaType;
         try { mediaType = MediaType.parseMediaType(contentType); }
         catch (Exception ignored) { mediaType = MediaType.APPLICATION_OCTET_STREAM; }
@@ -66,13 +66,13 @@ public class DocumentController {
     public DocumentResponse update(@AuthenticationPrincipal AuthenticatedUser user,
                                    @PathVariable Long id,
                                    @Valid @RequestBody DocumentRequest request) {
-        return service.updateDocument(user.userId(), id, request);
+        return service.updateDocument(user.userId(), user.isDuress(), id, request);
     }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@AuthenticationPrincipal AuthenticatedUser user,
                                        @PathVariable Long id) {
-        service.deleteDocument(user.userId(), id);
+        service.deleteDocument(user.userId(), user.isDuress(), id);
         return ResponseEntity.noContent().build();
     }
 }

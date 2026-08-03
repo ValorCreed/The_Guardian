@@ -49,19 +49,19 @@ public class InternalVaultService {
 
     public List<InternalVaultItemResponse> list(Long ownerId, String itemType) {
         return switch (normalizeType(itemType)) {
-            case "PASSWORD" -> vaultRepository.findByUserIdOrderByUpdatedAtDesc(ownerId)
+            case "PASSWORD" -> vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, false)
                     .stream()
                     .map(item -> password(item, false))
                     .toList();
-            case "CARD" -> cardRepository.findByUserIdOrderByCreatedAtDesc(ownerId)
+            case "CARD" -> cardRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false)
                     .stream()
                     .map(card -> card(card, false))
                     .toList();
-            case "DOCUMENT" -> documentRepository.findByUserIdOrderByCreatedAtDesc(ownerId)
+            case "DOCUMENT" -> documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false)
                     .stream()
                     .map(document -> document(document, false))
                     .toList();
-            case "NOTE" -> noteRepository.findByUserIdOrderByPinnedDescUpdatedAtDesc(ownerId)
+            case "NOTE" -> noteRepository.findByUserIdAndDecoyOrderByPinnedDescUpdatedAtDesc(ownerId, false)
                     .stream()
                     .map(note -> note(note, false))
                     .toList();
@@ -76,22 +76,22 @@ public class InternalVaultService {
     ) {
         return switch (normalizeType(itemType)) {
             case "PASSWORD" -> password(
-                    requireOwner(vaultRepository.findById(itemId)
+                    requireOwner(vaultRepository.findByIdAndUserIdAndDecoy(itemId, ownerId, false)
                             .orElseThrow(() -> notFound("Password")), ownerId),
                     true
             );
             case "CARD" -> card(
-                    requireOwner(cardRepository.findById(itemId)
+                    requireOwner(cardRepository.findByIdAndUserIdAndDecoy(itemId, ownerId, false)
                             .orElseThrow(() -> notFound("Card")), ownerId),
                     true
             );
             case "DOCUMENT" -> document(
-                    requireOwner(documentRepository.findById(itemId)
+                    requireOwner(documentRepository.findByIdAndUserIdAndDecoy(itemId, ownerId, false)
                             .orElseThrow(() -> notFound("Document")), ownerId),
                     true
             );
             case "NOTE" -> note(
-                    requireOwner(noteRepository.findById(itemId)
+                    requireOwner(noteRepository.findByIdAndUserIdAndDecoy(itemId, ownerId, false)
                             .orElseThrow(() -> notFound("Secure note")), ownerId),
                     true
             );
@@ -100,16 +100,16 @@ public class InternalVaultService {
     }
 
     public InternalDownloadedDocument download(Long ownerId, Long itemId) {
-        byte[] bytes = documentService.getDocumentBytes(ownerId, itemId);
-        String fileName = documentService.getDownloadFileName(ownerId, itemId);
-        String contentType = documentService.getDownloadContentType(ownerId, itemId);
+        byte[] bytes = documentService.getDocumentBytes(ownerId, false, itemId);
+        String fileName = documentService.getDownloadFileName(ownerId, false, itemId);
+        String contentType = documentService.getDownloadContentType(ownerId, false, itemId);
         return new InternalDownloadedDocument(bytes, fileName, contentType);
     }
 
     public InternalVaultBackupResponse exportBackup(Long ownerId) {
-        List<VaultItem> passwords = vaultRepository.findByUserIdOrderByUpdatedAtDesc(ownerId);
-        List<CreditCardEntity> cards = cardRepository.findByUserIdOrderByCreatedAtDesc(ownerId);
-        List<DocumentVault> documents = documentRepository.findByUserIdOrderByCreatedAtDesc(ownerId);
+        List<VaultItem> passwords = vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, false);
+        List<CreditCardEntity> cards = cardRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false);
+        List<DocumentVault> documents = documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false);
 
         return new InternalVaultBackupResponse(
                 passwords.stream().map(this::backupPassword).toList(),
@@ -132,9 +132,9 @@ public class InternalVaultService {
         }
 
         if (request.replaceExisting()) {
-            vaultRepository.deleteAll(vaultRepository.findByUserIdOrderByUpdatedAtDesc(ownerId));
-            cardRepository.deleteAll(cardRepository.findByUserIdOrderByCreatedAtDesc(ownerId));
-            documentRepository.deleteAll(documentRepository.findByUserIdOrderByCreatedAtDesc(ownerId));
+            vaultRepository.deleteAll(vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, false));
+            cardRepository.deleteAll(cardRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false));
+            documentRepository.deleteAll(documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false));
         }
 
         int passwords = restorePasswords(ownerId, request.passwords());
@@ -152,10 +152,18 @@ public class InternalVaultService {
 
     @Transactional
     public InternalVaultDeleteResponse deleteAllUserData(Long ownerId) {
-        List<VaultItem> passwords = vaultRepository.findByUserIdOrderByUpdatedAtDesc(ownerId);
-        List<CreditCardEntity> cards = cardRepository.findByUserIdOrderByCreatedAtDesc(ownerId);
-        List<DocumentVault> documents = documentRepository.findByUserIdOrderByCreatedAtDesc(ownerId);
-        List<SecureNote> notes = noteRepository.findByUserIdOrderByPinnedDescUpdatedAtDesc(ownerId);
+        List<VaultItem> passwords = new ArrayList<>();
+        passwords.addAll(vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, false));
+        passwords.addAll(vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, true));
+        List<CreditCardEntity> cards = new ArrayList<>();
+        cards.addAll(cardRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false));
+        cards.addAll(cardRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, true));
+        List<DocumentVault> documents = new ArrayList<>();
+        documents.addAll(documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, false));
+        documents.addAll(documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(ownerId, true));
+        List<SecureNote> notes = new ArrayList<>();
+        notes.addAll(noteRepository.findByUserIdAndDecoyOrderByPinnedDescUpdatedAtDesc(ownerId, false));
+        notes.addAll(noteRepository.findByUserIdAndDecoyOrderByPinnedDescUpdatedAtDesc(ownerId, true));
 
         vaultRepository.deleteAll(passwords);
         cardRepository.deleteAll(cards);
@@ -165,7 +173,7 @@ public class InternalVaultService {
          * database rows. This also removes encrypted Backblaze B2 objects.
          */
         for (DocumentVault document : documents) {
-            documentService.deleteDocument(ownerId, document.getId());
+            documentService.deleteDocument(ownerId, document.isDecoy(), document.getId());
         }
 
         noteRepository.deleteAll(notes);
@@ -187,7 +195,7 @@ public class InternalVaultService {
 
         List<VaultItem> items = new ArrayList<>();
         for (Long ownerId : ownerIds.stream().filter(Objects::nonNull).distinct().toList()) {
-            items.addAll(vaultRepository.findByUserIdOrderByUpdatedAtDesc(ownerId));
+            items.addAll(vaultRepository.findByUserIdAndDecoyOrderByUpdatedAtDesc(ownerId, false));
         }
 
         Map<Long, String> passwordByItem = new HashMap<>();
@@ -279,7 +287,7 @@ public class InternalVaultService {
             boolean detail
     ) {
         DocumentResponse response = detail
-                ? documentService.getDocument(document.getUserId(), document.getId())
+                ? documentService.getDocument(document.getUserId(), false, document.getId())
                 : null;
 
         return new InternalVaultItemResponse(
@@ -376,6 +384,7 @@ public class InternalVaultService {
             if (item == null || isBlank(item.title()) || isBlank(item.encryptedPassword())) continue;
             vaultRepository.save(VaultItem.builder()
                     .userId(ownerId)
+                    .decoy(false)
                     .title(item.title())
                     .usernameValue(safe(item.usernameValue()))
                     .encryptedPassword(item.encryptedPassword())
@@ -402,6 +411,7 @@ public class InternalVaultService {
                     || isBlank(item.encryptedCvv())) continue;
             cardRepository.save(CreditCardEntity.builder()
                     .userId(ownerId)
+                    .decoy(false)
                     .cardName(item.cardName())
                     .encryptedCardNumber(item.encryptedCardNumber())
                     .encryptedExpiryDate(item.encryptedExpiryDate())
@@ -429,6 +439,7 @@ public class InternalVaultService {
             }
             documentRepository.save(DocumentVault.builder()
                     .userId(ownerId)
+                    .decoy(false)
                     .documentName(item.documentName())
                     .documentType(safe(item.documentType()))
                     .encryptedFileUrl(safe(item.encryptedFileUrl()))

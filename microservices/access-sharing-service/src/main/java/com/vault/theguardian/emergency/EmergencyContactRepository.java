@@ -14,4 +14,5 @@ public interface EmergencyContactRepository extends JpaRepository<EmergencyConta
             Long ownerId, String contactEmail
     );
     long countByOwnerId(Long ownerId);
+    boolean existsByOwnerIdAndContactUserIdAndActiveTrue(Long ownerId, Long contactUserId);
 }

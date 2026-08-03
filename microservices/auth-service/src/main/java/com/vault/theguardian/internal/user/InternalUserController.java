@@ -73,6 +73,12 @@ public class InternalUserController {
         if (userIds == null || userIds.isEmpty()) {
             return List.of();
         }
+        if (userIds.size() > 1_000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No more than 1000 user IDs are allowed.");
+        }
+        if (userIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Every user ID must be greater than zero.");
+        }
 
         return userRepository.findAllById(userIds.stream().distinct().toList())
                 .stream()

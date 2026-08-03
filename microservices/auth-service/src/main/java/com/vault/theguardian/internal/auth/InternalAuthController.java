@@ -1,8 +1,12 @@
 package com.vault.theguardian.internal.auth;
 
+import com.vault.theguardian.incident.SecurityIncidentService;
 import com.vault.theguardian.security.JwtService;
 import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.session.UserSessionRepository;
+import com.vault.theguardian.subscription.Subscription;
+import com.vault.theguardian.subscription.SubscriptionPlan;
+import com.vault.theguardian.subscription.SubscriptionRepository;
 import com.vault.theguardian.user.User;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -12,6 +16,7 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
 
 @RestController
 @RequestMapping("/internal/auth")
@@ -20,11 +25,15 @@ public class InternalAuthController {
 
     private final JwtService jwtService;
     private final UserSessionRepository userSessionRepository;
+    private final SubscriptionRepository subscriptionRepository;
+    private final SecurityIncidentService securityIncidentService;
     private final byte[] expectedInternalKey;
 
     public InternalAuthController(
             JwtService jwtService,
             UserSessionRepository userSessionRepository,
+            SubscriptionRepository subscriptionRepository,
+            SecurityIncidentService securityIncidentService,
             @Value("${internal.service.key}") String internalServiceKey
     ) {
         if (internalServiceKey == null || internalServiceKey.isBlank()) {
@@ -32,6 +41,8 @@ public class InternalAuthController {
         }
         this.jwtService = jwtService;
         this.userSessionRepository = userSessionRepository;
+        this.subscriptionRepository = subscriptionRepository;
+        this.securityIncidentService = securityIncidentService;
         this.expectedInternalKey = internalServiceKey.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -77,7 +88,47 @@ public class InternalAuthController {
             return TokenIntrospectionResponse.inactive();
         }
 
-        return new TokenIntrospectionResponse(true, user.getId(), user.getEmail());
+        String sessionMode = "DURESS".equalsIgnoreCase(session.getSessionMode())
+                ? "DURESS"
+                : "NORMAL";
+
+        /*
+         * Duress Mode is a paid entitlement. Re-check it at token
+         * introspection time so an expired or downgraded account cannot keep an
+         * old decoy session alive indefinitely. Safety alerts already queued by
+         * that session are intentionally unaffected.
+         */
+        if ("DURESS".equals(sessionMode) && !hasActiveDuressEntitlement(user)) {
+            session.setActive(false);
+            session.setRevokedAt(LocalDateTime.now());
+            userSessionRepository.save(session);
+            return TokenIntrospectionResponse.inactive();
+        }
+
+        SecurityIncidentService.LockdownAccessSnapshot lockdown =
+                securityIncidentService.accessSnapshot(user.getId(), tokenId, sessionMode);
+
+        return new TokenIntrospectionResponse(
+                true,
+                user.getId(),
+                user.getEmail(),
+                user.getFullName(),
+                sessionMode,
+                lockdown.active(),
+                lockdown.recoveryAuthorized()
+        );
+    }
+
+    private boolean hasActiveDuressEntitlement(User user) {
+        Subscription subscription = subscriptionRepository.findByUser(user).orElse(null);
+        if (subscription == null
+                || !subscription.isActive()
+                || subscription.getPlan() == null
+                || subscription.getPlan() == SubscriptionPlan.FREE) {
+            return false;
+        }
+        return subscription.getExpiresAt() == null
+                || !subscription.getExpiresAt().isBefore(LocalDateTime.now());
     }
 
     private void requireValidInternalKey(String suppliedKey) {

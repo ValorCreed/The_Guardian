@@ -38,15 +38,105 @@ public class NotificationClient {
             String message,
             String actionRoute
     ) {
-        if (user == null || user.getId() == null) {
-            return;
-        }
+        if (user == null) return;
+        createNotification(user.getId(), type, title, message, actionRoute);
+    }
 
-        CreateNotificationRequest request = new CreateNotificationRequest(
-                user.getId(), type, title, message, actionRoute
+    public void createNotification(
+            Long userId,
+            String type,
+            String title,
+            String message,
+            String actionRoute
+    ) {
+        if (userId == null) return;
+        publishAfterCommit(new CreateNotificationRequest(
+                userId, type, title, message, actionRoute
+        ));
+    }
+
+
+    public void notifyIncidentLockdownStarted(User user, String incidentType, int revokedSessions) {
+        createNotification(
+                user,
+                "INCIDENT_LOCKDOWN_STARTED",
+                "Incident Lockdown started",
+                "Guardian restricted the account to the recovery device and revoked "
+                        + revokedSessions + " other active session(s). Incident: "
+                        + cleanTitle(incidentType, "Security concern").replace('_', ' ') + ".",
+                "/incidentlockdown"
         );
+    }
 
-        publishAfterCommit(request);
+    public void notifyIncidentPasswordRotated(User user) {
+        createNotification(
+                user,
+                "INCIDENT_PASSWORD_ROTATED",
+                "Master password rotated",
+                "The Guardian master password was changed during Incident Lockdown.",
+                "/incidentlockdown"
+        );
+    }
+
+    public void notifyIncidentLockdownCompleted(User user) {
+        createNotification(
+                user,
+                "INCIDENT_LOCKDOWN_COMPLETED",
+                "Incident recovery completed",
+                "All required recovery steps were completed and normal account access was restored.",
+                "/incidentlockdown"
+        );
+    }
+
+    public void notifyIncidentLockdownRecovered(User user, String recoveryMethod) {
+        createNotification(
+                user,
+                "INCIDENT_LOCKDOWN_RECOVERED",
+                "Incident Lockdown recovered",
+                recoveryMethod + " reset the master password, revoked all sessions and closed the previous recovery-device restriction.",
+                "/incidentlockdown"
+        );
+    }
+
+    public void notifyIncidentLockdownCancelled(User user) {
+        createNotification(
+                user,
+                "INCIDENT_LOCKDOWN_CANCELLED",
+                "Incident Lockdown cancelled",
+                "Lockdown was cancelled during the accidental-activation window. Revoked sessions and biometrics remain revoked.",
+                "/incidentlockdown"
+        );
+    }
+
+    public void notifyDuressAlert(Long recipientUserId, String ownerName, String ownerEmail) {
+        String safeOwner = cleanTitle(ownerName, ownerEmail == null ? "A trusted contact" : ownerEmail);
+        createNotification(
+                recipientUserId,
+                "DURESS_ALERT",
+                "Guardian safety alert",
+                safeOwner + " may have opened Guardian under coercion. Contact them through a safe channel. Do not confront anyone or reply with secrets.",
+                null
+        );
+    }
+
+    public void notifyTwoFactorEnabled(User user) {
+        createNotification(
+                user,
+                "TWO_FACTOR_ENABLED",
+                "Two-factor authentication enabled",
+                "Two-factor authentication was enabled for Guardian sign-in.",
+                "/twofasetup"
+        );
+    }
+
+    public void notifyTwoFactorDisabled(User user) {
+        createNotification(
+                user,
+                "TWO_FACTOR_DISABLED",
+                "Two-factor authentication disabled",
+                "Two-factor authentication was disabled. Re-enable it if you did not make this change.",
+                "/twofasetup"
+        );
     }
 
     public void notifyWelcome(User user) {

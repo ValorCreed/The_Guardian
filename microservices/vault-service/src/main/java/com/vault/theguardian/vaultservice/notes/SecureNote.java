@@ -12,6 +12,10 @@ public class SecureNote {
     private Long id;
     @Column(name = "user_id", nullable = false)
     private Long userId;
+
+    @Column(name = "is_decoy", nullable = false)
+    @Builder.Default
+    private boolean decoy = false;
     @Column(nullable = false) private String title;
     private String category;
     @Column(nullable = false, columnDefinition = "TEXT") private String encryptedContent;

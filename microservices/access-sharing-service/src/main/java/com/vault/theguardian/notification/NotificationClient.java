@@ -73,6 +73,272 @@ public class NotificationClient {
                 clean(requesterEmail, "A trusted contact") + " opened your emergency vault.", "/emergencyaccess"));
     }
 
+
+    public void notifySafetyCheckConfigured(
+            Long ownerId,
+            String contactEmail,
+            int intervalDays
+    ) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_CONFIGURED",
+                "Guardian Safety Check active",
+                "Check in every " + intervalDays + (intervalDays == 1 ? " day. " : " days. ")
+                        + clean(contactEmail, "Your trusted contact")
+                        + " will receive only the emergency categories and estate playbook items you approved if the grace period ends.",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifySafetyCheckCompleted(Long ownerId) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_COMPLETED",
+                "Safety check-in complete",
+                "Your Guardian Safety Check timer was reset. Your next check-in is scheduled.",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifySafetyCheckGraceStarted(
+            Long ownerId,
+            String contactEmail,
+            int gracePeriodHours
+    ) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_GRACE_STARTED",
+                "Safety Check needs attention",
+                "You missed a scheduled check-in. Check in within "
+                        + gracePeriodHours + (gracePeriodHours == 1 ? " hour" : " hours")
+                        + " to prevent release to "
+                        + clean(contactEmail, "your trusted contact") + ".",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifySafetyCheckTriggeredOwner(Long ownerId, String contactEmail) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_TRIGGERED",
+                "Safety Check information released",
+                "Guardian Safety Check released the emergency information you approved to "
+                        + clean(contactEmail, "your trusted contact") + ".",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifySafetyCheckTriggeredContact(
+            Long contactUserId,
+            String ownerEmail,
+            boolean emergencyVaultAvailable
+    ) {
+        publishAfterCommit(new Request(
+                contactUserId,
+                "SAFETY_CHECK_TRIGGERED",
+                "Safety Check information is available",
+                clean(ownerEmail, "A vault owner")
+                        + " missed their Guardian Safety Check and grace period. "
+                        + "Their approved emergency information is now available.",
+                emergencyVaultAvailable
+                        ? "/emergencyaccess"
+                        : "/estateplaybooks?tab=received"
+        ));
+    }
+
+    public void notifySafetyCheckDisabled(Long ownerId) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_DISABLED",
+                "Guardian Safety Check disabled",
+                "Periodic safety check-ins and automatic emergency release are now off.",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifySafetyCheckDisabledByContact(Long ownerId) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "SAFETY_CHECK_DISABLED",
+                "Safety Check needs a new contact",
+                "Guardian Safety Check was disabled because the selected emergency contact is no longer eligible.",
+                "/safetycheck"
+        ));
+    }
+
+    public void notifyEstatePlaybookCreated(Long ownerId, String itemTitle, String actionType) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_CREATED",
+                "Estate playbook created",
+                clean(itemTitle, "A vault item") + " now has a "
+                        + clean(actionType, "digital estate").toLowerCase()
+                        + " playbook.",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookUpdated(Long ownerId, String itemTitle) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_UPDATED",
+                "Estate playbook updated",
+                "The instructions for " + clean(itemTitle, "a vault item") + " were updated.",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookArchived(Long ownerId, String itemTitle) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_ARCHIVED",
+                "Estate playbook archived",
+                clean(itemTitle, "A vault item") + " is no longer part of your active estate plan.",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookReleased(
+            Long recipientUserId,
+            String itemTitle,
+            String actionLabel
+    ) {
+        publishAfterCommit(new Request(
+                recipientUserId,
+                "ESTATE_PLAYBOOK_RELEASED",
+                "Digital estate instructions released",
+                "A trusted owner released " + clean(actionLabel, "estate instructions")
+                        + " for " + clean(itemTitle, "a vault item") + ".",
+                "/estateplaybooks?tab=received"
+        ));
+    }
+
+    public void notifyEstatePlaybookReleasedOwner(
+            Long ownerId,
+            String recipientEmail,
+            String itemTitle
+    ) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_RELEASED",
+                "Estate playbook released",
+                clean(itemTitle, "A vault item") + " was released to "
+                        + clean(recipientEmail, "your trusted recipient") + ".",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookViewed(
+            Long ownerId,
+            String recipientEmail,
+            String itemTitle
+    ) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_VIEWED",
+                "Estate playbook opened",
+                clean(recipientEmail, "Your trusted recipient") + " opened the released item and instructions for "
+                        + clean(itemTitle, "a vault item") + ".",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookCompleted(
+            Long ownerId,
+            String recipientEmail,
+            String itemTitle
+    ) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "ESTATE_PLAYBOOK_COMPLETED",
+                "Estate task marked complete",
+                clean(recipientEmail, "Your trusted recipient") + " marked the playbook for "
+                        + clean(itemTitle, "a vault item") + " as completed.",
+                "/estateplaybooks"
+        ));
+    }
+
+    public void notifyEstatePlaybookCancelled(Long recipientUserId, String itemTitle) {
+        publishAfterCommit(new Request(
+                recipientUserId,
+                "ESTATE_PLAYBOOK_CANCELLED",
+                "Estate playbook cancelled",
+                "The owner cancelled the unrevealed playbook for "
+                        + clean(itemTitle, "a vault item") + ".",
+                "/estateplaybooks?tab=received"
+        ));
+    }
+
+    public void notifyContinuityDrillStarted(Long ownerId, int participantCount, java.time.Instant expiresAt) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "CONTINUITY_DRILL_STARTED",
+                "Continuity Drill started",
+                "Guardian sent a simulated notice to " + participantCount
+                        + (participantCount == 1 ? " trusted contact. " : " trusted contacts. ")
+                        + "No vault secret was released. The drill closes in 48 hours.",
+                "/continuitydrill"
+        ));
+    }
+
+    public void notifyContinuityDrillAcknowledgementRequested(
+            Long participantUserId,
+            String ownerName,
+            String roles
+    ) {
+        publishAfterCommit(new Request(
+                participantUserId,
+                "CONTINUITY_DRILL_ACK_REQUESTED",
+                "Continuity Drill check",
+                clean(ownerName, "A trusted Guardian user")
+                        + " is testing their digital continuity plan. Confirm that you received this simulated notice. "
+                        + "Role: " + clean(roles, "Trusted contact") + ". No secret was released.",
+                "/continuitydrill?tab=requests"
+        ));
+    }
+
+    public void notifyContinuityDrillAcknowledged(Long ownerId, String participantName) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "CONTINUITY_DRILL_ACKNOWLEDGED",
+                "Drill notice acknowledged",
+                clean(participantName, "A trusted contact")
+                        + " confirmed receipt of your simulated Continuity Drill notice.",
+                "/continuitydrill"
+        ));
+    }
+
+    public void notifyContinuityDrillCompleted(Long ownerId, int score) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "CONTINUITY_DRILL_COMPLETED",
+                "Continuity Drill complete",
+                "Your continuity readiness score is " + score
+                        + "/100. Review failed checks and repair weak recovery paths.",
+                "/continuitydrill"
+        ));
+    }
+
+    public void notifyContinuityDrillExpired(Long ownerId, int score) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "CONTINUITY_DRILL_EXPIRED",
+                "Continuity Drill expired",
+                "The 48-hour drill window ended with a readiness score of " + score + "/100.",
+                "/continuitydrill"
+        ));
+    }
+
+    public void notifyContinuityDrillCancelled(Long ownerId) {
+        publishAfterCommit(new Request(
+                ownerId,
+                "CONTINUITY_DRILL_CANCELLED",
+                "Continuity Drill cancelled",
+                "The simulated drill was cancelled. No vault secret was released.",
+                "/continuitydrill"
+        ));
+    }
+
     private void publishAfterCommit(Request request) {
         if (request.userId() == null) return;
 

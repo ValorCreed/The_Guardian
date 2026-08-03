@@ -32,7 +32,7 @@ public class AuthIntrospectionClient {
                     .body(TokenIntrospectionResponse.class);
 
             return response == null
-                    ? new TokenIntrospectionResponse(false, null, null)
+                    ? new TokenIntrospectionResponse(false, null, null, null, null, false, false)
                     : response;
         } catch (RestClientException exception) {
             throw new AuthServiceUnavailableException(

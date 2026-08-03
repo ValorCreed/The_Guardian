@@ -65,6 +65,10 @@ public class UserSession {
     @Column(nullable = false)
     private boolean active;
 
+    @Column(name = "session_mode", nullable = false, length = 16)
+    @Builder.Default
+    private String sessionMode = "NORMAL";
+
     private LocalDateTime createdAt;
 
     private LocalDateTime lastSeenAt;

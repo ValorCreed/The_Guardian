@@ -20,16 +20,16 @@ public class VaultController {
     public VaultResponse create(
             @AuthenticationPrincipal AuthenticatedUser user,
             @Valid @RequestBody VaultRequest request
-    ) { return vaultService.createVaultItem(user.userId(), request); }
+    ) { return vaultService.createVaultItem(user.userId(), user.isDuress(), request); }
 
     @GetMapping
     public List<VaultResponse> list(@AuthenticationPrincipal AuthenticatedUser user) {
-        return vaultService.getMyVaultItems(user.userId());
+        return vaultService.getMyVaultItems(user.userId(), user.isDuress());
     }
 
     @GetMapping("/{id}")
     public VaultResponse get(@AuthenticationPrincipal AuthenticatedUser user, @PathVariable Long id) {
-        return vaultService.getVaultItem(user.userId(), id);
+        return vaultService.getVaultItem(user.userId(), user.isDuress(), id);
     }
 
     @PutMapping("/{id}")
@@ -37,13 +37,13 @@ public class VaultController {
             @AuthenticationPrincipal AuthenticatedUser user,
             @PathVariable Long id,
             @Valid @RequestBody VaultRequest request
-    ) { return vaultService.updateVaultItem(user.userId(), id, request); }
+    ) { return vaultService.updateVaultItem(user.userId(), user.isDuress(), id, request); }
 
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(
             @AuthenticationPrincipal AuthenticatedUser user, @PathVariable Long id
     ) {
-        vaultService.deleteVaultItem(user.userId(), id);
+        vaultService.deleteVaultItem(user.userId(), user.isDuress(), id);
         return ResponseEntity.noContent().build();
     }
 }

@@ -18,6 +18,14 @@ public class DeviceSessionController {
         this.deviceSessionService = deviceSessionService;
     }
 
+    @GetMapping("/heartbeat")
+    public SessionHeartbeatResponse heartbeat(@AuthenticationPrincipal User user) {
+        return new SessionHeartbeatResponse(
+                user != null && user.getId() != null,
+                "Guardian session is active."
+        );
+    }
+
     @GetMapping
     public List<DeviceSessionResponse> getMySessions(
             @AuthenticationPrincipal User user,

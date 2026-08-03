@@ -1,5 +1,6 @@
 package com.vault.theguardian.security;
 
+import com.vault.theguardian.incident.SecurityIncidentService;
 import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
@@ -14,8 +15,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -27,15 +26,18 @@ public class SecurityConfig {
     private final JwtService jwtService;
     private final UserRepository userRepository;
     private final UserSessionRepository userSessionRepository;
+    private final SecurityIncidentService securityIncidentService;
 
     public SecurityConfig(
             JwtService jwtService,
             UserRepository userRepository,
-            UserSessionRepository userSessionRepository
+            UserSessionRepository userSessionRepository,
+            SecurityIncidentService securityIncidentService
     ) {
         this.jwtService = jwtService;
         this.userRepository = userRepository;
         this.userSessionRepository = userSessionRepository;
+        this.securityIncidentService = securityIncidentService;
     }
 
     @Bean
@@ -71,12 +73,6 @@ public class SecurityConfig {
 
         return http.build();
     }
-
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder(12);
-    }
-
     @Bean
     public OncePerRequestFilter jwtFilter() {
         return new OncePerRequestFilter() {
@@ -112,7 +108,7 @@ public class SecurityConfig {
                     String token = authHeader.substring(7);
 
                     if (!jwtService.isTokenValid(token)) {
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        writeSessionEnded(response);
                         return;
                     }
 
@@ -120,7 +116,7 @@ public class SecurityConfig {
                     String tokenId = jwtService.extractTokenId(token);
 
                     if (tokenId == null || tokenId.isBlank()) {
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        writeSessionEnded(response);
                         return;
                     }
 
@@ -128,7 +124,7 @@ public class SecurityConfig {
                             .orElse(null);
 
                     if (session == null || session.getUser() == null) {
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        writeSessionEnded(response);
                         return;
                     }
 
@@ -139,7 +135,7 @@ public class SecurityConfig {
                      * The JWT subject must match the session owner.
                      */
                     if (!user.getEmail().equalsIgnoreCase(email)) {
-                        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                        writeSessionEnded(response);
                         return;
                     }
 
@@ -153,6 +149,37 @@ public class SecurityConfig {
                         return;
                     }
 
+                    if ("DURESS".equalsIgnoreCase(session.getSessionMode())) {
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        response.setContentType("application/json");
+                        response.getWriter().write(
+                                "{\"message\":\"This action is not available in this vault session.\"}"
+                        );
+                        return;
+                    }
+
+                    SecurityIncidentService.LockdownAccessSnapshot lockdown =
+                            securityIncidentService.accessSnapshot(
+                                    user.getId(),
+                                    tokenId,
+                                    session.getSessionMode()
+                            );
+                    if (lockdown.active()) {
+                        boolean incidentRoute = path.equals("/vault/auth/incidents")
+                                || path.startsWith("/vault/auth/incidents/");
+                        boolean heartbeatRoute = path.equals("/vault/sessions/heartbeat");
+                        boolean allowedRecoveryRoute = incidentRoute || heartbeatRoute;
+                        if (!lockdown.recoveryAuthorized() || !allowedRecoveryRoute) {
+                            response.setStatus(423);
+                            response.setCharacterEncoding("UTF-8");
+                            response.setContentType("application/json");
+                            response.getWriter().write(
+                                    "{\"code\":\"ACCOUNT_LOCKDOWN_ACTIVE\",\"message\":\"Incident Lockdown is active. Continue recovery on the designated device.\"}"
+                            );
+                            return;
+                        }
+                    }
+
                     touchSessionIfNeeded(session);
 
                     UsernamePasswordAuthenticationToken authentication =
@@ -161,7 +188,7 @@ public class SecurityConfig {
                     SecurityContextHolder.getContext().setAuthentication(authentication);
                 } catch (Exception e) {
                     SecurityContextHolder.clearContext();
-                    response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                    writeAuthenticationUnavailable(response);
                     return;
                 }
 
@@ -172,6 +199,24 @@ public class SecurityConfig {
                 filterChain.doFilter(request, response);
             }
         };
+    }
+
+    private void writeSessionEnded(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setCharacterEncoding("UTF-8");
+        response.setContentType("application/json");
+        response.getWriter().write(
+                "{\"code\":\"SESSION_REVOKED\",\"message\":\"This Guardian session is no longer active.\"}"
+        );
+    }
+
+    private void writeAuthenticationUnavailable(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+        response.setCharacterEncoding("UTF-8");
+        response.setContentType("application/json");
+        response.getWriter().write(
+                "{\"code\":\"AUTH_SERVICE_UNAVAILABLE\",\"message\":\"Guardian could not verify this session right now. Please try again.\"}"
+        );
     }
 
     private boolean isPublicPath(String path) {

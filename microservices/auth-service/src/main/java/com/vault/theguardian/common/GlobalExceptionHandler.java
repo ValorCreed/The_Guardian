@@ -45,8 +45,14 @@ public class GlobalExceptionHandler {
             message = status.getReasonPhrase();
         }
 
+        String code = status.name();
+        if (status.value() == 423 && message.startsWith("ACCOUNT_LOCKDOWN_ACTIVE:")) {
+            code = "ACCOUNT_LOCKDOWN_ACTIVE";
+            message = message.substring("ACCOUNT_LOCKDOWN_ACTIVE:".length()).trim();
+        }
+
         return ResponseEntity.status(status).body(baseBody(
-                status.name(),
+                code,
                 message,
                 request.getRequestURI()
         ));

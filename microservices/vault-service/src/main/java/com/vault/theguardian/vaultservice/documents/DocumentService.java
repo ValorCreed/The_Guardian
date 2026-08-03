@@ -4,6 +4,7 @@ import com.vault.theguardian.vaultservice.notification.NotificationClient;
 import com.vault.theguardian.vaultservice.subscription.SubscriptionClient;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -16,6 +17,7 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.Base64;
@@ -27,12 +29,17 @@ import java.util.regex.Pattern;
 @Service
 public class DocumentService {
 
-    private static final String PREFIX = "v1";
+    private static final String NORMAL_PREFIX = "v1";
+    private static final String DECOY_PREFIX = "v1d";
     private static final String STORAGE_PROVIDER_B2 = "B2";
     private static final String STORAGE_PROVIDER_DATABASE = "DATABASE";
-    private static final byte[] FILE_MAGIC = new byte[]{'T', 'G', 'D', '1'};
+    private static final byte[] NORMAL_FILE_MAGIC = new byte[]{'T', 'G', 'D', '1'};
+    private static final byte[] DECOY_FILE_MAGIC = new byte[]{'T', 'G', 'D', '2'};
     private static final int IV_LENGTH_BYTES = 12;
     private static final int TAG_LENGTH_BITS = 128;
+    private static final long MAX_UPLOAD_BYTES = 25L * 1024L * 1024L;
+    private static final int MAX_DOCUMENT_NAME_LENGTH = 255;
+    private static final int MAX_DOCUMENT_TYPE_LENGTH = 127;
     private static final Pattern LEGACY_BASE64_CONTENT_PATTERN = Pattern.compile("\\\"base64Content\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"");
 
     private final DocumentRepository documentRepository;
@@ -40,7 +47,8 @@ public class DocumentService {
     private final NotificationClient notificationClient;
     private final B2StorageService b2StorageService;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final SecretKeySpec documentKeySpec;
+    private final SecretKeySpec normalDocumentKeySpec;
+    private final SecretKeySpec decoyDocumentKeySpec;
 
     public DocumentService(
             DocumentRepository documentRepository,
@@ -53,34 +61,37 @@ public class DocumentService {
         this.subscriptionService = subscriptionService;
         this.notificationClient = notificationClient;
         this.b2StorageService = b2StorageService;
-        this.documentKeySpec = buildKey(documentSecret);
+        this.normalDocumentKeySpec = buildKey(documentSecret);
+        this.decoyDocumentKeySpec = buildKey(documentSecret + "\u0000guardian-decoy-document-v1");
     }
 
-    public DocumentResponse createDocument(Long userId, DocumentRequest request) {
+    public DocumentResponse createDocument(Long userId, boolean decoy, DocumentRequest request) {
         requireDocumentUploadAccess(userId);
 
-        String finalDocumentName = cleanDocumentName(request.documentName());
-        String finalDocumentType = cleanDocumentType(request.documentType());
+        String finalDocumentName = validateDocumentName(request.documentName());
+        String finalDocumentType = validateDocumentType(request.documentType());
         byte[] fileBytes = decodePossibleBase64File(request.encryptedFileUrl());
 
         DocumentVault document = DocumentVault.builder()
                 .userId(userId)
+                .decoy(decoy)
                 .documentName(finalDocumentName)
                 .documentType(finalDocumentType)
-                .encryptedNotes(encryptText(request.encryptedNotes()))
+                .encryptedNotes(encryptText(request.encryptedNotes(), decoy))
                 .sizeBytes((long) fileBytes.length)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        storeFileBytes(userId, document, fileBytes, finalDocumentName, finalDocumentType);
+        storeFileBytes(userId, decoy, document, fileBytes, finalDocumentName, finalDocumentType);
 
         DocumentVault savedDocument = documentRepository.save(document);
-        notificationClient.notifyDocumentAdded(userId, savedDocument.getDocumentName());
+        if (!decoy) notificationClient.notifyDocumentAdded(userId, savedDocument.getDocumentName());
         return toMetadataResponse(savedDocument);
     }
 
     public DocumentResponse uploadDocument(
             Long userId,
+            boolean decoy,
             MultipartFile file,
             String documentName,
             String documentType,
@@ -92,61 +103,67 @@ public class DocumentService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No file was uploaded.");
         }
 
-        String finalDocumentName = documentName != null && !documentName.isBlank()
-                ? documentName.trim()
-                : file.getOriginalFilename();
-
-        if (finalDocumentName == null || finalDocumentName.isBlank()) {
-            finalDocumentName = "Untitled document";
+        long actualSize = file.getSize();
+        if (actualSize <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The uploaded file is empty.");
+        }
+        if (actualSize > MAX_UPLOAD_BYTES) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "The uploaded file must be 25 MB or smaller.");
+        }
+        if (sizeBytes != null && sizeBytes > 0 && sizeBytes.longValue() != actualSize) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "The declared file size does not match the uploaded file."
+            );
         }
 
-        String finalDocumentType = documentType != null && !documentType.isBlank()
-                ? documentType.trim()
-                : file.getContentType();
-
-        if (finalDocumentType == null || finalDocumentType.isBlank()) {
-            finalDocumentType = "application/octet-stream";
-        }
-
-        long finalSize = sizeBytes != null && sizeBytes > 0 ? sizeBytes : file.getSize();
+        String originalFileName = sanitizeOriginalFileName(file.getOriginalFilename());
+        String finalDocumentName = validateDocumentName(
+                documentName != null && !documentName.isBlank() ? documentName : originalFileName
+        );
+        String finalDocumentType = validateDocumentType(
+                documentType != null && !documentType.isBlank() ? documentType : file.getContentType()
+        );
+        long finalSize = actualSize;
 
         String metadataJson = String.format(
                 "{\"originalFileName\":\"%s\",\"sizeBytes\":%d,\"storage\":\"%s\"}",
-                escapeJson(file.getOriginalFilename()),
+                escapeJson(originalFileName),
                 finalSize,
                 b2StorageService.isEnabled() ? STORAGE_PROVIDER_B2 : STORAGE_PROVIDER_DATABASE
         );
 
         DocumentVault document = DocumentVault.builder()
                 .userId(userId)
+                .decoy(decoy)
                 .documentName(finalDocumentName)
                 .documentType(finalDocumentType)
-                .encryptedNotes(encryptText(metadataJson))
+                .encryptedNotes(encryptText(metadataJson, decoy))
                 .sizeBytes(finalSize)
                 .createdAt(LocalDateTime.now())
                 .build();
 
-        storeFileBytes(userId, document, file.getBytes(), finalDocumentName, finalDocumentType);
+        storeFileBytes(userId, decoy, document, file.getBytes(), finalDocumentName, finalDocumentType);
 
         DocumentVault savedDocument = documentRepository.save(document);
-        notificationClient.notifyDocumentAdded(userId, savedDocument.getDocumentName());
+        if (!decoy) notificationClient.notifyDocumentAdded(userId, savedDocument.getDocumentName());
         return toMetadataResponse(savedDocument);
     }
 
-    public List<DocumentResponse> getMyDocuments(Long userId) {
-        return documentRepository.findByUserIdOrderByCreatedAtDesc(userId)
+    public List<DocumentResponse> getMyDocuments(Long userId, boolean decoy) {
+        return documentRepository.findByUserIdAndDecoyOrderByCreatedAtDesc(userId, decoy)
                 .stream()
                 .map(this::toMetadataResponse)
                 .toList();
     }
 
-    public DocumentResponse getDocument(Long userId, Long id) {
-        DocumentVault document = getOwnedDocument(userId, id);
+    public DocumentResponse getDocument(Long userId, boolean decoy, Long id) {
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
         return toMetadataResponse(document);
     }
 
-    public byte[] getDocumentBytes(Long userId, Long id) {
-        DocumentVault document = getOwnedDocument(userId, id);
+    public byte[] getDocumentBytes(Long userId, boolean decoy, Long id) {
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
         return readDocumentBytes(document);
     }
 
@@ -158,8 +175,8 @@ public class DocumentService {
         return readDocumentBytes(document);
     }
 
-    public String getDownloadFileName(Long userId, Long id) {
-        DocumentVault document = getOwnedDocument(userId, id);
+    public String getDownloadFileName(Long userId, boolean decoy, Long id) {
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
         return getDownloadFileNameForSharedAccess(document);
     }
 
@@ -167,8 +184,8 @@ public class DocumentService {
         return cleanDownloadFileName(document.getDocumentName());
     }
 
-    public String getDownloadContentType(Long userId, Long id) {
-        DocumentVault document = getOwnedDocument(userId, id);
+    public String getDownloadContentType(Long userId, boolean decoy, Long id) {
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
         return getDownloadContentTypeForSharedAccess(document);
     }
 
@@ -184,7 +201,7 @@ public class DocumentService {
         if (isB2Document(document)) {
             try {
                 byte[] encryptedBytes = b2StorageService.getEncryptedObject(document.getStorageKey());
-                return decryptFileBytes(encryptedBytes);
+                return decryptFileBytes(encryptedBytes, document.isDecoy());
             } catch (ResponseStatusException error) {
                 throw error;
             } catch (Exception error) {
@@ -192,7 +209,7 @@ public class DocumentService {
             }
         }
 
-        String decryptedValue = decryptTextForResponse(document.getEncryptedFileUrl());
+        String decryptedValue = decryptTextForResponse(document.getEncryptedFileUrl(), document.isDecoy());
         String base64File = extractBase64FileContent(decryptedValue);
 
         if (base64File == null || base64File.isBlank()) {
@@ -206,34 +223,34 @@ public class DocumentService {
         }
     }
 
-    public DocumentResponse updateDocument(Long userId, Long id, DocumentRequest request) {
+    public DocumentResponse updateDocument(Long userId, boolean decoy, Long id, DocumentRequest request) {
         requireDocumentUploadAccess(userId);
 
-        DocumentVault document = getOwnedDocument(userId, id);
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
 
-        document.setDocumentName(cleanDocumentName(request.documentName()));
-        document.setDocumentType(cleanDocumentType(request.documentType()));
+        document.setDocumentName(validateDocumentName(request.documentName()));
+        document.setDocumentType(validateDocumentType(request.documentType()));
 
         if (request.encryptedFileUrl() != null && !request.encryptedFileUrl().isBlank()) {
             byte[] fileBytes = decodePossibleBase64File(request.encryptedFileUrl());
             String oldStorageKey = document.getStorageKey();
             boolean oldWasB2 = isB2Document(document);
 
-            storeFileBytes(userId, document, fileBytes, document.getDocumentName(), document.getDocumentType());
+            storeFileBytes(userId, decoy, document, fileBytes, document.getDocumentName(), document.getDocumentType());
 
             if (oldWasB2 && oldStorageKey != null && !oldStorageKey.equals(document.getStorageKey())) {
                 b2StorageService.deleteObjectQuietly(oldStorageKey);
             }
         }
 
-        document.setEncryptedNotes(encryptText(request.encryptedNotes()));
+        document.setEncryptedNotes(encryptText(request.encryptedNotes(), decoy));
 
         DocumentVault savedDocument = documentRepository.save(document);
         return toMetadataResponse(savedDocument);
     }
 
-    public void deleteDocument(Long userId, Long id) {
-        DocumentVault document = getOwnedDocument(userId, id);
+    public void deleteDocument(Long userId, boolean decoy, Long id) {
+        DocumentVault document = getOwnedDocument(userId, decoy, id);
         String storageKey = document.getStorageKey();
         boolean wasB2Document = isB2Document(document);
 
@@ -246,6 +263,7 @@ public class DocumentService {
 
     private void storeFileBytes(
             Long userId,
+            boolean decoy,
             DocumentVault document,
             byte[] fileBytes,
             String documentName,
@@ -256,8 +274,8 @@ public class DocumentService {
         }
 
         if (b2StorageService.isEnabled()) {
-            String storageKey = buildStorageKey(userId, documentName);
-            byte[] encryptedBytes = encryptFileBytes(fileBytes);
+            String storageKey = buildStorageKey(userId, documentName, decoy);
+            byte[] encryptedBytes = encryptFileBytes(fileBytes, decoy);
             b2StorageService.putEncryptedObject(storageKey, encryptedBytes, documentType);
 
             document.setStorageProvider(STORAGE_PROVIDER_B2);
@@ -270,7 +288,7 @@ public class DocumentService {
         String base64File = Base64.getEncoder().encodeToString(fileBytes);
         document.setStorageProvider(STORAGE_PROVIDER_DATABASE);
         document.setStorageKey(null);
-        document.setEncryptedFileUrl(encryptText(base64File));
+        document.setEncryptedFileUrl(encryptText(base64File, decoy));
         document.setSizeBytes((long) fileBytes.length);
     }
 
@@ -280,15 +298,12 @@ public class DocumentService {
                 && !document.getStorageKey().isBlank();
     }
 
-    private DocumentVault getOwnedDocument(Long userId, Long id) {
-        DocumentVault document = documentRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Document not found."));
-
-        if (!document.getUserId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this document.");
-        }
-
-        return document;
+    private DocumentVault getOwnedDocument(Long userId, boolean decoy, Long id) {
+        return documentRepository.findByIdAndUserIdAndDecoy(id, userId, decoy)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Document not found."
+                ));
     }
 
     private void requireDocumentUploadAccess(Long userId) {
@@ -306,29 +321,35 @@ public class DocumentService {
                 document.getDocumentName(),
                 document.getDocumentType(),
                 "",
-                decryptTextForResponse(document.getEncryptedNotes()),
+                decryptTextForResponse(document.getEncryptedNotes(), document.isDecoy()),
                 document.getSizeBytes(),
                 document.getCreatedAt(),
                 document.getCreatedAt()
         );
     }
 
-    private String buildStorageKey(Long userId, String documentName) {
+    private String buildStorageKey(Long userId, String documentName, boolean decoy) {
         String safeName = cleanDownloadFileName(documentName);
-        return "users/" + userId + "/documents/" + UUID.randomUUID() + "/" + safeName + ".enc";
+        return "users/" + userId + (decoy ? "/decoy-documents/" : "/documents/")
+                + UUID.randomUUID() + "/" + safeName + ".enc";
     }
 
-    private byte[] encryptFileBytes(byte[] plainBytes) {
+    private byte[] encryptFileBytes(byte[] plainBytes, boolean decoy) {
         try {
             byte[] iv = new byte[IV_LENGTH_BYTES];
             secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, documentKeySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    keyFor(decoy),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+            );
             byte[] encrypted = cipher.doFinal(plainBytes);
+            byte[] magic = decoy ? DECOY_FILE_MAGIC : NORMAL_FILE_MAGIC;
 
-            return ByteBuffer.allocate(FILE_MAGIC.length + IV_LENGTH_BYTES + encrypted.length)
-                    .put(FILE_MAGIC)
+            return ByteBuffer.allocate(magic.length + IV_LENGTH_BYTES + encrypted.length)
+                    .put(magic)
                     .put(iv)
                     .put(encrypted)
                     .array();
@@ -337,25 +358,47 @@ public class DocumentService {
         }
     }
 
-    private byte[] decryptFileBytes(byte[] storedBytes) {
-        if (storedBytes == null || storedBytes.length < FILE_MAGIC.length + IV_LENGTH_BYTES + 1) {
+    private byte[] decryptFileBytes(byte[] storedBytes, boolean decoy) {
+        int magicLength = NORMAL_FILE_MAGIC.length;
+        if (storedBytes == null || storedBytes.length < magicLength + IV_LENGTH_BYTES + 1) {
             throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR, "Document file data is invalid.");
         }
 
         try {
-            byte[] magic = Arrays.copyOfRange(storedBytes, 0, FILE_MAGIC.length);
-            if (!Arrays.equals(magic, FILE_MAGIC)) {
+            byte[] magic = Arrays.copyOfRange(storedBytes, 0, magicLength);
+            byte[] expectedMagic = decoy ? DECOY_FILE_MAGIC : NORMAL_FILE_MAGIC;
+            byte[] otherMagic = decoy ? NORMAL_FILE_MAGIC : DECOY_FILE_MAGIC;
+
+            if (Arrays.equals(magic, otherMagic)) {
+                throw new ResponseStatusException(
+                        HttpStatus.NOT_FOUND,
+                        "Document is not available in this vault session."
+                );
+            }
+
+            if (!Arrays.equals(magic, expectedMagic)) {
+                /* Only normal vaults may read the legacy text-wrapped format. */
+                if (decoy) {
+                    throw new ResponseStatusException(
+                            HttpStatus.NOT_FOUND,
+                            "Document is not available in this vault session."
+                    );
+                }
                 String asText = new String(storedBytes, StandardCharsets.UTF_8);
-                String decrypted = decryptTextForResponse(asText);
+                String decrypted = decryptTextForResponse(asText, false);
                 String base64File = extractBase64FileContent(decrypted);
                 return Base64.getDecoder().decode(base64File);
             }
 
-            byte[] iv = Arrays.copyOfRange(storedBytes, FILE_MAGIC.length, FILE_MAGIC.length + IV_LENGTH_BYTES);
-            byte[] encrypted = Arrays.copyOfRange(storedBytes, FILE_MAGIC.length + IV_LENGTH_BYTES, storedBytes.length);
+            byte[] iv = Arrays.copyOfRange(storedBytes, magicLength, magicLength + IV_LENGTH_BYTES);
+            byte[] encrypted = Arrays.copyOfRange(storedBytes, magicLength + IV_LENGTH_BYTES, storedBytes.length);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, documentKeySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    keyFor(decoy),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+            );
             return cipher.doFinal(encrypted);
         } catch (ResponseStatusException error) {
             throw error;
@@ -364,7 +407,7 @@ public class DocumentService {
         }
     }
 
-    private String encryptText(String plainText) {
+    private String encryptText(String plainText, boolean decoy) {
         if (plainText == null || plainText.isBlank()) {
             return plainText;
         }
@@ -374,11 +417,16 @@ public class DocumentService {
             secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, documentKeySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    keyFor(decoy),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+            );
 
             byte[] encrypted = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+            String prefix = decoy ? DECOY_PREFIX : NORMAL_PREFIX;
 
-            return PREFIX + ":" +
+            return prefix + ":" +
                     Base64.getUrlEncoder().withoutPadding().encodeToString(iv) + ":" +
                     Base64.getUrlEncoder().withoutPadding().encodeToString(encrypted);
         } catch (Exception error) {
@@ -386,26 +434,37 @@ public class DocumentService {
         }
     }
 
-    private String decryptTextForResponse(String storedText) {
+    private String decryptTextForResponse(String storedText, boolean decoy) {
         if (storedText == null || storedText.isBlank()) {
             return storedText;
         }
 
-        try {
-            if (storedText.startsWith(PREFIX + ":")) {
-                String[] parts = storedText.split(":", 3);
+        String expectedPrefix = decoy ? DECOY_PREFIX : NORMAL_PREFIX;
+        String otherPrefix = decoy ? NORMAL_PREFIX : DECOY_PREFIX;
+        if (storedText.startsWith(otherPrefix + ":")) {
+            return "";
+        }
 
+        try {
+            if (storedText.startsWith(expectedPrefix + ":")) {
+                String[] parts = storedText.split(":", 3);
                 if (parts.length != 3) return "";
 
                 byte[] iv = Base64.getUrlDecoder().decode(parts[1]);
                 byte[] encrypted = Base64.getUrlDecoder().decode(parts[2]);
 
                 Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-                cipher.init(Cipher.DECRYPT_MODE, documentKeySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
-
+                cipher.init(
+                        Cipher.DECRYPT_MODE,
+                        keyFor(decoy),
+                        new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+                );
                 byte[] decrypted = cipher.doFinal(encrypted);
                 return new String(decrypted, StandardCharsets.UTF_8);
             }
+
+            /* Legacy document metadata belongs only to the normal vault. */
+            if (decoy) return "";
 
             if (storedText.contains(":")) {
                 String[] parts = storedText.split(":", 2);
@@ -413,8 +472,11 @@ public class DocumentService {
                 byte[] encrypted = Base64.getDecoder().decode(parts[1]);
 
                 Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-                cipher.init(Cipher.DECRYPT_MODE, documentKeySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
-
+                cipher.init(
+                        Cipher.DECRYPT_MODE,
+                        normalDocumentKeySpec,
+                        new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+                );
                 byte[] decrypted = cipher.doFinal(encrypted);
                 return new String(decrypted, StandardCharsets.UTF_8);
             }
@@ -423,6 +485,10 @@ public class DocumentService {
         } catch (Exception error) {
             return "";
         }
+    }
+
+    private SecretKeySpec keyFor(boolean decoy) {
+        return decoy ? decoyDocumentKeySpec : normalDocumentKeySpec;
     }
 
     private byte[] decodePossibleBase64File(String value) {
@@ -468,6 +534,68 @@ public class DocumentService {
         } catch (Exception error) {
             throw new IllegalStateException("Could not initialize document encryption.", error);
         }
+    }
+
+    private String validateDocumentName(String value) {
+        String sanitized = sanitizeMetadataText(value);
+        if (sanitized.isBlank()) {
+            return "Untitled document";
+        }
+        if (sanitized.length() > MAX_DOCUMENT_NAME_LENGTH) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Document name must be 255 characters or fewer."
+            );
+        }
+        return sanitized;
+    }
+
+    private String validateDocumentType(String value) {
+        String normalized = value == null || value.isBlank()
+                ? MediaType.APPLICATION_OCTET_STREAM_VALUE
+                : value.trim();
+        if (normalized.length() > MAX_DOCUMENT_TYPE_LENGTH) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Document type must be 127 characters or fewer."
+            );
+        }
+        try {
+            return MediaType.parseMediaType(normalized).toString();
+        } catch (IllegalArgumentException exception) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Document type is not a valid MIME type.");
+        }
+    }
+
+    private String sanitizeOriginalFileName(String value) {
+        if (value == null || value.isBlank()) return "document";
+        String fileName = value.replace('\\', '/');
+        int separator = fileName.lastIndexOf('/');
+        if (separator >= 0) fileName = fileName.substring(separator + 1);
+        String sanitized = sanitizeMetadataText(fileName);
+        if (sanitized.isBlank()) return "document";
+        return sanitized.length() <= MAX_DOCUMENT_NAME_LENGTH
+                ? sanitized
+                : sanitized.substring(0, MAX_DOCUMENT_NAME_LENGTH);
+    }
+
+    private String sanitizeMetadataText(String value) {
+        if (value == null) return "";
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFKC);
+        StringBuilder sanitized = new StringBuilder(normalized.length());
+        for (int index = 0; index < normalized.length(); ) {
+            int codePoint = normalized.codePointAt(index);
+            index += Character.charCount(codePoint);
+            boolean unsafeDirection = (codePoint >= 0x202A && codePoint <= 0x202E)
+                    || (codePoint >= 0x2066 && codePoint <= 0x2069)
+                    || codePoint == 0x200B
+                    || codePoint == 0x2060
+                    || codePoint == 0xFEFF;
+            if (unsafeDirection || Character.isISOControl(codePoint)) continue;
+            if (codePoint == '<' || codePoint == '>') continue;
+            sanitized.appendCodePoint(codePoint);
+        }
+        return sanitized.toString().trim();
     }
 
     private String cleanDocumentName(String value) {

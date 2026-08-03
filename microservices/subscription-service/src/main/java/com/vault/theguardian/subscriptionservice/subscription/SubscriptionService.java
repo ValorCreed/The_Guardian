@@ -121,7 +121,9 @@ public class SubscriptionService {
     private SubscriptionEntitlementsResponse toEntitlements(Subscription subscription) {
         boolean paid = subscription.isActive()
                 && subscription.getPlan() != null
-                && subscription.getPlan() != SubscriptionPlan.FREE;
+                && subscription.getPlan() != SubscriptionPlan.FREE
+                && (subscription.getExpiresAt() == null
+                || !subscription.getExpiresAt().isBefore(LocalDateTime.now()));
         boolean family = paid && subscription.getPlan() == SubscriptionPlan.FAMILY;
 
         long emergencyLimit = switch (subscription.getPlan()) {
@@ -145,6 +147,9 @@ public class SubscriptionService {
                 paid,
                 paid,
                 paid,
+                paid,
+                paid,
+                family,
                 paid,
                 paid
         );

@@ -108,7 +108,16 @@ public class InternalVaultController {
             @RequestBody List<Long> ownerIds
     ) {
         requireValidInternalKey(suppliedKey);
-        return service.passwordRisks(ownerIds);
+        if (ownerIds == null || ownerIds.isEmpty()) {
+            return List.of();
+        }
+        if (ownerIds.size() > 1_000) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No more than 1000 owner IDs are allowed.");
+        }
+        if (ownerIds.stream().anyMatch(id -> id == null || id <= 0)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Every owner ID must be greater than zero.");
+        }
+        return service.passwordRisks(ownerIds.stream().distinct().toList());
     }
 
     private void requireValidInternalKey(String suppliedKey) {

@@ -23,10 +23,13 @@ public class SecurityConfig {
                 .sessionManagement(session ->
                         session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/", "/actuator/health", "/actuator/info", "/internal/family/**", "/internal/account/**").permitAll()
+                        .requestMatchers("/", "/actuator/health", "/actuator/info", "/internal/family/**", "/internal/account/**", "/internal/emergency/**").permitAll()
                         .requestMatchers(
                                 "/vault/family", "/vault/family/**",
-                                "/vault/emergency", "/vault/emergency/**"
+                                "/vault/emergency", "/vault/emergency/**",
+                                "/vault/safety-check", "/vault/safety-check/**",
+                                "/vault/estate-playbooks", "/vault/estate-playbooks/**",
+                                "/vault/continuity-drill", "/vault/continuity-drill/**"
                         ).authenticated()
                         .anyRequest().denyAll()
                 )

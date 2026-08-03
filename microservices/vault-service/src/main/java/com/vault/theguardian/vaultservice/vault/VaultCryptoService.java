@@ -15,12 +15,14 @@ import java.util.Base64;
 @Service
 public class VaultCryptoService {
 
-    private static final String PREFIX = "v1";
+    private static final String NORMAL_PREFIX = "v1";
+    private static final String DECOY_PREFIX = "v1d";
     private static final int IV_LENGTH_BYTES = 12;
     private static final int TAG_LENGTH_BITS = 128;
 
     private final SecureRandom secureRandom = new SecureRandom();
-    private final SecretKeySpec keySpec;
+    private final SecretKeySpec normalKeySpec;
+    private final SecretKeySpec decoyKeySpec;
 
     public VaultCryptoService(@Value("${vault.password.secret}") String secret) {
         if (secret == null || secret.isBlank() || secret.length() < 32) {
@@ -29,16 +31,21 @@ public class VaultCryptoService {
             );
         }
 
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] key = digest.digest(secret.getBytes(StandardCharsets.UTF_8));
-            this.keySpec = new SecretKeySpec(key, "AES");
-        } catch (Exception error) {
-            throw new IllegalStateException("Could not initialize vault encryption.", error);
-        }
+        this.normalKeySpec = deriveKey(secret);
+        /*
+         * Preserve the existing normal-vault key derivation for backward
+         * compatibility, but place decoy values in a separate cryptographic
+         * domain. A database-query mistake therefore cannot decrypt a real value
+         * through the decoy code path, or vice versa.
+         */
+        this.decoyKeySpec = deriveKey(secret + "\u0000guardian-decoy-v1");
     }
 
     public String encryptNullable(String plainText) {
+        return encryptNullable(plainText, false);
+    }
+
+    public String encryptNullable(String plainText, boolean decoy) {
         if (plainText == null || plainText.isBlank()) {
             return plainText;
         }
@@ -48,11 +55,16 @@ public class VaultCryptoService {
             secureRandom.nextBytes(iv);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, keySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.ENCRYPT_MODE,
+                    keyFor(decoy),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+            );
 
             byte[] cipherText = cipher.doFinal(plainText.getBytes(StandardCharsets.UTF_8));
+            String prefix = decoy ? DECOY_PREFIX : NORMAL_PREFIX;
 
-            return PREFIX + ":" +
+            return prefix + ":" +
                     Base64.getUrlEncoder().withoutPadding().encodeToString(iv) + ":" +
                     Base64.getUrlEncoder().withoutPadding().encodeToString(cipherText);
         } catch (Exception error) {
@@ -61,12 +73,26 @@ public class VaultCryptoService {
     }
 
     public String decryptForResponse(String storedValue) {
+        return decryptForResponse(storedValue, false);
+    }
+
+    public String decryptForResponse(String storedValue, boolean decoy) {
         if (storedValue == null || storedValue.isBlank()) {
             return storedValue;
         }
 
-        if (!storedValue.startsWith(PREFIX + ":")) {
-            return decodeLegacyFrontendValue(storedValue);
+        String expectedPrefix = decoy ? DECOY_PREFIX : NORMAL_PREFIX;
+        String otherPrefix = decoy ? NORMAL_PREFIX : DECOY_PREFIX;
+
+        if (storedValue.startsWith(otherPrefix + ":")) {
+            return "[Protected item unavailable in this vault session.]";
+        }
+
+        if (!storedValue.startsWith(expectedPrefix + ":")) {
+            /* Legacy plain/URL-encoded values belong only to the normal vault. */
+            return decoy
+                    ? "[Protected item unavailable in this vault session.]"
+                    : decodeLegacyFrontendValue(storedValue);
         }
 
         try {
@@ -80,23 +106,34 @@ public class VaultCryptoService {
             byte[] cipherText = Base64.getUrlDecoder().decode(parts[2]);
 
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, keySpec, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(
+                    Cipher.DECRYPT_MODE,
+                    keyFor(decoy),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv)
+            );
 
             byte[] plainText = cipher.doFinal(cipherText);
             return new String(plainText, StandardCharsets.UTF_8);
         } catch (Exception error) {
-            /*
-             * Do not crash a whole vault screen because one row cannot be decrypted.
-             * This usually happens only when old test data exists or the encryption
-             * secret was changed after saving items.
-             */
             return "[Unable to decrypt. Please update this item.]";
         }
     }
 
+    private SecretKeySpec keyFor(boolean decoy) {
+        return decoy ? decoyKeySpec : normalKeySpec;
+    }
+
+    private SecretKeySpec deriveKey(String material) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] key = digest.digest(material.getBytes(StandardCharsets.UTF_8));
+            return new SecretKeySpec(key, "AES");
+        } catch (Exception error) {
+            throw new IllegalStateException("Could not initialize vault encryption.", error);
+        }
+    }
+
     private String decodeLegacyFrontendValue(String value) {
-        // Old frontend values were often saved with encodeURIComponent.
-        // Avoid changing normal plain values unless they actually look URL-encoded.
         if (!value.contains("%")) {
             return value;
         }

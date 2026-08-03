@@ -18,5 +18,6 @@ public record SubscriptionEntitlements(
         boolean canUseAdvancedPasswordGenerator,
         boolean canUseBreachMonitoring,
         boolean canUseEmergencyVaultItemSharing,
-        boolean canUseCustomEmergencyWaitingPeriod
+        boolean canUseCustomEmergencyWaitingPeriod,
+        boolean canUseContinuityDrill
 ) {}

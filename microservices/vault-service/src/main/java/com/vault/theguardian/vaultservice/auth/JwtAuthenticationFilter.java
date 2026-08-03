@@ -53,12 +53,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             TokenIntrospectionResponse introspection = authIntrospectionClient.introspect(token);
             if (!introspection.active() || introspection.userId() == null) {
-                writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid or revoked session.");
+                writeSessionRevokedError(response);
+                return;
+            }
+
+
+            if (introspection.lockdownActive()) {
+                writeLockdownError(response);
                 return;
             }
 
             AuthenticatedUser principal = new AuthenticatedUser(
-                    introspection.userId(), introspection.email()
+                    introspection.userId(), introspection.email(), introspection.sessionMode()
             );
             UsernamePasswordAuthenticationToken authentication =
                     new UsernamePasswordAuthenticationToken(principal, null, List.of());
@@ -71,6 +77,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } finally {
             SecurityContextHolder.clearContext();
         }
+    }
+
+    private void writeSessionRevokedError(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"SESSION_REVOKED\",\"message\":\"This Guardian session is no longer active.\"}"
+        );
+    }
+
+    private void writeLockdownError(HttpServletResponse response) throws IOException {
+        response.setStatus(423);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"ACCOUNT_LOCKDOWN_ACTIVE\",\"message\":\"Incident Lockdown is active. Continue recovery on the designated device.\"}"
+        );
     }
 
     private void writeError(HttpServletResponse response, int status, String message) throws IOException {

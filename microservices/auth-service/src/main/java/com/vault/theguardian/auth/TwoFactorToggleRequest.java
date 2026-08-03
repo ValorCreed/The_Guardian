@@ -1,5 +1,8 @@
 package com.vault.theguardian.auth;
 
+import jakarta.validation.constraints.NotNull;
+
 public record TwoFactorToggleRequest(
-        boolean enabled
+        @NotNull(message = "Choose whether two-factor authentication is enabled.")
+        Boolean enabled
 ) {}

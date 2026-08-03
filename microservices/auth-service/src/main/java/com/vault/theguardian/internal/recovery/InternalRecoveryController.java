@@ -2,6 +2,7 @@ package com.vault.theguardian.internal.recovery;
 
 import com.vault.theguardian.biometric.BiometricCredential;
 import com.vault.theguardian.biometric.BiometricCredentialRepository;
+import com.vault.theguardian.incident.SecurityIncidentService;
 import com.vault.theguardian.session.UserSession;
 import com.vault.theguardian.session.UserSessionRepository;
 import com.vault.theguardian.user.User;
@@ -31,6 +32,7 @@ public class InternalRecoveryController {
     private final UserSessionRepository userSessionRepository;
     private final BiometricCredentialRepository biometricCredentialRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SecurityIncidentService securityIncidentService;
     private final byte[] expectedInternalKey;
 
     public InternalRecoveryController(
@@ -38,6 +40,7 @@ public class InternalRecoveryController {
             UserSessionRepository userSessionRepository,
             BiometricCredentialRepository biometricCredentialRepository,
             PasswordEncoder passwordEncoder,
+            SecurityIncidentService securityIncidentService,
             @Value("${internal.service.key}") String internalServiceKey
     ) {
         if (internalServiceKey == null || internalServiceKey.isBlank()) {
@@ -47,6 +50,7 @@ public class InternalRecoveryController {
         this.userSessionRepository = userSessionRepository;
         this.biometricCredentialRepository = biometricCredentialRepository;
         this.passwordEncoder = passwordEncoder;
+        this.securityIncidentService = securityIncidentService;
         this.expectedInternalKey = internalServiceKey.getBytes(StandardCharsets.UTF_8);
     }
 
@@ -70,6 +74,7 @@ public class InternalRecoveryController {
     ) {
         requireValidInternalKey(suppliedKey);
         User user = validateResetCode(request.email(), request.resetCode());
+        rejectEmailOnlyResetDuringLockdown(user);
         return new AccountResetValidationResponse(user.getId(), user.getEmail());
     }
 
@@ -83,6 +88,7 @@ public class InternalRecoveryController {
         requireValidInternalKey(suppliedKey);
         User user = requireUser(userId);
         resetCredentialsAndSessions(user, request.newPassword());
+        securityIncidentService.closeAfterVerifiedRecovery(user, request.recoveryMethod());
     }
 
     @PostMapping("/account-reset/complete")
@@ -93,6 +99,7 @@ public class InternalRecoveryController {
     ) {
         requireValidInternalKey(suppliedKey);
         User user = validateResetCode(request.email(), request.resetCode());
+        rejectEmailOnlyResetDuringLockdown(user);
         resetCredentialsAndSessions(user, request.newPassword());
         return new AccountResetValidationResponse(user.getId(), user.getEmail());
     }
@@ -138,6 +145,14 @@ public class InternalRecoveryController {
             );
         }
         return user;
+    }
+
+    private void rejectEmailOnlyResetDuringLockdown(User user) {
+        if (securityIncidentService.isActiveLockdown(user.getId())) {
+            throw securityIncidentService.locked(
+                    "Email-only account reset is blocked during Incident Lockdown. Use the designated recovery device, Recovery Kit, or Recovery Circle."
+            );
+        }
     }
 
     private void resetCredentialsAndSessions(User user, String newPassword) {
@@ -206,7 +221,9 @@ public class InternalRecoveryController {
     public record ResetPasswordRequest(
             @NotBlank(message = "New password is required")
             @Size(min = 8, message = "Password must be at least 8 characters")
-            String newPassword
+            String newPassword,
+            @NotBlank(message = "Verified recovery method is required")
+            String recoveryMethod
     ) {}
 
     public record CompleteAccountResetRequest(

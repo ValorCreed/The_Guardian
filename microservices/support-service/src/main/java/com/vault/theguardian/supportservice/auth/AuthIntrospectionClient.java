@@ -33,12 +33,12 @@ public class AuthIntrospectionClient {
                     .body(TokenIntrospectionResponse.class);
 
             return response == null
-                    ? new TokenIntrospectionResponse(false, null, null, null)
+                    ? new TokenIntrospectionResponse(false, null, null, null, null,false,false)
                     : response;
         } catch (HttpClientErrorException exception) {
             if (exception.getStatusCode().value() == 401
                     || exception.getStatusCode().value() == 403) {
-                return new TokenIntrospectionResponse(false, null, null, null);
+                return new TokenIntrospectionResponse(false, null, null, null, null, false,false);
             }
             throw new AuthServiceUnavailableException(
                     "Auth Service could not validate the access token.", exception

@@ -31,7 +31,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/info")
                 || path.equals("/vault/recovery-kit/reset-password")
                 || path.equals("/vault/recovery-kit/reset-account")
-                || path.startsWith("/internal/account/");
+                || path.equals("/vault/recovery-circle/recovery/start")
+                || path.equals("/vault/recovery-circle/recovery/status")
+                || path.equals("/vault/recovery-circle/recovery/complete")
+                || path.startsWith("/internal/account/")
+                || path.startsWith("/internal/continuity/");
     }
 
     @Override
@@ -56,7 +60,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             TokenIntrospectionResponse introspection = authClient.introspect(token);
             if (!introspection.active() || introspection.userId() == null) {
-                writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid or revoked session.");
+                writeSessionRevokedError(response);
+                return;
+            }
+
+            if ("DURESS".equalsIgnoreCase(introspection.sessionMode())) {
+                writeError(response, HttpServletResponse.SC_FORBIDDEN,
+                        "This action is not available in this vault session.");
+                return;
+            }
+
+
+            if (introspection.lockdownActive()) {
+                writeLockdownError(response);
                 return;
             }
 
@@ -76,6 +92,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } finally {
             SecurityContextHolder.clearContext();
         }
+    }
+
+    private void writeSessionRevokedError(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"SESSION_REVOKED\",\"message\":\"This Guardian session is no longer active.\"}"
+        );
+    }
+
+    private void writeLockdownError(HttpServletResponse response) throws IOException {
+        response.setStatus(423);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"ACCOUNT_LOCKDOWN_ACTIVE\",\"message\":\"Incident Lockdown is active. Continue recovery on the designated device.\"}"
+        );
     }
 
     private void writeError(HttpServletResponse response, int status, String message)

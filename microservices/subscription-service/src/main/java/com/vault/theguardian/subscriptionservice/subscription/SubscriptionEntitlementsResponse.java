@@ -18,7 +18,10 @@ public record SubscriptionEntitlementsResponse(
         boolean canUseAdvancedPasswordGenerator,
         boolean canUseBreachMonitoring,
         boolean canUseEmergencyVaultItemSharing,
-        boolean canUseCustomEmergencyWaitingPeriod
+        boolean canUseCustomEmergencyWaitingPeriod,
+        boolean canUseContinuityDrill,
+        boolean canUseDuressMode,
+        boolean canUseIncidentLockdown
 ) {
     public boolean multipleDevicesAllowed() {
         return maxDevices != 1;

@@ -16,6 +16,10 @@ public class VaultItem {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "is_decoy", nullable = false)
+    @Builder.Default
+    private boolean decoy = false;
+
     private String title;
     private String usernameValue;
 

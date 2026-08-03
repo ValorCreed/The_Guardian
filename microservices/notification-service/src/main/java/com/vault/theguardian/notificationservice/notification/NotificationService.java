@@ -4,16 +4,33 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
+import com.vault.theguardian.notificationservice.push.DatabaseClock;
+import com.vault.theguardian.notificationservice.push.PushDispatchService;
+import com.vault.theguardian.notificationservice.push.PushPreferenceService;
+import com.vault.theguardian.notificationservice.push.PushTokenService;
 
-import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 public class NotificationService {
     private final NotificationRepository notificationRepository;
+    private final PushDispatchService pushDispatchService;
+    private final PushTokenService pushTokenService;
+    private final PushPreferenceService pushPreferenceService;
+    private final DatabaseClock databaseClock;
 
-    public NotificationService(NotificationRepository notificationRepository) {
+    public NotificationService(
+            NotificationRepository notificationRepository,
+            PushDispatchService pushDispatchService,
+            PushTokenService pushTokenService,
+            PushPreferenceService pushPreferenceService,
+            DatabaseClock databaseClock
+    ) {
         this.notificationRepository = notificationRepository;
+        this.pushDispatchService = pushDispatchService;
+        this.pushTokenService = pushTokenService;
+        this.pushPreferenceService = pushPreferenceService;
+        this.databaseClock = databaseClock;
     }
 
     @Transactional(readOnly = true)
@@ -35,7 +52,8 @@ public class NotificationService {
     public NotificationResponse markAsRead(Long userId, Long id) {
         AppNotification notification = findOwnedNotification(userId, id);
         notification.setRead(true);
-        return toResponse(notificationRepository.save(notification));
+        AppNotification saved = notificationRepository.save(notification);
+        return toResponse(saved);
     }
 
     @Transactional
@@ -60,15 +78,19 @@ public class NotificationService {
                 .message(request.message().trim())
                 .actionRoute(cleanNullable(request.actionRoute()))
                 .read(false)
-                .createdAt(LocalDateTime.now())
+                .createdAt(databaseClock.now())
                 .build();
 
-        return toResponse(notificationRepository.save(notification));
+        AppNotification saved = notificationRepository.save(notification);
+        pushDispatchService.queue(saved);
+        return toResponse(saved);
     }
 
     @Transactional
     public void deleteAllForUser(Long userId) {
         notificationRepository.deleteByUserId(userId);
+        pushTokenService.deleteForUser(userId);
+        pushPreferenceService.deleteForUser(userId);
     }
 
     private AppNotification findOwnedNotification(Long userId, Long id) {

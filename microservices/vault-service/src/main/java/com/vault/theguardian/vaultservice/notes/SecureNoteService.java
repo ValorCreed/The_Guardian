@@ -7,92 +7,23 @@ import com.vault.theguardian.vaultservice.vault.VaultCryptoService;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
-
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 public class SecureNoteService {
-    private final SecureNoteRepository repository;
-    private final SubscriptionClient subscriptionClient;
-    private final NotificationClient notificationClient;
-    private final VaultCryptoService cryptoService;
-
-    public SecureNoteService(SecureNoteRepository repository,
-                             SubscriptionClient subscriptionClient,
-                             NotificationClient notificationClient,
-                             VaultCryptoService cryptoService) {
-        this.repository = repository;
-        this.subscriptionClient = subscriptionClient;
-        this.notificationClient = notificationClient;
-        this.cryptoService = cryptoService;
+    private final SecureNoteRepository repository; private final SubscriptionClient subscriptions; private final NotificationClient notifications; private final VaultCryptoService crypto;
+    public SecureNoteService(SecureNoteRepository repository, SubscriptionClient subscriptions, NotificationClient notifications, VaultCryptoService crypto){this.repository=repository;this.subscriptions=subscriptions;this.notifications=notifications;this.crypto=crypto;}
+    public SecureNoteResponse create(Long userId, boolean decoy, SecureNoteRequest request){
+        if(!decoy){long count=repository.countByUserIdAndDecoy(userId,false); if(!subscriptions.canCreateSecureNote(userId,count)){long limit=subscriptions.getEntitlements(userId).maxSecureNotes();throw new PlanLimitException("SECURE_NOTE",limit,"Free note limit reached. Upgrade to Premium or Family for unlimited secure notes.");}}
+        LocalDateTime now=LocalDateTime.now(); SecureNote saved=repository.save(SecureNote.builder().userId(userId).decoy(decoy).title(cleanTitle(request.title())).category(cleanCategory(request.category())).encryptedContent(crypto.encryptNullable(request.encryptedContent(), decoy)).pinned(Boolean.TRUE.equals(request.pinned())).createdAt(now).updatedAt(now).build());
+        if(!decoy)notifications.notifySecureNoteAdded(userId,saved.getTitle()); return toResponse(saved);
     }
-
-    public SecureNoteResponse create(Long userId, SecureNoteRequest request) {
-        long count = repository.countByUserId(userId);
-        if (!subscriptionClient.canCreateSecureNote(userId, count)) {
-            long limit = subscriptionClient.getEntitlements(userId).maxSecureNotes();
-            throw new PlanLimitException("SECURE_NOTE", limit,
-                    "Free note limit reached. Upgrade to Premium or Family for unlimited secure notes.");
-        }
-
-        LocalDateTime now = LocalDateTime.now();
-        SecureNote note = SecureNote.builder()
-                .userId(userId)
-                .title(cleanTitle(request.title()))
-                .category(cleanCategory(request.category()))
-                .encryptedContent(cryptoService.encryptNullable(request.encryptedContent()))
-                .pinned(Boolean.TRUE.equals(request.pinned()))
-                .createdAt(now).updatedAt(now).build();
-        SecureNote saved = repository.save(note);
-        notificationClient.notifySecureNoteAdded(userId, saved.getTitle());
-        return toResponse(saved);
-    }
-
-    public List<SecureNoteResponse> list(Long userId) {
-        return repository.findByUserIdOrderByPinnedDescUpdatedAtDesc(userId)
-                .stream().map(this::toResponse).toList();
-    }
-
-    public SecureNoteResponse get(Long userId, Long id) { return toResponse(owned(userId, id)); }
-
-    public SecureNoteResponse update(Long userId, Long id, SecureNoteRequest request) {
-        SecureNote note = owned(userId, id);
-        note.setTitle(cleanTitle(request.title()));
-        note.setCategory(cleanCategory(request.category()));
-        note.setEncryptedContent(cryptoService.encryptNullable(request.encryptedContent()));
-        note.setPinned(Boolean.TRUE.equals(request.pinned()));
-        note.setUpdatedAt(LocalDateTime.now());
-        SecureNote saved = repository.save(note);
-        notificationClient.notifySecureNoteUpdated(userId, saved.getTitle());
-        return toResponse(saved);
-    }
-
-    public void delete(Long userId, Long id) {
-        SecureNote note = owned(userId, id);
-        String title = note.getTitle();
-        repository.delete(note);
-        notificationClient.notifySecureNoteDeleted(userId, title);
-    }
-
-    private SecureNote owned(Long userId, Long id) {
-        SecureNote note = repository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Secure note not found."));
-        if (!note.getUserId().equals(userId)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "You cannot access this secure note.");
-        }
-        return note;
-    }
-
-    private String cleanTitle(String value) {
-        return value == null || value.isBlank() ? "Untitled note" : value.trim();
-    }
-    private String cleanCategory(String value) {
-        return value == null || value.isBlank() ? "General" : value.trim();
-    }
-    private SecureNoteResponse toResponse(SecureNote note) {
-        return new SecureNoteResponse(note.getId(), note.getTitle(), note.getCategory(),
-                cryptoService.decryptForResponse(note.getEncryptedContent()), note.isPinned(),
-                note.getCreatedAt(), note.getUpdatedAt());
-    }
+    public List<SecureNoteResponse> list(Long userId, boolean decoy){return repository.findByUserIdAndDecoyOrderByPinnedDescUpdatedAtDesc(userId,decoy).stream().map(this::toResponse).toList();}
+    public SecureNoteResponse get(Long userId, boolean decoy, Long id){return toResponse(owned(userId,decoy,id));}
+    public SecureNoteResponse update(Long userId, boolean decoy, Long id, SecureNoteRequest r){SecureNote n=owned(userId,decoy,id);n.setTitle(cleanTitle(r.title()));n.setCategory(cleanCategory(r.category()));n.setEncryptedContent(crypto.encryptNullable(r.encryptedContent(), decoy));n.setPinned(Boolean.TRUE.equals(r.pinned()));n.setUpdatedAt(LocalDateTime.now());SecureNote saved=repository.save(n);if(!decoy)notifications.notifySecureNoteUpdated(userId,saved.getTitle());return toResponse(saved);}
+    public void delete(Long userId, boolean decoy, Long id){SecureNote n=owned(userId,decoy,id);repository.delete(n);if(!decoy)notifications.notifySecureNoteDeleted(userId,n.getTitle());}
+    private SecureNote owned(Long userId, boolean decoy, Long id){return repository.findByIdAndUserIdAndDecoy(id,userId,decoy).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"Secure note not found."));}
+    private String cleanTitle(String v){return v==null||v.isBlank()?"Untitled note":v.trim();} private String cleanCategory(String v){return v==null||v.isBlank()?"General":v.trim();}
+    private SecureNoteResponse toResponse(SecureNote n){return new SecureNoteResponse(n.getId(),n.getTitle(),n.getCategory(),crypto.decryptForResponse(n.getEncryptedContent(), n.isDecoy()),n.isPinned(),n.getCreatedAt(),n.getUpdatedAt());}
 }

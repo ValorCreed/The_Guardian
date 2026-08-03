@@ -90,6 +90,127 @@ public class NotificationClient {
         ));
     }
 
+
+    public void notifyRecoveryCircleConfigured(Long userId, int threshold, int memberCount) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_CONFIGURED",
+                "Recovery Circle active",
+                "Your Recovery Circle now requires " + threshold + " of " + memberCount
+                        + " trusted contacts to approve account recovery.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleDisabled(Long userId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_DISABLED",
+                "Recovery Circle disabled",
+                "Recovery Circle protection was disabled for your account.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleMemberAdded(Long userId, String ownerEmail) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_MEMBER_ADDED",
+                "You joined a Recovery Circle",
+                ownerEmail + " selected you as a trusted Recovery Circle member.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleApprovalRequested(
+            Long userId,
+            String ownerName,
+            String requestId
+    ) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_APPROVAL_REQUESTED",
+                "Recovery approval requested",
+                ownerName + " started account recovery. Verify their identity outside Guardian before approving request "
+                        + requestId + ".",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleRequestStarted(Long userId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_REQUEST_STARTED",
+                "Recovery Circle request started",
+                "A Recovery Circle request was started for your account. If this was not you, sign in and cancel it immediately.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleVoteProgress(Long userId, int approvals, int threshold) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_VOTE_RECORDED",
+                "Recovery approval recorded",
+                approvals + " of " + threshold + " required approvals have been received.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleThresholdReached(Long userId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_APPROVED",
+                "Recovery Circle approved",
+                "Your trusted contacts reached the approval threshold. The recovery request can now reset the account password.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleRequestDenied(Long userId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_DENIED",
+                "Recovery Circle request denied",
+                "The request can no longer reach the required approval threshold.",
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleRequestCancelled(Long userId) {
+        notifyRecoveryCircleRequestCancelled(userId, "The active Recovery Circle request was cancelled.");
+    }
+
+    public void notifyRecoveryCircleRequestCancelled(Long userId, String message) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_CANCELLED",
+                "Recovery Circle request cancelled",
+                message,
+                "/recoverycircle"
+        ));
+    }
+
+    public void notifyRecoveryCircleCompleted(Long userId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_COMPLETED",
+                "Recovery Circle completed",
+                "Your password was reset through Recovery Circle. Existing sessions, biometric credentials, and recovery kits were revoked.",
+                "/security"
+        ));
+    }
+
+    public void notifyRecoveryCircleCompletedForMember(Long userId, String requestId) {
+        publishAfterCommit(new Request(
+                userId,
+                "RECOVERY_CIRCLE_COMPLETED",
+                "Recovery completed",
+                "Recovery Circle request " + requestId + " was completed.",
+                "/recoverycircle"
+        ));
+    }
+
     private void publishAfterCommit(Request request) {
         if (request.userId() == null) return;
 

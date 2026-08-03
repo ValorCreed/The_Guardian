@@ -4,6 +4,9 @@ import com.vault.theguardian.auth.AuthClient;
 import com.vault.theguardian.auth.AuthenticatedUser;
 import com.vault.theguardian.auth.InternalUserResponse;
 import com.vault.theguardian.notification.NotificationClient;
+import com.vault.theguardian.estate.EstatePlaybookService;
+import com.vault.theguardian.safetycheck.GuardianSafetyCheckRepository;
+import com.vault.theguardian.safetycheck.SafetyCheckStatus;
 import com.vault.theguardian.subscription.SubscriptionClient;
 import com.vault.theguardian.subscription.SubscriptionEntitlements;
 import com.vault.theguardian.vault.DownloadedDocument;
@@ -30,6 +33,8 @@ public class EmergencyAccessService {
     private final SubscriptionClient subscriptionClient;
     private final NotificationClient notificationClient;
     private final VaultClient vaultClient;
+    private final GuardianSafetyCheckRepository safetyCheckRepository;
+    private final EstatePlaybookService estatePlaybookService;
 
     public EmergencyAccessService(
             EmergencyContactRepository contactRepository,
@@ -38,7 +43,9 @@ public class EmergencyAccessService {
             AuthClient authClient,
             SubscriptionClient subscriptionClient,
             NotificationClient notificationClient,
-            VaultClient vaultClient
+            VaultClient vaultClient,
+            GuardianSafetyCheckRepository safetyCheckRepository,
+            EstatePlaybookService estatePlaybookService
     ) {
         this.contactRepository = contactRepository;
         this.requestRepository = requestRepository;
@@ -47,12 +54,11 @@ public class EmergencyAccessService {
         this.subscriptionClient = subscriptionClient;
         this.notificationClient = notificationClient;
         this.vaultClient = vaultClient;
+        this.safetyCheckRepository = safetyCheckRepository;
+        this.estatePlaybookService = estatePlaybookService;
     }
 
     public EmergencyOverviewResponse getOverview(AuthenticatedUser user) {
-        refreshAvailableRequestsForOwner(user.id());
-        refreshAvailableRequestsForRequester(user.id());
-
         SubscriptionEntitlements entitlements =
                 subscriptionClient.getEntitlements(user.id());
 
@@ -200,6 +206,27 @@ public class EmergencyAccessService {
         );
         contact.setEncryptedEmergencyNote(request.encryptedEmergencyNote());
         contact.setActive(request.active() == null || Boolean.TRUE.equals(request.active()));
+
+        if (isActiveSafetyCheckContact(contact)
+                && (!contact.isActive()
+                || (!hasEmergencyReleaseScope(contact)
+                && !estatePlaybookService.hasActiveSafetyCheckPlaybooksForContact(
+                owner.id(),
+                contact.getId()
+        )))) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This contact is used by Guardian Safety Check. Keep an emergency category or an active Safety Check estate playbook, or disable Safety Check first."
+            );
+        }
+
+        if (estatePlaybookService.contactChangeInvalidatesLivePlaybooks(contact)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This contact is used by a Digital Estate Playbook. Pause or archive the affected playbook before deactivating the contact."
+            );
+        }
+
         contact.setUpdatedAt(LocalDateTime.now());
 
         EmergencyContact saved = contactRepository.save(contact);
@@ -214,6 +241,20 @@ public class EmergencyAccessService {
     public void deleteContact(AuthenticatedUser owner, Long id) {
         EmergencyContact contact = getOwnedContact(owner.id(), id);
         String email = contact.getContactEmail();
+
+        if (isActiveSafetyCheckContact(contact)) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This contact is used by Guardian Safety Check. Choose another Safety Check contact or disable Safety Check before deleting it."
+            );
+        }
+
+        if (estatePlaybookService.hasAnyEstateHistoryForContact(contact.getId())) {
+            throw new ResponseStatusException(
+                    HttpStatus.CONFLICT,
+                    "This contact is referenced by Digital Estate Playbook history. Deactivate the contact instead so released instructions and audit records remain intact."
+            );
+        }
 
         contactRepository.delete(contact);
         notificationClient.notifyEmergencyContactRemoved(owner.id(), email);
@@ -249,12 +290,18 @@ public class EmergencyAccessService {
                         "You are not listed as an active emergency contact for this user."
                 ));
 
-        if (requestRepository.findByContactAndRequesterIdAndStatus(
-                contact, requester.id(), EmergencyAccessStatus.PENDING
+        if (requestRepository.findFirstByContactAndRequesterIdAndStatusInOrderByRequestedAtDesc(
+                contact,
+                requester.id(),
+                Set.of(
+                        EmergencyAccessStatus.PENDING,
+                        EmergencyAccessStatus.AVAILABLE,
+                        EmergencyAccessStatus.APPROVED
+                )
         ).isPresent()) {
             throw new ResponseStatusException(
                     HttpStatus.CONFLICT,
-                    "You already have a pending emergency request for this vault."
+                    "You already have an active emergency access request for this vault."
             );
         }
 
@@ -267,7 +314,7 @@ public class EmergencyAccessService {
                         .status(EmergencyAccessStatus.PENDING)
                         .message(clean(dto.message(), "Emergency access requested."))
                         .requestedAt(now)
-                        .availableAt(now.plusHours(contact.getWaitingPeriodHours()))
+                        .availableAt(null)
                         .build()
         );
 
@@ -284,8 +331,6 @@ public class EmergencyAccessService {
     public List<EmergencyAccessRequestResponse> getReceivedRequests(
             AuthenticatedUser owner
     ) {
-        refreshAvailableRequestsForOwner(owner.id());
-
         List<EmergencyAccessRequest> requests =
                 requestRepository.findByOwnerIdOrderByRequestedAtDesc(owner.id());
 
@@ -316,6 +361,11 @@ public class EmergencyAccessService {
         request.setReleasedAt(now);
 
         EmergencyAccessRequest saved = requestRepository.save(request);
+        estatePlaybookService.releaseForEmergencyApproval(
+                owner.id(),
+                request.getContact(),
+                saved.getId()
+        );
         notificationClient.notifyEmergencyAccessApproved(
                 request.getRequesterId(), owner.email()
         );
@@ -389,24 +439,28 @@ public class EmergencyAccessService {
 
         List<EmergencyVaultItemResponse> passwords = contact.isAllowPasswords()
                 ? vaultClient.list(owner.id(), "passwords").stream()
+                .filter(item -> !estatePlaybookService.isNeverRelease(owner.id(), "PASSWORD", item.id()))
                 .map(item -> toEmergencyItem(item, owner, false))
                 .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> cards = contact.isAllowCards()
                 ? vaultClient.list(owner.id(), "cards").stream()
+                .filter(item -> !estatePlaybookService.isNeverRelease(owner.id(), "CARD", item.id()))
                 .map(item -> toEmergencyItem(item, owner, false))
                 .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> documents = contact.isAllowDocuments()
                 ? vaultClient.list(owner.id(), "documents").stream()
+                .filter(item -> !estatePlaybookService.isNeverRelease(owner.id(), "DOCUMENT", item.id()))
                 .map(item -> toEmergencyItem(item, owner, false))
                 .toList()
                 : List.of();
 
         List<EmergencyVaultItemResponse> notes = contact.isAllowNotes()
                 ? vaultClient.list(owner.id(), "notes").stream()
+                .filter(item -> !estatePlaybookService.isNeverRelease(owner.id(), "NOTE", item.id()))
                 .map(item -> toEmergencyItem(item, owner, false))
                 .toList()
                 : List.of();
@@ -448,6 +502,9 @@ public class EmergencyAccessService {
         String type = normalizeItemType(itemType);
 
         requireItemTypeAllowed(contact, type);
+        if (estatePlaybookService.isNeverRelease(owner.id(), type, itemId)) {
+            throw forbidden("The owner marked this item as Never release.");
+        }
 
         InternalVaultItemResponse item =
                 vaultClient.get(owner.id(), routeType(type), itemId);
@@ -475,6 +532,9 @@ public class EmergencyAccessService {
         requireItemTypeAllowed(contact, "DOCUMENT");
 
         InternalUserResponse owner = authClient.requireById(request.getOwnerId());
+        if (estatePlaybookService.isNeverRelease(owner.id(), "DOCUMENT", itemId)) {
+            throw forbidden("The owner marked this document as Never release.");
+        }
 
         // Confirm the item belongs to this owner before downloading its bytes.
         InternalVaultItemResponse item =
@@ -499,8 +559,6 @@ public class EmergencyAccessService {
                         HttpStatus.NOT_FOUND, "Emergency request not found."
                 ));
 
-        refreshRequestIfAvailable(request);
-
         EmergencyContact contact = request.getContact();
 
         if (contact == null || !contact.isActive()) {
@@ -515,7 +573,7 @@ public class EmergencyAccessService {
                 && request.getStatus() != EmergencyAccessStatus.APPROVED) {
             if (request.getStatus() == EmergencyAccessStatus.PENDING) {
                 throw forbidden(
-                        "Emergency access is still pending. Wait until the waiting period ends or the vault owner approves it."
+                        "Emergency access is still pending. The vault owner must approve it, or Guardian Safety Check must release access automatically."
                 );
             }
             throw forbidden("Emergency access is not available for this request.");
@@ -524,37 +582,20 @@ public class EmergencyAccessService {
         return request;
     }
 
-    private void refreshAvailableRequestsForOwner(Long ownerId) {
-        requestRepository.findByOwnerIdOrderByRequestedAtDesc(ownerId)
-                .forEach(this::refreshRequestIfAvailable);
+    private boolean isActiveSafetyCheckContact(EmergencyContact contact) {
+        return contact != null
+                && contact.getId() != null
+                && safetyCheckRepository.existsByContact_IdAndStatusNot(
+                contact.getId(),
+                SafetyCheckStatus.DISABLED
+        );
     }
 
-    private void refreshAvailableRequestsForRequester(Long requesterId) {
-        requestRepository.findByRequesterIdOrderByRequestedAtDesc(requesterId)
-                .forEach(this::refreshRequestIfAvailable);
-    }
-
-    private void refreshRequestIfAvailable(EmergencyAccessRequest request) {
-        LocalDateTime now = LocalDateTime.now();
-
-        if (request.getStatus() == EmergencyAccessStatus.PENDING
-                && !request.getAvailableAt().isAfter(now)) {
-            request.setStatus(EmergencyAccessStatus.AVAILABLE);
-            request.setReleasedAt(now);
-            requestRepository.save(request);
-
-            InternalUserResponse owner = authClient.requireById(request.getOwnerId());
-            InternalUserResponse requester =
-                    authClient.requireById(request.getRequesterId());
-
-            notificationClient.notifyEmergencyAccessAvailable(
-                    requester.id(), owner.email()
-            );
-
-            log(owner.id(), requester.id(), EmergencyAuditAction.ACCESS_AVAILABLE,
-                    "Emergency access available",
-                    "Waiting period ended for " + requester.email() + ".");
-        }
+    private boolean hasEmergencyReleaseScope(EmergencyContact contact) {
+        return contact.isAllowPasswords()
+                || contact.isAllowCards()
+                || contact.isAllowDocuments()
+                || contact.isAllowNotes();
     }
 
     private EmergencyContact getOwnedContact(Long ownerId, Long id) {
@@ -565,10 +606,8 @@ public class EmergencyAccessService {
     }
 
     private void requireActionable(EmergencyAccessRequest request) {
-        if (request.getStatus() != EmergencyAccessStatus.PENDING
-                && request.getStatus() != EmergencyAccessStatus.AVAILABLE
-                && request.getStatus() != EmergencyAccessStatus.APPROVED) {
-            throw badRequest("Only pending emergency requests can be changed.");
+        if (request.getStatus() != EmergencyAccessStatus.PENDING) {
+            throw badRequest("Only pending emergency requests can be approved or denied.");
         }
     }
 

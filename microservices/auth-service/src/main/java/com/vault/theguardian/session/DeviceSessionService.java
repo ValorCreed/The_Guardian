@@ -55,12 +55,12 @@ public class DeviceSessionService {
      */
     @Transactional
     public UserSession createLoginSession(User user, HttpServletRequest request) {
-        return createLoginSession(user, request, true, false);
+        return createLoginSession(user, request, true, false, "NORMAL");
     }
 
     @Transactional
     public UserSession createLoginSession(User user, HttpServletRequest request, boolean multipleDevicesAllowed) {
-        return createLoginSession(user, request, multipleDevicesAllowed, false);
+        return createLoginSession(user, request, multipleDevicesAllowed, false, "NORMAL");
     }
 
     @Transactional
@@ -70,6 +70,21 @@ public class DeviceSessionService {
             boolean multipleDevicesAllowed,
             boolean forceReplaceDevice
     ) {
+        return createLoginSession(user, request, multipleDevicesAllowed, forceReplaceDevice, "NORMAL");
+    }
+
+    @Transactional
+    public UserSession createLoginSession(
+            User user,
+            HttpServletRequest request,
+            boolean multipleDevicesAllowed,
+            boolean forceReplaceDevice,
+            String requestedSessionMode
+    ) {
+        String sessionMode = "DURESS".equalsIgnoreCase(requestedSessionMode)
+                ? "DURESS"
+                : "NORMAL";
+        boolean duressSession = "DURESS".equals(sessionMode);
         LocalDateTime now = LocalDateTime.now();
 
         String userAgent = request == null ? "" : safe(request.getHeader("User-Agent"));
@@ -86,9 +101,10 @@ public class DeviceSessionService {
         String deviceIdHash = sha256(rawDeviceId);
 
         List<UserSession> matchingActiveSessions =
-                userSessionRepository.findByUserAndDeviceIdHashAndActiveTrueOrderByLastSeenAtDesc(
+                userSessionRepository.findByUserAndDeviceIdHashAndSessionModeAndActiveTrueOrderByLastSeenAtDesc(
                         user,
-                        deviceIdHash
+                        deviceIdHash,
+                        sessionMode
                 );
 
         if (!matchingActiveSessions.isEmpty()) {
@@ -101,6 +117,7 @@ public class DeviceSessionService {
             primarySession.setUserAgent(userAgent);
             primarySession.setIpAddress(ipAddress);
             primarySession.setActive(true);
+            primarySession.setSessionMode(sessionMode);
             primarySession.setLastSeenAt(now);
             primarySession.setRevokedAt(null);
 
@@ -125,10 +142,10 @@ public class DeviceSessionService {
          * A different device ID counts as a new trusted device.
          * If the user chooses to continue on this device, forceReplaceDevice revokes the old device.
          */
-        if (!multipleDevicesAllowed) {
+        if (!duressSession && !multipleDevicesAllowed) {
             collapseDuplicateActiveSessions(user, "");
 
-            long activeSessionCount = userSessionRepository.countByUserAndActiveTrue(user);
+            long activeSessionCount = userSessionRepository.countByUserAndSessionModeAndActiveTrue(user, "NORMAL");
 
             if (activeSessionCount >= 1) {
                 if (!forceReplaceDevice) {
@@ -148,6 +165,7 @@ public class DeviceSessionService {
                 .userAgent(userAgent)
                 .ipAddress(ipAddress)
                 .active(true)
+                .sessionMode(sessionMode)
                 .createdAt(now)
                 .lastSeenAt(now)
                 .revokedAt(null)
@@ -155,13 +173,16 @@ public class DeviceSessionService {
 
         UserSession saved = userSessionRepository.save(session);
 
-        notificationClient.notifyNewDeviceLogin(user, deviceName, ipAddress);
+        if (!duressSession) {
+            notificationClient.notifyNewDeviceLogin(user, deviceName, ipAddress);
+        }
 
         return saved;
     }
 
     private void revokeAllActiveSessionsForDeviceReplacement(User user) {
-        List<UserSession> sessions = userSessionRepository.findByUserAndActiveTrue(user);
+        List<UserSession> sessions = userSessionRepository
+                .findByUserAndSessionModeAndActiveTrue(user, "NORMAL");
         LocalDateTime now = LocalDateTime.now();
 
         for (UserSession session : sessions) {
@@ -188,6 +209,7 @@ public class DeviceSessionService {
 
         return userSessionRepository.findByUserAndActiveTrueOrderByLastSeenAtDesc(user)
                 .stream()
+                .filter(session -> !"DURESS".equalsIgnoreCase(session.getSessionMode()))
                 .map(session -> toResponse(session, currentTokenId))
                 .toList();
     }
@@ -229,8 +251,9 @@ public class DeviceSessionService {
     }
 
     private String sessionIdentityKey(UserSession session) {
+        String mode = "DURESS".equalsIgnoreCase(session.getSessionMode()) ? "duress" : "normal";
         if (session.getDeviceIdHash() != null && !session.getDeviceIdHash().isBlank()) {
-            return "device:" + session.getDeviceIdHash().trim().toLowerCase(Locale.ROOT);
+            return mode + ":device:" + session.getDeviceIdHash().trim().toLowerCase(Locale.ROOT);
         }
 
         /*
@@ -239,6 +262,7 @@ public class DeviceSessionService {
          */
         return String.join(
                 "|",
+                mode,
                 cleanKey(session.getDeviceType()),
                 cleanKey(session.getDeviceName()),
                 cleanKey(session.getUserAgent())
@@ -247,6 +271,74 @@ public class DeviceSessionService {
 
     private String cleanKey(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+
+    @Transactional
+    public UserSession requireCurrentNormalSession(User user, HttpServletRequest request) {
+        String currentTokenId = extractCurrentTokenId(request);
+        if (currentTokenId == null || currentTokenId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Current session could not be resolved.");
+        }
+
+        UserSession session = userSessionRepository.findByTokenIdAndActiveTrue(currentTokenId)
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.UNAUTHORIZED,
+                        "Current session could not be resolved."
+                ));
+        if (session.getUser() == null
+                || !session.getUser().getId().equals(user.getId())
+                || "DURESS".equalsIgnoreCase(session.getSessionMode())) {
+            throw new ResponseStatusException(
+                    HttpStatus.FORBIDDEN,
+                    "Incident Lockdown can only be started from a normal Guardian session."
+            );
+        }
+        return session;
+    }
+
+    @Transactional
+    public LockdownSessionResult lockdownToCurrentSession(User user, String safeTokenId) {
+        if (safeTokenId == null || safeTokenId.isBlank()) {
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Safe recovery session is missing.");
+        }
+
+        List<UserSession> sessions = userSessionRepository.findByUserAndActiveTrue(user);
+        LocalDateTime now = LocalDateTime.now();
+        int revokedSessions = 0;
+
+        for (UserSession session : sessions) {
+            if (safeTokenId.equals(session.getTokenId())
+                    && !"DURESS".equalsIgnoreCase(session.getSessionMode())) {
+                continue;
+            }
+            session.setActive(false);
+            session.setRevokedAt(now);
+            revokedSessions++;
+        }
+        if (!sessions.isEmpty()) {
+            userSessionRepository.saveAll(sessions);
+            userSessionRepository.flush();
+        }
+
+        List<BiometricCredential> credentials =
+                biometricCredentialRepository.findByUserAndRevokedAtIsNull(user);
+        int revokedBiometrics = credentials.size();
+        for (BiometricCredential credential : credentials) {
+            credential.setRevokedAt(now);
+        }
+        if (!credentials.isEmpty()) {
+            biometricCredentialRepository.saveAll(credentials);
+        }
+
+        return new LockdownSessionResult(revokedSessions, revokedBiometrics);
+    }
+
+    public String resolveDeviceIdHashForRequest(HttpServletRequest request) {
+        String userAgent = request == null ? "" : safe(request.getHeader("User-Agent"));
+        String deviceName = resolveDeviceName(request, userAgent);
+        String deviceType = resolveDeviceType(request, userAgent);
+        return sha256(resolveDeviceId(request, userAgent, deviceName, deviceType));
     }
 
     @Transactional
@@ -309,6 +401,22 @@ public class DeviceSessionService {
         if (!credentials.isEmpty()) {
             biometricCredentialRepository.saveAll(credentials);
         }
+    }
+
+
+    @Transactional
+    public void revokeDuressSessions(User user) {
+        List<UserSession> sessions = userSessionRepository
+                .findByUserAndSessionModeAndActiveTrue(user, "DURESS");
+        if (sessions.isEmpty()) return;
+
+        LocalDateTime now = LocalDateTime.now();
+        for (UserSession session : sessions) {
+            session.setActive(false);
+            session.setRevokedAt(now);
+        }
+        userSessionRepository.saveAll(sessions);
+        userSessionRepository.flush();
     }
 
     private void revokeBiometricCredentialsForDevice(

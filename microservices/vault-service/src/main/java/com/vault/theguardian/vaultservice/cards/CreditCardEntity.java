@@ -16,6 +16,10 @@ public class CreditCardEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
+    @Column(name = "is_decoy", nullable = false)
+    @Builder.Default
+    private boolean decoy = false;
+
     private String cardName;
     @Column(columnDefinition = "TEXT") private String encryptedCardNumber;
     @Column(columnDefinition = "TEXT") private String encryptedExpiryDate;

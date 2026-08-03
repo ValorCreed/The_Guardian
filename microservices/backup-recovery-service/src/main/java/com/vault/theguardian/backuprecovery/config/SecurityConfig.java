@@ -31,13 +31,19 @@ public class SecurityConfig {
                                 "/actuator/info",
                                 "/vault/recovery-kit/reset-password",
                                 "/vault/recovery-kit/reset-account",
-                                "/internal/account/**"
+                                "/vault/recovery-circle/recovery/start",
+                                "/vault/recovery-circle/recovery/status",
+                                "/vault/recovery-circle/recovery/complete",
+                                "/internal/account/**",
+                                "/internal/continuity/**"
                         ).permitAll()
                         .requestMatchers(
                                 "/vault/backup",
                                 "/vault/backup/**",
                                 "/vault/recovery-kit",
-                                "/vault/recovery-kit/**"
+                                "/vault/recovery-kit/**",
+                                "/vault/recovery-circle",
+                                "/vault/recovery-circle/**"
                         ).authenticated()
                         .anyRequest().denyAll()
                 )

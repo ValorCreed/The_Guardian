@@ -5,6 +5,8 @@ import com.vault.theguardian.biometric.BiometricCredentialRepository;
 import com.vault.theguardian.biometric.BiometricEnrollmentResponse;
 import com.vault.theguardian.biometric.BiometricLoginRequest;
 import com.vault.theguardian.email.EmailService;
+import com.vault.theguardian.duress.DuressService;
+import com.vault.theguardian.incident.SecurityIncidentService;
 import com.vault.theguardian.integration.NotificationClient;
 import com.vault.theguardian.registration.PendingRegistration;
 import com.vault.theguardian.registration.PendingRegistrationRepository;
@@ -48,6 +50,8 @@ public class AuthService {
     private final NotificationClient notificationClient;
     private final DeviceSessionService deviceSessionService;
     private final BiometricCredentialRepository biometricCredentialRepository;
+    private final DuressService duressService;
+    private final SecurityIncidentService securityIncidentService;
     private final SecureRandom secureRandom = new SecureRandom();
 
     public AuthService(
@@ -59,7 +63,9 @@ public class AuthService {
             EmailService emailService,
             NotificationClient notificationClient,
             DeviceSessionService deviceSessionService,
-            BiometricCredentialRepository biometricCredentialRepository
+            BiometricCredentialRepository biometricCredentialRepository,
+            DuressService duressService,
+            SecurityIncidentService securityIncidentService
     ) {
         this.userRepository = userRepository;
         this.pendingRegistrationRepository = pendingRegistrationRepository;
@@ -70,6 +76,8 @@ public class AuthService {
         this.notificationClient = notificationClient;
         this.deviceSessionService = deviceSessionService;
         this.biometricCredentialRepository = biometricCredentialRepository;
+        this.duressService = duressService;
+        this.securityIncidentService = securityIncidentService;
     }
 
     /**
@@ -254,19 +262,43 @@ public class AuthService {
             throw new RuntimeException("Invalid email or password");
         }
 
-        boolean passwordMatches = passwordEncoder.matches(request.password(), user.getPasswordHash());
-
-        if (!passwordMatches) {
-            throw new RuntimeException("Invalid email or password");
-        }
-
-        /* Blocks legacy unverified accounts from all authenticated access. */
+        /*
+         * Email verification is checked before both normal and duress password
+         * handling. A legacy unverified account must not gain a duress session.
+         */
         if (!user.isEmailVerified()) {
             throw new ResponseStatusException(
                     HttpStatus.FORBIDDEN,
                     "Verify your email before signing in."
             );
         }
+
+        boolean passwordMatches = passwordEncoder.matches(request.password(), user.getPasswordHash());
+
+        if (!passwordMatches) {
+            if (duressService.matchesEnabledDuressPassword(user, request.password())) {
+                Subscription duressSubscription = subscriptionRepository.findByUser(user)
+                        .orElseThrow(() -> new RuntimeException("Subscription not found"));
+                duressSubscription = refreshExpiredSubscription(duressSubscription);
+
+                UserSession duressSession = deviceSessionService.createLoginSession(
+                        user,
+                        httpRequest,
+                        true,
+                        false,
+                        "DURESS"
+                );
+                String duressToken = jwtService.generateToken(
+                        user.getEmail(),
+                        duressSession.getTokenId()
+                );
+                duressService.scheduleAlertForDuressLogin(user, duressSession.getTokenId());
+                return toAuthResponse(user, duressSubscription, duressToken, false, "DURESS");
+            }
+            throw new RuntimeException("Invalid email or password");
+        }
+
+        securityIncidentService.requireLoginFromSafeDevice(user, httpRequest);
 
         Subscription subscription = subscriptionRepository.findByUser(user)
                 .orElseThrow(() -> new RuntimeException("Subscription not found"));
@@ -293,7 +325,11 @@ public class AuthService {
                 request.shouldForceReplaceDevice()
         );
 
+        securityIncidentService.refreshSafeSessionAfterLogin(user, session);
+
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
+        duressService.cancelPendingAlerts(user);
+        deviceSessionService.revokeDuressSessions(user);
 
         return toAuthResponse(user, subscription, token, false);
     }
@@ -327,6 +363,14 @@ public class AuthService {
             throw new RuntimeException("Invalid 2FA code");
         }
 
+        /*
+         * During Incident Lockdown, reject a correct 2FA code from any device
+         * other than the designated recovery device before consuming the code.
+         * Otherwise an attacker could repeatedly invalidate the owner's valid
+         * recovery code without ever being allowed to sign in.
+         */
+        securityIncidentService.requireLoginFromSafeDevice(user, httpRequest);
+
         user.setTwoFactorCode(null);
         user.setTwoFactorCodeExpiresAt(null);
 
@@ -343,8 +387,11 @@ public class AuthService {
                 hasMultipleDeviceAccess(subscription),
                 false
         );
+        securityIncidentService.refreshSafeSessionAfterLogin(user, session);
 
         String token = jwtService.generateToken(user.getEmail(), session.getTokenId());
+        duressService.cancelPendingAlerts(user);
+        deviceSessionService.revokeDuressSessions(user);
 
         return toAuthResponse(user, subscription, token, false);
     }
@@ -413,6 +460,13 @@ public class AuthService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Verify your email before signing in.");
         }
 
+        securityIncidentService.requireLoginFromSafeDevice(user, httpRequest);
+        if (securityIncidentService.isActiveLockdown(user.getId())) {
+            throw securityIncidentService.locked(
+                    "Biometric sign-in is disabled during Incident Lockdown. Use the master password on the recovery device."
+            );
+        }
+
         BiometricCredential credential = biometricCredentialRepository
                 .findByTokenHashAndRevokedAtIsNull(sha256(request.credentialToken().trim()))
                 .orElseThrow(() -> new ResponseStatusException(
@@ -473,11 +527,21 @@ public class AuthService {
             throw new RuntimeException("Please verify your email before enabling 2FA.");
         }
 
+        boolean changed = user.isTwoFactorEnabled() != request.enabled();
+
         user.setTwoFactorEnabled(request.enabled());
         user.setTwoFactorCode(null);
         user.setTwoFactorCodeExpiresAt(null);
 
         User saved = userRepository.save(user);
+
+        if (changed) {
+            if (saved.isTwoFactorEnabled()) {
+                notificationClient.notifyTwoFactorEnabled(saved);
+            } else {
+                notificationClient.notifyTwoFactorDisabled(saved);
+            }
+        }
 
         return new SecuritySettingsResponse(
                 saved.isEmailVerified(),
@@ -575,6 +639,16 @@ public class AuthService {
             String token,
             boolean requiresTwoFactor
     ) {
+        return toAuthResponse(user, subscription, token, requiresTwoFactor, "NORMAL");
+    }
+
+    private AuthResponse toAuthResponse(
+            User user,
+            Subscription subscription,
+            String token,
+            boolean requiresTwoFactor,
+            String sessionMode
+    ) {
         return new AuthResponse(
                 token,
                 user.getId(),
@@ -583,7 +657,8 @@ public class AuthService {
                 subscription.getPlan().name(),
                 user.isEmailVerified(),
                 user.isTwoFactorEnabled(),
-                requiresTwoFactor
+                requiresTwoFactor,
+                "DURESS".equalsIgnoreCase(sessionMode) ? "DURESS" : "NORMAL"
         );
     }
 

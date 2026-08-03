@@ -48,6 +48,17 @@ public class EmailService {
         return sendCode("/internal/emails/two-factor", toEmail, code);
     }
 
+    public boolean sendDuressAlert(
+            String toEmail,
+            String ownerName,
+            String ownerEmail,
+            LocalDateTime triggeredAt
+    ) {
+        return send("/internal/emails/duress-alert", new DuressAlertEmailRequest(
+                toEmail, ownerName, ownerEmail, triggeredAt
+        ));
+    }
+
     public boolean sendBugReportNotification(
             String toEmail,
             String reporterName,
@@ -90,6 +101,13 @@ public class EmailService {
     }
 
     private record CodeEmailRequest(String toEmail, String code) {}
+
+    private record DuressAlertEmailRequest(
+            String toEmail,
+            String ownerName,
+            String ownerEmail,
+            LocalDateTime triggeredAt
+    ) {}
 
     private record BugReportEmailRequest(
             String toEmail,

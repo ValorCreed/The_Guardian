@@ -37,7 +37,7 @@ public class EmergencyAccessRequest {
     @Column(name = "requested_at", nullable = false)
     private LocalDateTime requestedAt;
 
-    @Column(name = "available_at", nullable = false)
+    @Column(name = "available_at")
     private LocalDateTime availableAt;
 
     @Column(name = "approved_at")

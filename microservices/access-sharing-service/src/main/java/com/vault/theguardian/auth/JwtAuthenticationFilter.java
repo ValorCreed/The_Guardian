@@ -29,7 +29,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 || path.equals("/actuator/health")
                 || path.equals("/actuator/info")
                 || path.startsWith("/internal/family/")
-                || path.startsWith("/internal/account/");
+                || path.startsWith("/internal/account/")
+                || path.startsWith("/internal/emergency/");
     }
 
     @Override
@@ -54,8 +55,38 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         try {
             TokenIntrospectionResponse introspection = authClient.introspect(token);
             if (!introspection.active() || introspection.userId() == null) {
-                writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "Invalid or revoked session.");
+                writeSessionRevokedError(response);
                 return;
+            }
+
+            if ("DURESS".equalsIgnoreCase(introspection.sessionMode())) {
+                writeError(response, HttpServletResponse.SC_FORBIDDEN,
+                        "This action is not available in this vault session.");
+                return;
+            }
+
+
+            if (introspection.lockdownActive()) {
+                String path = request.getServletPath();
+                String method = request.getMethod();
+                boolean safetyCheckRead = introspection.recoveryAuthorized()
+                        && "/vault/safety-check".equals(path)
+                        && "GET".equalsIgnoreCase(method);
+                boolean safetyCheckIn = introspection.recoveryAuthorized()
+                        && "/vault/safety-check/check-in".equals(path)
+                        && "POST".equalsIgnoreCase(method);
+
+                /*
+                 * Lockdown must never trap the owner in an automatic Safety
+                 * Check release countdown. The designated recovery device may
+                 * view status and check in, but it cannot change contacts,
+                 * timing, release scope, emergency access, or any other
+                 * access-sharing setting until Lockdown is completed.
+                 */
+                if (!safetyCheckRead && !safetyCheckIn) {
+                    writeLockdownError(response);
+                    return;
+                }
             }
 
             AuthenticatedUser principal =
@@ -72,6 +103,24 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         } finally {
             SecurityContextHolder.clearContext();
         }
+    }
+
+    private void writeSessionRevokedError(HttpServletResponse response) throws IOException {
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"SESSION_REVOKED\",\"message\":\"This Guardian session is no longer active.\"}"
+        );
+    }
+
+    private void writeLockdownError(HttpServletResponse response) throws IOException {
+        response.setStatus(423);
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write(
+                "{\"code\":\"ACCOUNT_LOCKDOWN_ACTIVE\",\"message\":\"Incident Lockdown is active. Continue recovery on the designated device.\"}"
+        );
     }
 
     private void writeError(HttpServletResponse response, int status, String message) throws IOException {
