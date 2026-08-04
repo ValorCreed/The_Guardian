@@ -291,15 +291,31 @@ public class NotificationClient {
                 "/securityhealth");
     }
 
-    public void notifyNewDeviceLogin(User user, String deviceName, String ipAddress) {
+    public void notifySignIn(
+            User user,
+            String deviceName,
+            String ipAddress,
+            boolean newDevice
+    ) {
         String deviceLabel = cleanTitle(deviceName, "A device");
         String ipLabel = ipAddress == null || ipAddress.isBlank() || ipAddress.equalsIgnoreCase("Unknown")
                 ? ""
                 : " from " + ipAddress;
-        createNotification(user, "NEW_DEVICE_LOGIN", "New device signed in",
-                deviceLabel + " signed in to your account" + ipLabel
-                        + ". Review trusted devices if this was not you.",
-                "/devices");
+        String title = newDevice ? "New device signed in" : "Sign-in detected";
+        String message = deviceLabel + " signed in to your account" + ipLabel
+                + ". Review trusted devices if this was not you.";
+
+        /*
+         * NEW_DEVICE_LOGIN remains the event type for compatibility with the
+         * existing mobile model and notification preference category. The
+         * title distinguishes a new trusted device from a later sign-in on an
+         * already trusted device.
+         */
+        createNotification(user, "NEW_DEVICE_LOGIN", title, message, "/devices");
+    }
+
+    public void notifyNewDeviceLogin(User user, String deviceName, String ipAddress) {
+        notifySignIn(user, deviceName, ipAddress, true);
     }
 
     public void notifySessionRevoked(User user, String deviceName) {

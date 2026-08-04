@@ -15,6 +15,8 @@ import java.util.Optional;
 public interface PushDeliveryAttemptRepository
         extends JpaRepository<PushDeliveryAttempt, Long> {
 
+    boolean existsByNotificationIdAndPushTokenId(Long notificationId, Long pushTokenId);
+
     @Query("""
             select a.id
             from PushDeliveryAttempt a

@@ -1,24 +1,34 @@
 package com.vault.theguardian.notificationservice.push;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
 public class PushTokenService {
+    private static final Logger log = LoggerFactory.getLogger(PushTokenService.class);
+    private static final long RECENT_NOTIFICATION_LOOKBACK_MINUTES = 5L;
+
     private final PushTokenRepository repository;
     private final PushPreferenceService preferenceService;
+    private final PushDispatchService pushDispatchService;
     private final DatabaseClock databaseClock;
 
     public PushTokenService(
             PushTokenRepository repository,
             PushPreferenceService preferenceService,
+            PushDispatchService pushDispatchService,
             DatabaseClock databaseClock
     ) {
         this.repository = repository;
         this.preferenceService = preferenceService;
+        this.pushDispatchService = pushDispatchService;
         this.databaseClock = databaseClock;
     }
 
@@ -66,9 +76,51 @@ public class PushTokenService {
         token.setLastSeenAt(now);
         if (token.getCreatedAt() == null) token.setCreatedAt(now);
 
-        PushToken saved = repository.save(token);
+        PushToken saved = repository.saveAndFlush(token);
         preferenceService.setPushEnabled(userId, true);
+
+        queueRecentNotificationsAfterCommit(
+                userId,
+                saved.getId(),
+                now.minusMinutes(RECENT_NOTIFICATION_LOOKBACK_MINUTES)
+        );
+
         return toResponse(saved);
+    }
+
+    private void queueRecentNotificationsAfterCommit(
+            Long userId,
+            Long tokenId,
+            LocalDateTime createdAfter
+    ) {
+        Runnable catchUp = () -> {
+            try {
+                pushDispatchService.queueRecentForToken(userId, tokenId, createdAfter);
+            } catch (RuntimeException error) {
+                /* Push catch-up must never roll back or fail token registration. */
+                log.warn(
+                        "Could not queue recent push notifications after token registration userId={} tokenId={}: {}",
+                        userId,
+                        tokenId,
+                        error.getMessage()
+                );
+            }
+        };
+
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(
+                    new TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            catchUp.run();
+                        }
+                    }
+            );
+            return;
+        }
+
+        catchUp.run();
     }
 
     @Transactional

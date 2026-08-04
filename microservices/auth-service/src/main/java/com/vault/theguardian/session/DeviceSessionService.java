@@ -134,6 +134,15 @@ public class DeviceSessionService {
             userSessionRepository.saveAll(matchingActiveSessions);
             userSessionRepository.flush();
 
+            if (!duressSession) {
+                notificationClient.notifySignIn(
+                        user,
+                        deviceName,
+                        ipAddress,
+                        false
+                );
+            }
+
             return primarySession;
         }
 
@@ -174,7 +183,7 @@ public class DeviceSessionService {
         UserSession saved = userSessionRepository.save(session);
 
         if (!duressSession) {
-            notificationClient.notifyNewDeviceLogin(user, deviceName, ipAddress);
+            notificationClient.notifySignIn(user, deviceName, ipAddress, true);
         }
 
         return saved;
