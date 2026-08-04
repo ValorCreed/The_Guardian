@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Alert,
   RefreshControl,
   ScrollView,
   Share,
@@ -43,6 +42,13 @@ import {
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import {
+  markSecurityScoreDirty,
+  SECURITY_BACKUP_SNAPSHOT_PREFIX,
+  SECURITY_SCORE_NEEDS_SYNC_KEY,
+} from '../services/securityScoreSync';
+import { safeLogError } from '../utils/asyncResilience';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -143,6 +149,55 @@ const toHistoryItem = (backup: BackupResponse, path: string): BackupHistoryItem 
   totalItemCount: backup.totalItemCount || 0,
 });
 
+type BackupSecuritySnapshotSource = Pick<
+  BackupHistoryItem,
+  | 'createdAt'
+  | 'passwordCount'
+  | 'cardCount'
+  | 'documentCount'
+  | 'familyMemberCount'
+  | 'totalItemCount'
+>;
+
+const saveBackupSecuritySnapshot = async (
+  backup?: BackupSecuritySnapshotSource | null
+) => {
+  try {
+    const email = (
+      (await AsyncStorage.getItem('userEmail')) || 'anonymous'
+    ).trim().toLowerCase();
+    const snapshotKey = `${SECURITY_BACKUP_SNAPSHOT_PREFIX}:${email}`;
+
+    if (!backup) {
+      await AsyncStorage.multiRemove([snapshotKey]);
+      await AsyncStorage.setItem(SECURITY_SCORE_NEEDS_SYNC_KEY, 'true');
+      markSecurityScoreDirty('backup');
+      return;
+    }
+
+    await AsyncStorage.multiSet([
+      [
+        snapshotKey,
+        JSON.stringify({
+          createdAt: backup.createdAt,
+          passwordCount: Math.max(0, Number(backup.passwordCount || 0)),
+          cardCount: Math.max(0, Number(backup.cardCount || 0)),
+          documentCount: Math.max(0, Number(backup.documentCount || 0)),
+          familyMemberCount: Math.max(0, Number(backup.familyMemberCount || 0)),
+          totalItemCount: Math.max(0, Number(backup.totalItemCount || 0)),
+        }),
+      ],
+      [SECURITY_SCORE_NEEDS_SYNC_KEY, 'true'],
+    ]);
+
+    // Emit only after the snapshot exists so Security does not rescan against
+    // the pre-backup state and leave the recommendation visible.
+    markSecurityScoreDirty('backup');
+  } catch (error: unknown) {
+    safeLogError('BACKUP_SECURITY_SNAPSHOT', error);
+  }
+};
+
 
 function AnimatedSkeleton({
   styles,
@@ -180,6 +235,8 @@ function AnimatedSkeleton({
 }
 
 export default function BackupScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -243,7 +300,7 @@ export default function BackupScreen() {
       setPlan((backupStatus.plan || 'FREE') as Plan);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      console.log('BACKUP STATUS ERROR:', error);
+      safeLogError('BACKUP_STATUS_LOAD', error);
 
       try {
         const subscription = await requestApi.getSubscription();
@@ -278,7 +335,7 @@ export default function BackupScreen() {
 
   const createBackup = async () => {
     if (!allowed) {
-      Alert.alert(
+      screenAlert(
         'Premium feature',
         'Backup is only available on the Premium and Family plans.',
         [
@@ -303,15 +360,16 @@ export default function BackupScreen() {
       });
 
       await addBackupToHistory(backup, filePath);
+      await saveBackupSecuritySnapshot(backup);
       await loadStatus(false);
 
-      Alert.alert(
+      screenAlert(
         'Backup created',
         'Your encrypted backup has been created and saved on this device. It will stay in your backup history.'
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Backup failed', error.message || 'Could not create backup.');
+      screenAlert('Backup failed', error.message || 'Could not create backup.');
     } finally {
       setCreating(false);
     }
@@ -335,14 +393,14 @@ export default function BackupScreen() {
       });
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Share failed', error.message || 'Could not share backup details.');
+      screenAlert('Share failed', error.message || 'Could not share backup details.');
     } finally {
       setSharingId(null);
     }
   };
 
   const deleteHistoryItem = (item: BackupHistoryItem) => {
-    Alert.alert(
+    screenAlert(
       'Delete local backup?',
       'This removes the backup file and removes it from the history on this device. It does not delete your vault data.',
       [
@@ -358,11 +416,12 @@ export default function BackupScreen() {
 
               const next = history.filter((backup) => backup.id !== item.id);
               await saveHistory(next);
+              await saveBackupSecuritySnapshot(next[0] || null);
 
-              Alert.alert('Deleted', 'The local backup file has been deleted.');
+              screenAlert('Deleted', 'The local backup file has been deleted.');
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Delete failed', error.message || 'Could not delete the backup file.');
+              screenAlert('Delete failed', error.message || 'Could not delete the backup file.');
             } finally {
               setDeletingId(null);
             }
@@ -376,7 +435,7 @@ export default function BackupScreen() {
     const info = await FileSystem.getInfoAsync(item.path);
 
     if (!info.exists) {
-      Alert.alert(
+      screenAlert(
         'Backup file missing',
         'This backup is listed in history, but the file is no longer on this device. You can delete it from history.'
       );
@@ -408,13 +467,13 @@ export default function BackupScreen() {
       chooseRestoreMode(encryptedBackup, item.fileName);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Restore failed', error.message || 'Could not read this backup file.');
+      screenAlert('Restore failed', error.message || 'Could not read this backup file.');
     }
   };
 
   const importBackupFile = async () => {
     if (!allowed) {
-      Alert.alert('Premium feature', 'Restore is only available on Premium and Family plans.');
+      screenAlert('Premium feature', 'Restore is only available on Premium and Family plans.');
       return;
     }
 
@@ -434,7 +493,7 @@ export default function BackupScreen() {
       const asset = result.assets?.[0];
 
       if (!asset?.uri) {
-        Alert.alert('No file selected', 'Please select a valid The Guardian backup file.');
+        screenAlert('No file selected', 'Please select a valid The Guardian backup file.');
         return;
       }
 
@@ -449,7 +508,7 @@ export default function BackupScreen() {
       });
 
       if (!isLikelyGuardianBackupPayload(encryptedBackup)) {
-        Alert.alert(
+        screenAlert(
           'Invalid backup file',
           'This file does not contain a valid encrypted The Guardian backup.'
         );
@@ -459,14 +518,14 @@ export default function BackupScreen() {
       chooseRestoreMode(encryptedBackup.trim(), asset.name || 'Imported backup');
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Import failed', error.message || 'Could not import backup file.');
+      screenAlert('Import failed', error.message || 'Could not import backup file.');
     } finally {
       setImporting(false);
     }
   };
 
   const chooseRestoreMode = (encryptedBackup: string, fileName: string) => {
-    Alert.alert(
+    screenAlert(
       'Restore backup?',
       `Choose how to restore ${fileName}. Merge is safer because it keeps your current vault data.`,
       [
@@ -485,7 +544,7 @@ export default function BackupScreen() {
   };
 
   const confirmReplaceRestore = (encryptedBackup: string) => {
-    Alert.alert(
+    screenAlert(
       'Replace current vault?',
       'This will delete your current passwords, cards, and documents before restoring this backup. Family members are not deleted. Continue?',
       [
@@ -511,13 +570,13 @@ export default function BackupScreen() {
       setLastRestore(response);
       await loadStatus(false);
 
-      Alert.alert(
+      screenAlert(
         'Restore complete',
         `${response.message}\n\nRestored ${response.totalRestoredCount} item(s).`
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Restore failed', error.message || 'Could not restore backup.');
+      screenAlert('Restore failed', error.message || 'Could not restore backup.');
     } finally {
       setRestoring(false);
     }
@@ -923,6 +982,12 @@ const makeStyles = (C: any) =>
       elevation: 2,},
 
     skeletonHeroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 82,
       height: 82,
       borderRadius: 28,
@@ -971,6 +1036,12 @@ const makeStyles = (C: any) =>
     },
 
     skeletonButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       flex: 1,
       height: 52,
       borderRadius: 999,
@@ -984,6 +1055,12 @@ const makeStyles = (C: any) =>
     },
 
     skeletonHistoryIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 42,
       height: 42,
       borderRadius: 18,
@@ -1007,6 +1084,12 @@ const makeStyles = (C: any) =>
     },
 
     heroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 82,
       height: 82,
       borderRadius: 28,
@@ -1017,6 +1100,12 @@ const makeStyles = (C: any) =>
     },
 
     lockedHeroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 82,
       height: 82,
       borderRadius: 28,
@@ -1051,10 +1140,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     infoRow: {
       flexDirection: 'row',
@@ -1063,6 +1152,12 @@ const makeStyles = (C: any) =>
     },
 
     infoIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 22,
@@ -1100,10 +1195,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     statusHeaderRow: {
       flexDirection: 'row',
@@ -1112,6 +1207,12 @@ const makeStyles = (C: any) =>
     },
 
     statusIconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 46,
       height: 46,
       borderRadius: 23,
@@ -1122,6 +1223,12 @@ const makeStyles = (C: any) =>
     },
 
     successIconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 46,
       height: 46,
       borderRadius: 23,
@@ -1159,10 +1266,10 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 12,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     statValue: {
       color: C.text,
@@ -1191,10 +1298,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     sectionTitle: {
       color: C.text,
@@ -1219,10 +1326,10 @@ const makeStyles = (C: any) =>
       marginTop: 12,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     primaryButtonText: {
       color: '#fff',
@@ -1243,10 +1350,10 @@ const makeStyles = (C: any) =>
       gap: 10,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -1274,10 +1381,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     restoreStatsRow: {
       flexDirection: 'row',
@@ -1286,6 +1393,12 @@ const makeStyles = (C: any) =>
     },
 
     miniCountBox: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       flex: 1,
       backgroundColor: C.background,
       borderRadius: 14,
@@ -1318,6 +1431,12 @@ const makeStyles = (C: any) =>
     },
 
     historyTitleIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 38,
       height: 38,
       borderRadius: 19,
@@ -1337,10 +1456,10 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     emptyTitle: {
       color: C.text,
@@ -1366,10 +1485,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     historyTopRow: {
       flexDirection: 'row',
@@ -1378,6 +1497,12 @@ const makeStyles = (C: any) =>
     },
 
     fileIconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 42,
       height: 42,
       borderRadius: 21,
@@ -1451,10 +1576,10 @@ const makeStyles = (C: any) =>
       gap: 6,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     smallActionText: {
       color: C.primary,
@@ -1472,10 +1597,10 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     footnote: {
       color: C.textSecondary,

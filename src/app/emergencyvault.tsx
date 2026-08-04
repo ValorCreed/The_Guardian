@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -17,9 +16,13 @@ import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyVaultItemResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 const getTitle = (item: EmergencyVaultItemResponse) =>
-  item.title || item.documentName || item.fileName || 'Emergency vault item';
+  item.itemType === 'PASSWORD'
+    ? getFriendlyVaultTitle(item.title, item.website, 'Saved login')
+    : item.title || item.documentName || item.fileName || 'Emergency vault item';
 
 const getFileExtension = (fileName?: string | null) => {
   const cleanName = String(fileName || '').split('?')[0].split('#')[0];
@@ -44,7 +47,10 @@ const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | n
 };
 
 const getSubtitle = (item: EmergencyVaultItemResponse) => {
-  if (item.itemType === 'PASSWORD') return item.usernameValue || item.website || 'Password login';
+  if (item.itemType === 'PASSWORD') {
+    return item.usernameValue ||
+      getFriendlyVaultSubtitle(undefined, item.website, 'Password login');
+  }
   if (item.itemType === 'CARD') return item.usernameValue || 'Saved payment card';
   if (item.itemType === 'DOCUMENT') return getFriendlyDocumentType(item.documentType || item.mimeType, item.documentName || item.fileName || item.title);
   if (item.itemType === 'NOTE') return item.category || 'SecureNote';
@@ -60,6 +66,8 @@ const getIcon = (itemType: string) => {
 };
 
 export default function EmergencyVaultScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { requestId, ownerName, ownerEmail } = useLocalSearchParams<{
     requestId: string;
@@ -93,7 +101,7 @@ export default function EmergencyVaultScreen() {
       setVaultOwnerEmail(data.ownerEmail || ownerEmail || '');
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not open emergency vault', error.message || 'Please try again.');
+      screenAlert('Could not open emergency vault', error.message || 'Please try again.');
       router.back();
     } finally {
       setLoading(false);

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, hasStoredAuthToken } from './api';
+import { AppOperationError, safeLogError } from '../utils/asyncResilience';
 
 /**
  * Change this value whenever the Privacy Policy or Terms of Service changes in
@@ -36,70 +37,98 @@ async function resolveEmail(email?: string | null) {
   const suppliedEmail = normalizeEmail(email);
   if (suppliedEmail) return suppliedEmail;
 
-  return normalizeEmail(await AsyncStorage.getItem('userEmail'));
+  try {
+    return normalizeEmail(await AsyncStorage.getItem('userEmail'));
+  } catch (error: unknown) {
+    safeLogError('LEGAL_CONSENT_EMAIL_READ', error);
+    return '';
+  }
 }
 
 export async function getLegalConsentRecord(
   email?: string | null
 ): Promise<LegalConsentRecord | null> {
-  const resolvedEmail = await resolveEmail(email);
-  if (!resolvedEmail) return null;
-
-  const raw = await AsyncStorage.getItem(getConsentStorageKey(resolvedEmail));
-
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as Partial<LegalConsentRecord>;
-
-      if (
-        parsed.version === LEGAL_CONSENT_VERSION &&
-        parsed.email === resolvedEmail &&
-        parsed.privacyAccepted === true &&
-        parsed.termsAccepted === true &&
-        parsed.acceptedAt
-      ) {
-        return parsed as LegalConsentRecord;
-      }
-    } catch {
-      // Try the authenticated server record below.
-    }
-  }
-
-  if (!(await hasStoredAuthToken())) return null;
-
   try {
-    const serverRecord = await api.getLegalConsent(LEGAL_CONSENT_VERSION);
-    if (!serverRecord?.privacyAccepted || !serverRecord?.termsAccepted || !serverRecord.acceptedAt) {
+    const resolvedEmail = await resolveEmail(email);
+    if (!resolvedEmail) return null;
+
+    const raw = await AsyncStorage.getItem(getConsentStorageKey(resolvedEmail));
+
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Partial<LegalConsentRecord>;
+
+        if (
+          parsed.version === LEGAL_CONSENT_VERSION &&
+          parsed.email === resolvedEmail &&
+          parsed.privacyAccepted === true &&
+          parsed.termsAccepted === true &&
+          parsed.acceptedAt
+        ) {
+          return parsed as LegalConsentRecord;
+        }
+      } catch (error: unknown) {
+        safeLogError('LEGAL_CONSENT_CACHE_PARSE', error);
+      }
+    }
+
+    if (!(await hasStoredAuthToken())) return null;
+
+    try {
+      const serverRecord = await api.getLegalConsent(LEGAL_CONSENT_VERSION);
+      if (
+        !serverRecord?.privacyAccepted ||
+        !serverRecord?.termsAccepted ||
+        !serverRecord.acceptedAt
+      ) {
+        return null;
+      }
+
+      const record: LegalConsentRecord = {
+        version: LEGAL_CONSENT_VERSION,
+        email: resolvedEmail,
+        privacyAccepted: true,
+        termsAccepted: true,
+        acceptedAt: serverRecord.acceptedAt,
+      };
+
+      await AsyncStorage.setItem(
+        getConsentStorageKey(resolvedEmail),
+        JSON.stringify(record)
+      ).catch((error: unknown) => {
+        safeLogError('LEGAL_CONSENT_CACHE_SAVE', error);
+      });
+
+      return record;
+    } catch (error: unknown) {
+      safeLogError('LEGAL_CONSENT_SERVER_READ', error);
       return null;
     }
-
-    const record: LegalConsentRecord = {
-      version: LEGAL_CONSENT_VERSION,
-      email: resolvedEmail,
-      privacyAccepted: true,
-      termsAccepted: true,
-      acceptedAt: serverRecord.acceptedAt,
-    };
-
-    await AsyncStorage.setItem(getConsentStorageKey(resolvedEmail), JSON.stringify(record));
-    return record;
-  } catch {
+  } catch (error: unknown) {
+    safeLogError('LEGAL_CONSENT_READ', error);
     return null;
   }
 }
 
 export async function hasAcceptedLegalConsent(email?: string | null) {
-  return Boolean(await getLegalConsentRecord(email));
+  try {
+    return Boolean(await getLegalConsentRecord(email));
+  } catch (error: unknown) {
+    safeLogError('LEGAL_CONSENT_CHECK', error);
+    return false;
+  }
 }
 
 export async function syncLegalConsentToBackend(email?: string | null) {
-  const resolvedEmail = await resolveEmail(email);
-  if (!resolvedEmail || !(await hasStoredAuthToken())) return false;
-
-  const record = await getLegalConsentRecord(resolvedEmail);
-  if (!record) return false;
+  let resolvedEmail = '';
 
   try {
+    resolvedEmail = await resolveEmail(email);
+    if (!resolvedEmail || !(await hasStoredAuthToken())) return false;
+
+    const record = await getLegalConsentRecord(resolvedEmail);
+    if (!record) return false;
+
     const response = await api.saveLegalConsent({
       version: record.version,
       privacyAccepted: record.privacyAccepted,
@@ -108,14 +137,21 @@ export async function syncLegalConsentToBackend(email?: string | null) {
     });
 
     if (response?.privacyAccepted && response?.termsAccepted) {
-      await AsyncStorage.removeItem(getConsentSyncKey(resolvedEmail));
+      await AsyncStorage.removeItem(getConsentSyncKey(resolvedEmail)).catch(
+        (error: unknown) => safeLogError('LEGAL_CONSENT_SYNC_MARKER_CLEAR', error)
+      );
       return true;
     }
-  } catch {
-    // Keep the local acceptance and retry after a future authenticated login.
+  } catch (error: unknown) {
+    safeLogError('LEGAL_CONSENT_SYNC', error);
   }
 
-  await AsyncStorage.setItem(getConsentSyncKey(resolvedEmail), 'true');
+  if (resolvedEmail) {
+    await AsyncStorage.setItem(getConsentSyncKey(resolvedEmail), 'true').catch(
+      (error: unknown) => safeLogError('LEGAL_CONSENT_SYNC_MARKER_SAVE', error)
+    );
+  }
+
   return false;
 }
 
@@ -123,7 +159,10 @@ export async function saveLegalConsentAcceptance(email?: string | null) {
   const resolvedEmail = await resolveEmail(email);
 
   if (!resolvedEmail) {
-    throw new Error('Your account email could not be found. Please sign in again.');
+    throw new AppOperationError(
+      'Your account email could not be found. Please sign in again.',
+      { code: 'STORAGE_UNAVAILABLE' }
+    );
   }
 
   const record: LegalConsentRecord = {
@@ -134,13 +173,21 @@ export async function saveLegalConsentAcceptance(email?: string | null) {
     acceptedAt: new Date().toISOString(),
   };
 
-  await AsyncStorage.multiSet([
-    [getConsentStorageKey(resolvedEmail), JSON.stringify(record)],
-    [getConsentSyncKey(resolvedEmail), 'true'],
-  ]);
+  try {
+    await AsyncStorage.multiSet([
+      [getConsentStorageKey(resolvedEmail), JSON.stringify(record)],
+      [getConsentSyncKey(resolvedEmail), 'true'],
+    ]);
+  } catch (error: unknown) {
+    safeLogError('LEGAL_CONSENT_SAVE', error);
+    throw new AppOperationError(
+      'Your consent could not be saved. Please try again.',
+      { code: 'STORAGE_UNAVAILABLE' }
+    );
+  }
 
-  // Do not block onboarding if the server is temporarily unavailable. The
-  // dirty marker is retried automatically after the next authenticated login.
+  // Keep onboarding available during a temporary server outage. The local
+  // marker is retried after the next authenticated login.
   await syncLegalConsentToBackend(resolvedEmail);
 
   return record;

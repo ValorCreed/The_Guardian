@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -18,8 +17,11 @@ import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyContactResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { decryptJson } from '../utils/vaultcrypto';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 export default function EmergencyDetailsScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors: C, isDark } = useAppTheme();
@@ -38,7 +40,7 @@ export default function EmergencyDetailsScreen() {
       setContact(data);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not load contact', error.message || 'Please try again.');
+      screenAlert('Could not load contact', error.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -53,7 +55,7 @@ export default function EmergencyDetailsScreen() {
   const deleteContact = () => {
     if (!contact || deleting) return;
 
-    Alert.alert(
+    screenAlert(
       'Remove emergency contact?',
       `${contact.contactEmail} will no longer be able to request emergency access.`,
       [
@@ -65,12 +67,12 @@ export default function EmergencyDetailsScreen() {
             try {
               setDeleting(true);
               await requestApi.deleteEmergencyContact(contact.id);
-              Alert.alert('Removed', 'Emergency contact removed.', [
+              screenAlert('Removed', 'Emergency contact removed.', [
                 { text: 'OK', onPress: () => router.back() },
               ]);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Remove failed', error.message || 'Could not remove this contact.');
+              screenAlert('Remove failed', error.message || 'Could not remove this contact.');
             } finally {
               setDeleting(false);
             }
@@ -162,7 +164,7 @@ export default function EmergencyDetailsScreen() {
 
         <View style={styles.card}>
           <InfoRow label="Relationship" value={contact.relationship || 'Trusted contact'} C={C} />
-          <InfoRow label="Waiting period" value={`${contact.waitingPeriodHours} hours`} C={C} />
+          <InfoRow label="Request release" value="Owner approval required" C={C} />
           <InfoRow label="Status" value={contact.active ? 'Active' : 'Inactive'} C={C} />
         </View>
 
@@ -226,14 +228,16 @@ const makeStyles = (C: any) => StyleSheet.create({
     elevation: 3,
   },
   skeletonAvatar: {
+    shadowColor: '#000000',
+
     width: 78,
     height: 78,
     borderRadius: 24,
     marginBottom: 14,
-    shadowOpacity: 0.11,
+    shadowOpacity: 0.16,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    elevation: 6,
   },
   skeletonTitle: { width: '62%', height: 26, marginBottom: 10 },
   skeletonSubtitle: { width: '74%', height: 13, marginBottom: 22 },
@@ -246,10 +250,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOpacity: 0.10,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 11 },
-    elevation: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   skeletonInfoRow: {
     paddingVertical: 14,
@@ -276,17 +280,23 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderBottomWidth: 0,
   },
   skeletonAccessText: { width: '42%', height: 14 },
-  skeletonAccessIcon: { width: 22, height: 22, borderRadius: 8 },
+  skeletonAccessIcon: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+ width: 22, height: 22, borderRadius: 8 },
   skeletonButton: {
     width: '100%',
     height: 52,
     borderRadius: 999,
     marginTop: 2,
     shadowColor: C.backgroundbutton,
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 9 },
-    elevation: 5,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   skeletonButtonDanger: {
     width: '100%',
@@ -294,10 +304,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderRadius: 999,
     marginTop: 12,
     shadowColor: C.danger,
-    shadowOpacity: 0.13,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   safeArea: { flex: 1, backgroundColor: C.background },
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
@@ -330,10 +340,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOpacity: 0.10,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 11 },
-    elevation: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   noteCard: {
     width: '100%',
@@ -344,10 +354,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     padding: 16,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOpacity: 0.09,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 5,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   noteText: { color: C.text, fontSize: 14, lineHeight: 21 },
   mainButton: {
@@ -361,10 +371,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     gap: 9,
     marginTop: 2,
     shadowColor: C.backgroundbutton,
-    shadowOpacity: 0.22,
+    shadowOpacity: 0.25,
     shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   mainButtonText: { color: '#fff', fontSize: 15, fontWeight: '900' },
   deleteButton: {
@@ -380,10 +390,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     gap: 9,
     marginTop: 12,
     shadowColor: C.danger,
-    shadowOpacity: 0.13,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 4,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   deleteButtonText: { color: C.danger, fontSize: 15, fontWeight: '900' },
 });

@@ -3,7 +3,9 @@ import { AppState, AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router, usePathname } from 'expo-router';
 
-import { logout } from '../services/api';
+import { api } from '../services/api';
+import { clearOfflineVaultMemoryCache } from '../services/offlineVault';
+import { AppOperationError, safeLogError } from '../utils/asyncResilience';
 
 export const AUTO_LOCK_ON_APP_CLOSE = -1;
 export const AUTO_LOCK_MODE_ON_APP_CLOSE = 'app_close';
@@ -62,8 +64,13 @@ const parseStoredTimeout = (savedTimeout: string | null) => {
 };
 
 export const getAutoLockTimeout = async () => {
-  const savedTimeout = await AsyncStorage.getItem(AUTO_LOCK_TIMEOUT_KEY);
-  return parseStoredTimeout(savedTimeout);
+  try {
+    const savedTimeout = await AsyncStorage.getItem(AUTO_LOCK_TIMEOUT_KEY);
+    return parseStoredTimeout(savedTimeout);
+  } catch (error: unknown) {
+    safeLogError('AUTO_LOCK_TIMEOUT_READ', error);
+    return DEFAULT_TIMEOUT;
+  }
 };
 
 export const setAutoLockTimeout = async (timeout: number) => {
@@ -72,7 +79,14 @@ export const setAutoLockTimeout = async (timeout: number) => {
       ? String(AUTO_LOCK_ON_APP_CLOSE)
       : String(timeout);
 
-  await AsyncStorage.setItem(AUTO_LOCK_TIMEOUT_KEY, value);
+  try {
+    await AsyncStorage.setItem(AUTO_LOCK_TIMEOUT_KEY, value);
+  } catch (error: unknown) {
+    safeLogError('AUTO_LOCK_TIMEOUT_SAVE', error);
+    throw new AppOperationError('Auto-lock settings could not be saved.', {
+      code: 'STORAGE_UNAVAILABLE',
+    });
+  }
 };
 
 export const getAutoLockSettings = async (): Promise<AutoLockSettings> => {
@@ -132,18 +146,23 @@ export const formatAutoLockSetting = (
 
 
 const getStoredBackgroundTime = async () => {
-  const savedTime = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
+  try {
+    const savedTime = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
 
-  if (!savedTime) return null;
+    if (!savedTime) return null;
 
-  const parsedTime = Number(savedTime);
+    const parsedTime = Number(savedTime);
 
-  if (!Number.isFinite(parsedTime) || parsedTime <= 0) {
-    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+    if (!Number.isFinite(parsedTime) || parsedTime <= 0) {
+      await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY).catch(() => undefined);
+      return null;
+    }
+
+    return parsedTime;
+  } catch (error: unknown) {
+    safeLogError('AUTO_LOCK_BACKGROUND_TIME_READ', error);
     return null;
   }
-
-  return parsedTime;
 };
 
 export const isAutoLockDue = async () => {
@@ -172,11 +191,29 @@ export const useAutoLock = () => {
       try {
         lockingRef.current = true;
 
-        await AsyncStorage.setItem('vaultLocked', 'true');
-        await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+        const storageResults = await Promise.allSettled([
+          AsyncStorage.setItem('vaultLocked', 'true'),
+          AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY),
+        ]);
 
-        await logout();
+        storageResults.forEach((result) => {
+          if (result.status === 'rejected') {
+            safeLogError('AUTO_LOCK_STORAGE', result.reason);
+          }
+        });
 
+        /*
+         * Auto-lock is a local privacy boundary, not a remote sign-out.
+         * Keep the authenticated device session, biometric credential, push
+         * registration, and trusted-device state intact. Only discard
+         * in-memory sensitive data before showing the unlock screen.
+         */
+        clearOfflineVaultMemoryCache();
+        api.clearCache?.();
+
+        router.replace('/signin');
+      } catch (error: unknown) {
+        safeLogError('AUTO_LOCK_EXECUTION', error);
         router.replace('/signin');
       } finally {
         lockingRef.current = false;
@@ -188,10 +225,14 @@ export const useAutoLock = () => {
   const markAppLeftAt = useCallback(async () => {
     if (!shouldUseAutoLock(pathname)) return;
 
-    const existing = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
+    try {
+      const existing = await AsyncStorage.getItem(LAST_BACKGROUND_AT_KEY);
 
-    if (!existing) {
-      await AsyncStorage.setItem(LAST_BACKGROUND_AT_KEY, String(Date.now()));
+      if (!existing) {
+        await AsyncStorage.setItem(LAST_BACKGROUND_AT_KEY, String(Date.now()));
+      }
+    } catch (error: unknown) {
+      safeLogError('AUTO_LOCK_BACKGROUND_MARK', error);
     }
   }, [pathname]);
 
@@ -199,47 +240,52 @@ export const useAutoLock = () => {
     if (!mountedRef.current) return;
     if (!shouldUseAutoLock(pathname)) return;
 
-    const lastBackgroundAt = await getStoredBackgroundTime();
+    try {
+      const lastBackgroundAt = await getStoredBackgroundTime();
 
-    if (!lastBackgroundAt) return;
+      if (!lastBackgroundAt) return;
 
-    const timeout = await getAutoLockTimeout();
-    const timeAway = Date.now() - lastBackgroundAt;
-    const shouldLock = timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
+      const timeout = await getAutoLockTimeout();
+      const timeAway = Date.now() - lastBackgroundAt;
+      const shouldLock = timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
 
-    /*
-     * Always clear the old timestamp after checking it. If the app comes back
-     * before the timeout, the next background event will store a fresh time.
-     * If the timeout expired, lockVault() will also keep the vault locked.
-     */
-    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+      /*
+       * Always clear the old timestamp after checking it. If the app comes back
+       * before the timeout, the next background event will store a fresh time.
+       */
+      await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY).catch((error: unknown) => {
+        safeLogError('AUTO_LOCK_BACKGROUND_CLEAR', error);
+      });
 
-    if (shouldLock) {
-      await lockVault();
+      if (shouldLock) {
+        await lockVault();
+      }
+    } catch (error: unknown) {
+      safeLogError('AUTO_LOCK_RESUME_CHECK', error);
     }
   }, [lockVault, pathname]);
 
   const checkColdStartShouldLock = useCallback(async () => {
     if (!mountedRef.current) return;
 
-    const lastBackgroundAt = await getStoredBackgroundTime();
-    if (!lastBackgroundAt) return;
+    try {
+      const lastBackgroundAt = await getStoredBackgroundTime();
+      if (!lastBackgroundAt) return;
 
-    const timeout = await getAutoLockTimeout();
-    const timeAway = Math.max(0, Date.now() - lastBackgroundAt);
-    const shouldLock =
-      timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
+      const timeout = await getAutoLockTimeout();
+      const timeAway = Math.max(0, Date.now() - lastBackgroundAt);
+      const shouldLock =
+        timeout === AUTO_LOCK_ON_APP_CLOSE || timeAway >= timeout;
 
-    /*
-     * Android may kill the JavaScript process while the app is in the
-     * background. The persisted timestamp is therefore the only reliable way
-     * to honour the user's numeric timeout after a cold resume. Clear it only
-     * after the elapsed time has been evaluated.
-     */
-    await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY);
+      await AsyncStorage.removeItem(LAST_BACKGROUND_AT_KEY).catch((error: unknown) => {
+        safeLogError('AUTO_LOCK_COLD_MARKER_CLEAR', error);
+      });
 
-    if (shouldLock) {
-      await lockVault({ force: true });
+      if (shouldLock) {
+        await lockVault({ force: true });
+      }
+    } catch (error: unknown) {
+      safeLogError('AUTO_LOCK_COLD_START_CHECK', error);
     }
   }, [lockVault]);
 
@@ -250,28 +296,39 @@ export const useAutoLock = () => {
      * Resolve a marker left behind by a killed/swiped-away process. Both the
      * explicit app-close option and elapsed numeric timeouts are enforced.
      */
-    checkColdStartShouldLock();
+    void checkColdStartShouldLock().catch((error: unknown) => {
+      safeLogError('AUTO_LOCK_INITIAL_CHECK', error);
+    });
 
-    const subscription = AppState.addEventListener('change', async (nextState) => {
-      const previousState = appState.current;
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      void (async () => {
+        try {
+          const previousState = appState.current;
 
-      const appWasActive = previousState === 'active';
-      const appLeftScreen =
-        nextState === 'inactive' || nextState === 'background';
+          /*
+           * Treat only a real background transition as leaving Guardian.
+           * Android permission sheets, biometric prompts, and other system
+           * dialogs can briefly report `inactive`; those must not trigger the
+           * user's auto-lock policy or imitate a remote lock.
+           */
+          const appEnteredBackground =
+            previousState !== 'background' && nextState === 'background';
+          const appReturnedFromBackground =
+            previousState === 'background' && nextState === 'active';
 
-      const appReturned =
-        (previousState === 'inactive' || previousState === 'background') &&
-        nextState === 'active';
+          if (appEnteredBackground) {
+            await markAppLeftAt();
+          }
 
-      if (appWasActive && appLeftScreen) {
-        await markAppLeftAt();
-      }
-
-      if (appReturned) {
-        await checkIfShouldLock();
-      }
-
-      appState.current = nextState;
+          if (appReturnedFromBackground) {
+            await checkIfShouldLock();
+          }
+        } catch (error: unknown) {
+          safeLogError('AUTO_LOCK_APP_STATE', error);
+        } finally {
+          appState.current = nextState;
+        }
+      })();
     });
 
     return () => {

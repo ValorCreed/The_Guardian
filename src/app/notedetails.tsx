@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -24,10 +23,13 @@ import { findOfflineNote, isOfflineReadableError, loadOfflineVaultSnapshot } fro
 import { decryptJson, encryptJson } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
 export default function NoteDetailsScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
   const { id, returnTab, mode } = useLocalSearchParams<{
@@ -104,7 +106,7 @@ export default function NoteDetailsScreen() {
         }
       }
 
-      Alert.alert('Error', error.message || 'Could not load SecureNote.');
+      screenAlert('Error', error.message || 'Could not load SecureNote.');
     } finally {
       setLoading(false);
     }
@@ -115,7 +117,7 @@ export default function NoteDetailsScreen() {
   }, [id, mode]);
 
   const showOfflineWriteWarning = () => {
-    Alert.alert(
+    screenAlert(
       'Offline mode',
       'Only this note’s title and category are stored in the offline item list. Its secret content, editing, and deleting will be available again when the server reconnects.'
     );
@@ -124,7 +126,7 @@ export default function NoteDetailsScreen() {
   const copyContent = async () => {
     if (!content) return;
     await setSecureClipboard(content);
-    Alert.alert('Copied', getSecureClipboardMessage('SecureNote'));
+    screenAlert('Copied', getSecureClipboardMessage('SecureNote'));
   };
 
   const saveChanges = async () => {
@@ -136,12 +138,12 @@ export default function NoteDetailsScreen() {
     if (!note || saving) return;
 
     if (!editTitle.trim()) {
-      Alert.alert('Missing title', 'Please enter a note title.');
+      screenAlert('Missing title', 'Please enter a note title.');
       return;
     }
 
     if (!editContent.trim()) {
-      Alert.alert('Missing content', 'Please enter note content.');
+      screenAlert('Missing content', 'Please enter note content.');
       return;
     }
 
@@ -157,10 +159,10 @@ export default function NoteDetailsScreen() {
       setNote(updated);
       setContent(editContent.trim());
       setEditing(false);
-      Alert.alert('Updated', 'SecureNote updated.');
+      screenAlert('Updated', 'SecureNote updated.');
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Update failed', error.message || 'Could not update SecureNote.');
+      screenAlert('Update failed', error.message || 'Could not update SecureNote.');
     } finally {
       setSaving(false);
     }
@@ -174,7 +176,7 @@ export default function NoteDetailsScreen() {
 
     if (!note) return;
 
-    Alert.alert(
+    screenAlert(
       'Delete SecureNote?',
       'This note will be permanently deleted. This cannot be undone.',
       [
@@ -185,12 +187,12 @@ export default function NoteDetailsScreen() {
           onPress: async () => {
             try {
               await requestApi.deleteSecureNote(note.id);
-              Alert.alert('Deleted', 'SecureNote deleted.', [
+              screenAlert('Deleted', 'SecureNote deleted.', [
                 { text: 'OK', onPress: goBackToVaultNotes },
               ]);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Delete failed', error.message || 'Could not delete SecureNote.');
+              screenAlert('Delete failed', error.message || 'Could not delete SecureNote.');
             }
           },
         },
@@ -356,29 +358,71 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
       elevation: 2,},
-    skeletonNoteIcon: { width: 74, height: 74, borderRadius: 24, marginBottom: 16 },
+    skeletonNoteIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 74, height: 74, borderRadius: 24, marginBottom: 16 },
     skeletonTitle: { width: '62%', height: 26, marginBottom: 10 },
     skeletonSubtitle: { width: '48%', height: 13 },
     skeletonNoteLine: { width: '82%', height: 14, marginBottom: 12 },
     skeletonNoteLineWide: { width: '100%', height: 14, marginBottom: 12 },
     skeletonNoteLineShort: { width: '55%', height: 14 },
-    skeletonButton: { width: '100%', height: 52, borderRadius: 999, marginTop: 20 },
-    skeletonButtonLight: { width: '100%', height: 52, borderRadius: 999, marginTop: 12 },
+    skeletonButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ width: '100%', height: 52, borderRadius: 999, marginTop: 20 },
+    skeletonButtonLight: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ width: '100%', height: 52, borderRadius: 999, marginTop: 12 },
 
     scrollContent: { paddingBottom: 30 },
     loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
     loadingText: { color: C.textSecondary, marginTop: 12, fontSize: 15 },
     header: { paddingHorizontal: 20, paddingTop: 96, paddingBottom: 20, alignItems: 'center' },
-    noteIcon: { width: 74, height: 74, borderRadius: 37, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+    noteIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 74, height: 74, borderRadius: 37, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
     title: { color: C.text, fontSize: 26, fontWeight: '900', textAlign: 'center' },
     subtitle: { color: C.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 5 },
     content: { paddingHorizontal: 20 },
     form: { paddingHorizontal: 20 },
     label: { fontSize: 14, color: C.text, fontWeight: '800', marginBottom: 8 },
-    input: { backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
+    input: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
     categoryRow: { gap: 8, paddingBottom: 18 },
-    categoryChip: { backgroundColor: C.backgroundElement, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: C.border },
-    categoryChipActive: { backgroundColor: C.primary, borderColor: C.primary },
+    categoryChip: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ backgroundColor: C.backgroundElement, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: C.border },
+    categoryChipActive: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
     pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
@@ -389,26 +433,32 @@ const makeStyles = (C: ThemeColors) =>
       elevation: 2,},
     pinnedTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     pinnedSub: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
-    noteInput: { minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
+    noteInput: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
     noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     noteText: { color: C.text, fontSize: 15, lineHeight: 23 },
     mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     mainBtnText: { color: '#fff', fontWeight: '900', fontSize: 15 },
     secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10, flexDirection: 'row', gap: 8
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     secondaryBtnText: { color: C.primary, fontWeight: '900', fontSize: 15 },
   });

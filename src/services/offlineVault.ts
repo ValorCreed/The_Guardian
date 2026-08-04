@@ -7,6 +7,7 @@ import type {
   VaultItem,
   VaultItemType,
 } from './api';
+import { AppOperationError, safeLogError } from '../utils/asyncResilience';
 
 const OFFLINE_VAULT_ENABLED_KEY = 'theguardian.offlineVault.enabled.v1';
 const OFFLINE_VAULT_NEEDS_REFRESH_KEY = 'theguardian.offlineVault.needsRefresh.v1';
@@ -98,6 +99,16 @@ type OfflineMemoryCache = {
 };
 
 let offlineMemoryCache: OfflineMemoryCache | null = null;
+
+const isDuressLocalSession = async () => {
+  try {
+    return (await AsyncStorage.getItem('guardianSessionMode')) === 'DURESS';
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_SESSION_MODE', error);
+    // Fail closed: never expose cached secrets when session state is unknown.
+    return true;
+  }
+};
 let legacySnapshotCleanupPromise: Promise<void> | null = null;
 
 const normalizeEmail = (email?: string | null) =>
@@ -415,7 +426,9 @@ const purgeLegacyPlaintextSnapshots = async () => {
     if (legacyKeys.length > 0) {
       await AsyncStorage.multiRemove(legacyKeys);
     }
-  })().catch(() => undefined);
+  })().catch((error: unknown) => {
+    safeLogError('OFFLINE_VAULT_LEGACY_CLEANUP', error);
+  });
 
   return legacySnapshotCleanupPromise;
 };
@@ -425,34 +438,65 @@ export const clearOfflineVaultMemoryCache = () => {
 };
 
 export const getCurrentUserEmail = async () => {
-  const email = await AsyncStorage.getItem('userEmail');
-  return normalizeEmail(email);
+  try {
+    const email = await AsyncStorage.getItem('userEmail');
+    return normalizeEmail(email);
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_EMAIL_READ', error);
+    return offlineMemoryCache?.email || 'anonymous';
+  }
 };
 
 export const isOfflineVaultEnabled = async () => {
-  await purgeLegacyPlaintextSnapshots();
-  const raw = await AsyncStorage.getItem(OFFLINE_VAULT_ENABLED_KEY);
-  return raw !== 'false';
+  try {
+    await purgeLegacyPlaintextSnapshots();
+    const raw = await AsyncStorage.getItem(OFFLINE_VAULT_ENABLED_KEY);
+    return raw !== 'false';
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_ENABLED_READ', error);
+    return true;
+  }
 };
 
 export const setOfflineVaultEnabled = async (enabled: boolean) => {
-  await AsyncStorage.setItem(OFFLINE_VAULT_ENABLED_KEY, String(enabled));
+  try {
+    await AsyncStorage.setItem(OFFLINE_VAULT_ENABLED_KEY, String(enabled));
 
-  if (!enabled) {
-    await clearOfflineVaultSnapshot();
+    if (!enabled) {
+      await clearOfflineVaultSnapshot();
+    }
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_ENABLED_SAVE', error);
+    throw new AppOperationError('Offline vault settings could not be saved.', {
+      code: 'STORAGE_UNAVAILABLE',
+    });
   }
 };
 
 export const markOfflineVaultStale = async () => {
-  await AsyncStorage.setItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY, 'true');
+  try {
+    await AsyncStorage.setItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY, 'true');
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_STALE_MARK', error);
+  }
 };
 
 export const markOfflineVaultFresh = async () => {
-  await AsyncStorage.removeItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY);
+  try {
+    await AsyncStorage.removeItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY);
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_FRESH_MARK', error);
+  }
 };
 
-export const isOfflineVaultStale = async () =>
-  (await AsyncStorage.getItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY)) === 'true';
+export const isOfflineVaultStale = async () => {
+  try {
+    return (await AsyncStorage.getItem(OFFLINE_VAULT_NEEDS_REFRESH_KEY)) === 'true';
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_STALE_READ', error);
+    return true;
+  }
+};
 
 export const createOfflineVaultSnapshot = async (input: {
   passwords?: VaultItem[];
@@ -485,7 +529,7 @@ export const createOfflineVaultSnapshot = async (input: {
   return mergeSecurePayload(metadata, secrets);
 };
 
-export const saveOfflineVaultSnapshot = async (
+const saveOfflineVaultSnapshotInternal = async (
   input:
     | OfflineVaultSnapshot
     | {
@@ -495,6 +539,11 @@ export const saveOfflineVaultSnapshot = async (
         notes?: SecureNoteResponse[];
       }
 ) => {
+  if (await isDuressLocalSession()) {
+    clearOfflineVaultMemoryCache();
+    return null;
+  }
+
   const enabled = await isOfflineVaultEnabled();
   if (!enabled) return null;
 
@@ -568,17 +617,41 @@ export const saveOfflineVaultSnapshot = async (
   return savedSnapshot;
 };
 
-export const getOfflineVaultMemorySnapshot = async (email?: string | null) => {
-  const currentEmail = normalizeEmail(email || (await getCurrentUserEmail()));
-
-  if (offlineMemoryCache?.email === currentEmail) {
-    return offlineMemoryCache.snapshot;
+export const saveOfflineVaultSnapshot = async (
+  input: Parameters<typeof saveOfflineVaultSnapshotInternal>[0]
+) => {
+  try {
+    return await saveOfflineVaultSnapshotInternal(input);
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_SAVE', error);
+    throw new AppOperationError(
+      'The offline copy could not be updated. Your online vault is unchanged.',
+      { code: 'STORAGE_UNAVAILABLE' }
+    );
   }
-
-  return null;
 };
 
-export const loadOfflineVaultSnapshot = async (email?: string | null) => {
+export const getOfflineVaultMemorySnapshot = async (email?: string | null) => {
+  try {
+    if (await isDuressLocalSession()) return null;
+    const currentEmail = normalizeEmail(email || (await getCurrentUserEmail()));
+
+    if (offlineMemoryCache?.email === currentEmail) {
+      return offlineMemoryCache.snapshot;
+    }
+
+    return null;
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_MEMORY_READ', error);
+    return null;
+  }
+};
+
+const loadOfflineVaultSnapshotInternal = async (email?: string | null) => {
+  if (await isDuressLocalSession()) {
+    clearOfflineVaultMemoryCache();
+    return null;
+  }
   await purgeLegacyPlaintextSnapshots();
   const currentEmail = normalizeEmail(email || (await getCurrentUserEmail()));
 
@@ -631,7 +704,26 @@ export const loadOfflineVaultSnapshot = async (email?: string | null) => {
   }
 };
 
-export const clearOfflineVaultSnapshot = async (email?: string | null) => {
+export const loadOfflineVaultSnapshot = async (email?: string | null) => {
+  const requestedEmail = normalizeEmail(email || '');
+
+  try {
+    return await loadOfflineVaultSnapshotInternal(email);
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_LOAD', error);
+
+    if (
+      offlineMemoryCache &&
+      (!requestedEmail || offlineMemoryCache.email === requestedEmail)
+    ) {
+      return offlineMemoryCache.snapshot;
+    }
+
+    return null;
+  }
+};
+
+const clearOfflineVaultSnapshotInternal = async (email?: string | null) => {
   const currentEmail = normalizeEmail(email || (await getCurrentUserEmail()));
 
   await Promise.all([
@@ -650,7 +742,34 @@ export const clearOfflineVaultSnapshot = async (email?: string | null) => {
   clearOfflineVaultMemoryCache();
 };
 
-export const getOfflineVaultStatus = async (): Promise<OfflineVaultStatus> => {
+export const clearOfflineVaultSnapshot = async (email?: string | null) => {
+  try {
+    await clearOfflineVaultSnapshotInternal(email);
+  } catch (error: unknown) {
+    clearOfflineVaultMemoryCache();
+    safeLogError('OFFLINE_VAULT_CLEAR', error);
+    throw new AppOperationError('The offline copy could not be cleared.', {
+      code: 'STORAGE_UNAVAILABLE',
+    });
+  }
+};
+
+const getOfflineVaultStatusInternal = async (): Promise<OfflineVaultStatus> => {
+  if (await isDuressLocalSession()) {
+    return {
+      enabled: false,
+      hasSnapshot: false,
+      needsRefresh: false,
+      metadataOnly: true,
+      secureSecretsAvailable: false,
+      savedAt: null,
+      passwordCount: 0,
+      cardCount: 0,
+      documentCount: 0,
+      noteCount: 0,
+      totalCount: 0,
+    };
+  }
   const enabled = await isOfflineVaultEnabled();
   const snapshot = await loadOfflineVaultSnapshot();
   const needsRefresh = await isOfflineVaultStale();
@@ -673,6 +792,33 @@ export const getOfflineVaultStatus = async (): Promise<OfflineVaultStatus> => {
     noteCount,
     totalCount: passwordCount + cardCount + documentCount + noteCount,
   };
+};
+
+export const getOfflineVaultStatus = async (): Promise<OfflineVaultStatus> => {
+  try {
+    return await getOfflineVaultStatusInternal();
+  } catch (error: unknown) {
+    safeLogError('OFFLINE_VAULT_STATUS', error);
+    const snapshot = offlineMemoryCache?.snapshot || null;
+    const passwordCount = snapshot?.passwords?.length || 0;
+    const cardCount = snapshot?.cards?.length || 0;
+    const documentCount = snapshot?.documents?.length || 0;
+    const noteCount = snapshot?.notes?.length || 0;
+
+    return {
+      enabled: true,
+      hasSnapshot: Boolean(snapshot),
+      needsRefresh: true,
+      metadataOnly: snapshot?.metadataOnly ?? true,
+      secureSecretsAvailable: snapshot?.secureSecretsAvailable ?? false,
+      savedAt: snapshot?.savedAt || null,
+      passwordCount,
+      cardCount,
+      documentCount,
+      noteCount,
+      totalCount: passwordCount + cardCount + documentCount + noteCount,
+    };
+  }
 };
 
 export const findOfflinePassword = async (id: number | string) => {

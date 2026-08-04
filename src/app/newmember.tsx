@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -38,6 +37,7 @@ import {
   hapticWarning,
   hapticSuccess,
 } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type DocumentOption = {
   id: number;
@@ -96,6 +96,8 @@ const toggleSelection = (
 };
 
 export default function NewMemberScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -175,7 +177,7 @@ export default function NewMemberScreen() {
     const active = subscription?.active !== false;
 
     if (plan !== 'FAMILY' || !active) {
-      Alert.alert(
+      screenAlert(
         'Family plan required',
         'This account is not currently recognized as an active Family plan account.'
       );
@@ -192,13 +194,13 @@ export default function NewMemberScreen() {
 
     if (!cleanEmail) {
       hapticWarning();
-      Alert.alert('Missing email', 'Enter the email of the user you want to add.');
+      screenAlert('Missing email', 'Enter the email of the user you want to add.');
       return;
     }
 
     if (selectedCount === 0) {
       hapticWarning();
-      Alert.alert(
+      screenAlert(
         'Choose specific items',
         'Select at least one password, card, document, or SecureNote to share.'
       );
@@ -220,7 +222,7 @@ export default function NewMemberScreen() {
 
         if (lookupStatus === 404 || lookupCode === 'ACCOUNT_NOT_FOUND') {
           hapticWarning();
-          Alert.alert(
+          screenAlert(
             'Account not found',
             'That email is not registered on The Guardian. Ask the person to create an account first.'
           );
@@ -229,7 +231,7 @@ export default function NewMemberScreen() {
 
         if (lookupStatus === 403 || lookupCode === 'FAMILY_PLAN_REQUIRED') {
           hapticWarning();
-          Alert.alert('Family plan required', 'Only active Family plan users can add members.');
+          screenAlert('Family plan required', 'Only active Family plan users can add members.');
           return;
         }
 
@@ -249,7 +251,7 @@ export default function NewMemberScreen() {
       requestApi.clearCache();
 
       hapticSuccess();
-      Alert.alert(
+      screenAlert(
         'Member added',
         `${selectedCount} selected vault item${selectedCount === 1 ? '' : 's'} can now be viewed by this member.`,
         [{ text: 'OK', onPress: () => router.replace('/family') }]
@@ -265,7 +267,7 @@ export default function NewMemberScreen() {
             : error?.message || 'Please try again.';
 
       hapticWarning();
-      Alert.alert(status === 404 ? 'Account not found' : 'Could not add member', message);
+      screenAlert(status === 404 ? 'Account not found' : 'Could not add member', message);
     } finally {
       submittingRef.current = false;
       setLoading(false);

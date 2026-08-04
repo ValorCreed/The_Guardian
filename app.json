@@ -2,7 +2,7 @@
   "expo": {
     "name": "The Guardian",
     "slug": "guardian",
-    "version": "3.5(Beta)",
+    "version": "4.0.0",
     "orientation": "portrait",
     "scheme": "theguardian",
     "userInterfaceStyle": "automatic",
@@ -24,7 +24,12 @@
       "predictiveBackGestureEnabled": true,
       "package": "com.vault.theguardian",
       "runtimeVersion": "1.0.0",
-      "allowBackup": false
+      "allowBackup": false,
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "output": "static",
@@ -35,7 +40,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F8FAF9",
+          "backgroundColor": "#FFFFFF",
           "image": "./src/assets/GuardianSplashNativeIcon.png",
           "imageWidth": 220,
           "resizeMode": "contain",
@@ -56,6 +61,14 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Allow The Guardian to use Face ID for secure biometric sign-in."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./src/assets/GuardianNotificationMonochrome.png",
+          "color": "#0B8FAC",
+          "defaultChannel": "guardian-security"
         }
       ]
     ],

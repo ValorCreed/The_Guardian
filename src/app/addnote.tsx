@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,10 +17,11 @@ import { useRouter } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import AddScreenEntrance from '../components/AddScreenEntrance';
-import { api } from '../services/api';
+import { api, isDuressSession } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -30,6 +30,8 @@ const FREE_SECURE_NOTE_LIMIT = 5;
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
 export default function AddNoteScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
   const { colors: C } = useAppTheme();
@@ -53,12 +55,13 @@ export default function AddNoteScreen() {
     const loadLimits = async () => {
       try {
         setChecking(true);
-        const [subscription, notes] = await Promise.all([
-          api
-            .getSubscriptionFresh()
-            .catch(() => requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const }))),
-          requestApi.getSecureNotes().catch(() => []),
-        ]);
+        const duress = await isDuressSession();
+        const notes = await requestApi.getSecureNotes().catch(() => []);
+        const subscription = duress
+          ? ({ plan: 'PREMIUM' as const })
+          : await api
+              .getSubscriptionFresh()
+              .catch(() => requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const })));
         setPlan((subscription.plan || 'FREE') as Plan);
         setNoteCount(notes.length || 0);
       } finally {
@@ -70,7 +73,7 @@ export default function AddNoteScreen() {
   }, []);
 
   const showUpgradeAlert = () => {
-    Alert.alert(
+    screenAlert(
       'SecureNotes limit reached',
       `Free accounts can save up to ${FREE_SECURE_NOTE_LIMIT} SecureNotes. Upgrade to Premium or Family for unlimited SecureNotes.`,
       [
@@ -89,12 +92,12 @@ export default function AddNoteScreen() {
     }
 
     if (!title.trim()) {
-      Alert.alert('Missing title', 'Please enter a title for this SecureNote.');
+      screenAlert('Missing title', 'Please enter a title for this SecureNote.');
       return;
     }
 
     if (!content.trim()) {
-      Alert.alert('Missing note', 'Please enter the note content.');
+      screenAlert('Missing note', 'Please enter the note content.');
       return;
     }
 
@@ -108,7 +111,7 @@ export default function AddNoteScreen() {
         pinned,
       });
 
-      Alert.alert('Saved', 'SecureNote saved to your vault.', [
+      screenAlert('Saved', 'SecureNote saved to your vault.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
@@ -120,7 +123,7 @@ export default function AddNoteScreen() {
         return;
       }
 
-      Alert.alert('Save failed', message);
+      screenAlert('Save failed', message);
     } finally {
       setSaving(false);
     }
@@ -273,15 +276,39 @@ const makeStyles = (C: ThemeColors) =>
     loadingText: { color: C.textSecondary, marginTop: 10, fontSize: 14 },
     scrollContent: { paddingBottom: 30 },
     header: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 20, paddingTop: 94, paddingBottom: 18 },
-    noteIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    noteIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 56, height: 56, borderRadius: 28, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     title: { color: C.text, fontSize: 25, fontWeight: '900' },
     subTitle: { color: C.textSecondary, fontSize: 13, marginTop: 3, fontWeight: '700' },
     form: { paddingHorizontal: 20 },
     label: { fontSize: 14, color: C.text, fontWeight: '800', marginBottom: 8 },
-    input: { backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
+    input: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
     categoryRow: { gap: 8, paddingBottom: 18 },
-    categoryChip: { backgroundColor: C.backgroundElement, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: C.border },
-    categoryChipActive: { backgroundColor: C.primary, borderColor: C.primary },
+    categoryChip: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ backgroundColor: C.backgroundElement, borderRadius: 999, paddingHorizontal: 14, paddingVertical: 9, borderWidth: 1, borderColor: C.border },
+    categoryChipActive: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
     pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
@@ -292,26 +319,38 @@ const makeStyles = (C: ThemeColors) =>
       elevation: 2,},
     pinnedTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     pinnedSub: { color: C.textSecondary, fontSize: 12, marginTop: 3, lineHeight: 17 },
-    noteInput: { minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
+    noteInput: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
     noticeBox: { backgroundColor: C.actionCard, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     noticeText: { color: C.primary, fontSize: 13, fontWeight: '800', flex: 1, lineHeight: 18 },
     saveBtn: { backgroundColor: C.backgroundbutton, borderRadius: 999, minHeight: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, marginHorizontal: 20, marginTop: 4
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
     disabledBtn: { opacity: 0.7 },
     lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },
     noteIconLarge: { width: 86, height: 86, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
     lockedTitle: { color: C.text, fontSize: 30, fontWeight: '900', marginBottom: 10 },
     lockedSubtitle: { color: C.textSecondary, fontSize: 15, lineHeight: 23, marginBottom: 24 },
-    notNowBtn: { paddingVertical: 14, alignItems: 'center' },
+    notNowBtn: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ paddingVertical: 14, alignItems: 'center' },
     notNowText: { color: C.textSecondary, fontSize: 15, fontWeight: '800' },
   });

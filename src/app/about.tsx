@@ -21,7 +21,7 @@ import {
 import { useAppTheme } from '../context/ThemeContext';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const APP_VERSION = '3.5 Beta';
+const APP_VERSION = '4.0.0';
 
 const Developers = [
   {
@@ -115,7 +115,7 @@ export default function AboutScreen() {
           <FeatureRow
             icon={<ShieldCheck size={21} color={C.primary} />}
             title="Security focused"
-            subtitle="Built with authentication, encryption, biometrics, and auto-lock features."
+            subtitle="Built with authentication, encryption, biometrics, auto-lock features and other security measures to protect your data."
             styles={styles}
           />
         </View>
@@ -131,7 +131,7 @@ export default function AboutScreen() {
             <Text style={styles.companyName}>TheGuardian.LLC</Text>
             <Text style={styles.companyText}>
               Product design, mobile development, backend development, and
-              security implementation.
+              a security focused organization.
             </Text>
           </View>
         </View>
@@ -204,6 +204,12 @@ const makeStyles = (C: any) =>
     },
 
     logoBox: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       marginBottom: 20,
     },
 
@@ -232,12 +238,18 @@ const makeStyles = (C: any) =>
       marginBottom: 26,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     versionIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 22,
@@ -279,10 +291,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     featureRow: {
       flexDirection: 'row',
@@ -291,6 +303,12 @@ const makeStyles = (C: any) =>
     },
 
     featureIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 42,
       height: 42,
       borderRadius: 21,
@@ -329,12 +347,18 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     companyIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 48,
       height: 48,
       borderRadius: 24,
@@ -364,6 +388,12 @@ const makeStyles = (C: any) =>
     },
 
     developerIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 38,
       height: 38,
       borderRadius: 19,

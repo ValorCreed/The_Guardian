@@ -15,6 +15,8 @@ import { checkPwnedPassword } from '../utils/pwnedPasswords';
 import {
   getSecurityScoreChangeVersion,
   scheduleIdleTask,
+  SECURITY_BACKUP_SNAPSHOT_PREFIX,
+  SECURITY_LAST_BACKUP_INVALIDATING_CHANGE_KEY,
   SECURITY_SCORE_NEEDS_SYNC_KEY,
   subscribeSecurityScoreChanges,
 } from '../services/securityScoreSync';
@@ -123,6 +125,60 @@ const emptyReport: SecurityReport = {
 
 const OLD_PASSWORD_DAYS = 180;
 const SHARED_PASSWORD_DETAIL_LIMIT = 25;
+const SECURITY_SERVER_DATA_TIMEOUT_MS = 12000;
+const BACKUP_FRESHNESS_MS = 30 * 24 * 60 * 60 * 1000;
+
+type SecurityBackupSnapshot = {
+  createdAt?: string;
+  passwordCount?: number;
+  cardCount?: number;
+  documentCount?: number;
+  familyMemberCount?: number;
+  totalItemCount?: number;
+};
+
+const readBackupSecuritySnapshot = async (email: string) => {
+  try {
+    const raw = await AsyncStorage.getItem(
+      `${SECURITY_BACKUP_SNAPSHOT_PREFIX}:${email || 'anonymous'}`
+    );
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object'
+      ? (parsed as SecurityBackupSnapshot)
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const isBackupSnapshotCurrent = (
+  backupStatus?: BackupStatusResponse | null,
+  snapshot?: SecurityBackupSnapshot | null,
+  lastInvalidatingChangeAt = 0
+) => {
+  if (!backupStatus || backupStatus.totalItemCount <= 0) return true;
+  if (!snapshot?.createdAt) return false;
+
+  const createdAt = new Date(snapshot.createdAt).getTime();
+  if (!Number.isFinite(createdAt) || createdAt <= 0) return false;
+  if (Date.now() - createdAt > BACKUP_FRESHNESS_MS) return false;
+  if (lastInvalidatingChangeAt > createdAt) return false;
+
+  return (
+    Number(snapshot.passwordCount || 0) === Number(backupStatus.passwordCount || 0) &&
+    Number(snapshot.cardCount || 0) === Number(backupStatus.cardCount || 0) &&
+    Number(snapshot.documentCount || 0) === Number(backupStatus.documentCount || 0) &&
+    Number(snapshot.familyMemberCount || 0) === Number(backupStatus.familyMemberCount || 0) &&
+    Number(snapshot.totalItemCount || 0) === Number(backupStatus.totalItemCount || 0)
+  );
+};
+
+const securityRequestOptions = (signal: AbortSignal) => ({
+  signal,
+  __guardianScreenRequest: true as const,
+});
 
 const cleanValue = (value?: string | null) => {
   if (!value) return '';
@@ -237,7 +293,8 @@ function addAccountIssues(
   settings?: { emailVerified: boolean; twoFactorEnabled: boolean },
   recoveryKitStatus?: RecoveryKitStatusResponse | null,
   backupStatus?: BackupStatusResponse | null,
-  plan: string = 'FREE'
+  plan: string = 'FREE',
+  backupCurrent = false
 ) {
   if (settings && !settings.emailVerified) {
     issues.unshift(
@@ -284,7 +341,7 @@ function addAccountIssues(
     );
   }
 
-  if (backupStatus && backupStatus.totalItemCount > 0 && plan !== 'FREE') {
+  if (backupStatus && backupStatus.totalItemCount > 0 && plan !== 'FREE' && !backupCurrent) {
     issues.push(
       makeIssue({
         id: 'backup-reminder',
@@ -301,7 +358,8 @@ function addAccountIssues(
 }
 
 async function loadSharedPasswordsForSecurity(
-  subscription?: SubscriptionResponse
+  subscription?: SubscriptionResponse,
+  signal?: AbortSignal
 ): Promise<VaultPasswordItem[]> {
   const plan = subscription?.plan || 'FREE';
   const isPremiumOrFamily = plan === 'PREMIUM' || plan === 'FAMILY';
@@ -309,11 +367,17 @@ async function loadSharedPasswordsForSecurity(
   if (!isPremiumOrFamily) return [];
 
   try {
-    const summaries = await api.getSharedPasswordItems?.();
+    const summaries = signal
+      ? await (api.getSharedPasswordItems as any)?.(securityRequestOptions(signal))
+      : await api.getSharedPasswordItems?.();
     const limitedSummaries = (summaries || []).slice(0, SHARED_PASSWORD_DETAIL_LIMIT);
 
     const details = await Promise.allSettled(
-      limitedSummaries.map((item: SharedPasswordItem) => api.getSharedPasswordItem(item.id))
+      limitedSummaries.map((item: SharedPasswordItem) =>
+        signal
+          ? (api.getSharedPasswordItem as any)(item.id, securityRequestOptions(signal))
+          : api.getSharedPasswordItem(item.id)
+      )
     );
 
     return details
@@ -331,12 +395,15 @@ async function loadSharedPasswordsForSecurity(
 
 
 async function loadFamilyMemberPasswordRisksForSecurity(
-  subscription?: SubscriptionResponse
+  subscription?: SubscriptionResponse,
+  signal?: AbortSignal
 ): Promise<FamilyMemberPasswordRisk[]> {
   if (subscription?.plan !== 'FAMILY') return [];
 
   try {
-    return (await api.getFamilyMemberPasswordRisks?.()) || [];
+    return (signal
+      ? await (api.getFamilyMemberPasswordRisks as any)?.(securityRequestOptions(signal))
+      : await api.getFamilyMemberPasswordRisks?.()) || [];
   } catch (error: any) {
     const status = error?.status;
     if (status !== 401) {
@@ -461,7 +528,8 @@ async function calculateSecurityReport(
   backupStatus?: BackupStatusResponse | null,
   recoveryKitStatus?: RecoveryKitStatusResponse | null,
   sharedPasswords: VaultPasswordItem[] = [],
-  familyMemberPasswordRisks: FamilyMemberPasswordRisk[] = []
+  familyMemberPasswordRisks: FamilyMemberPasswordRisk[] = [],
+  backupCurrent = false
 ): Promise<SecurityReport> {
   const ownPasswords = passwords.filter((item) => item && item.id !== undefined && item.id !== null);
   const familyPasswords = sharedPasswords.filter((item) => item && item.id !== undefined && item.id !== null);
@@ -660,13 +728,25 @@ async function calculateSecurityReport(
   reusedCount += familyMemberRiskCounts.reused;
   oldCount += familyMemberRiskCounts.old;
 
-  addAccountIssues(issues, settings, recoveryKitStatus, backupStatus, plan);
+  addAccountIssues(
+    issues,
+    settings,
+    recoveryKitStatus,
+    backupStatus,
+    plan,
+    backupCurrent
+  );
 
   const accountPenalty =
     (settings && !settings.emailVerified ? 8 : 0) +
     (settings && !settings.twoFactorEnabled ? 10 : 0) +
     (recoveryKitStatus && !recoveryKitStatus.created ? 18 : 0) +
-    (backupStatus && backupStatus.totalItemCount > 0 && plan !== 'FREE' ? 4 : 0);
+    (backupStatus &&
+    backupStatus.totalItemCount > 0 &&
+    plan !== 'FREE' &&
+    !backupCurrent
+      ? 4
+      : 0);
 
   const vaultPenalty =
     breachedCount * 18 +
@@ -813,26 +893,86 @@ async function loadReportFromServer(force = false) {
   }
 
   inFlight = (async () => {
-    const [passwords, subscription, settings, backupStatus, recoveryKitStatus] = await Promise.all([
-      api.getVaultItems(),
-      api.getSubscription().catch(() => ({ plan: 'FREE' as const })),
-      api.getSecuritySettings().catch(() => undefined),
-      api.getBackupStatus().catch(() => null),
-      api.getRecoveryKitStatus().catch(() => ({ created: false })),
-    ]);
+    const controller = new AbortController();
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-    const sharedPasswords = await loadSharedPasswordsForSecurity(subscription as SubscriptionResponse);
-    const familyMemberPasswordRisks = await loadFamilyMemberPasswordRisksForSecurity(subscription as SubscriptionResponse);
+    const serverDataTask = (async () => {
+      const options = securityRequestOptions(controller.signal);
+      const email = await getActiveEmail();
+      const [
+        passwords,
+        subscription,
+        settings,
+        backupStatus,
+        recoveryKitStatus,
+        backupSnapshot,
+        lastInvalidatingChangeRaw,
+      ] = await Promise.all([
+        (api.getVaultItems as any)(options),
+        (api.getSubscription as any)(options).catch(() => ({ plan: 'FREE' as const })),
+        (api.getSecuritySettings as any)(options).catch(() => undefined),
+        (api.getBackupStatus as any)(options).catch(() => null),
+        (api.getRecoveryKitStatus as any)(options).catch(() => ({ created: false })),
+        readBackupSecuritySnapshot(email),
+        AsyncStorage.getItem(
+          `${SECURITY_LAST_BACKUP_INVALIDATING_CHANGE_KEY}:${email}`
+        ).catch(() => null),
+      ]);
 
-    return calculateSecurityReport(
-      passwords as VaultPasswordItem[],
-      subscription as SubscriptionResponse,
-      settings,
-      backupStatus as BackupStatusResponse | null,
-      recoveryKitStatus as RecoveryKitStatusResponse | null,
-      sharedPasswords,
-      familyMemberPasswordRisks
-    );
+      const backupCurrent = isBackupSnapshotCurrent(
+        backupStatus as BackupStatusResponse | null,
+        backupSnapshot,
+        Number(lastInvalidatingChangeRaw || 0)
+      );
+
+      const sharedPasswords = await loadSharedPasswordsForSecurity(
+        subscription as SubscriptionResponse,
+        controller.signal
+      );
+      const familyMemberPasswordRisks = await loadFamilyMemberPasswordRisksForSecurity(
+        subscription as SubscriptionResponse,
+        controller.signal
+      );
+
+      return {
+        passwords,
+        subscription,
+        settings,
+        backupStatus,
+        recoveryKitStatus,
+        sharedPasswords,
+        familyMemberPasswordRisks,
+        backupCurrent,
+      };
+    })();
+
+    const timeoutTask = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        controller.abort();
+        const timeoutError = new Error(
+          'Security information could not be refreshed right now.'
+        );
+        timeoutError.name = 'SecurityScoreTimeoutError';
+        reject(timeoutError);
+      }, SECURITY_SERVER_DATA_TIMEOUT_MS);
+    });
+
+    try {
+      const serverData = await Promise.race([serverDataTask, timeoutTask]);
+
+      return calculateSecurityReport(
+        serverData.passwords as VaultPasswordItem[],
+        serverData.subscription as SubscriptionResponse,
+        serverData.settings,
+        serverData.backupStatus as BackupStatusResponse | null,
+        serverData.recoveryKitStatus as RecoveryKitStatusResponse | null,
+        serverData.sharedPasswords,
+        serverData.familyMemberPasswordRisks,
+        serverData.backupCurrent
+      );
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
   })().finally(() => {
     inFlight = null;
   });
@@ -896,6 +1036,7 @@ export const useSecurityScore = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncPending, setSyncPending] = useState(false);
   const refreshPromiseRef = useRef<Promise<SecurityReport> | null>(null);
+  const trailingRefreshRequestedRef = useRef(false);
 
   const applyReport = useCallback((nextReport: SecurityReport) => {
     setReport((currentReport) =>
@@ -938,6 +1079,9 @@ export const useSecurityScore = () => {
        * repeat cache writes, state commits, or loading transitions.
        */
       if (refreshPromiseRef.current) {
+        if (silent) {
+          trailingRefreshRequestedRef.current = true;
+        }
         return refreshPromiseRef.current;
       }
 
@@ -952,7 +1096,7 @@ export const useSecurityScore = () => {
             setLoading(true);
           }
 
-          const calculated = await loadReportFromServer(true);
+          const calculated = await loadReportFromServer(!silent);
           const previousMemoryReport =
             memoryEmail === email ? memoryReport : null;
           const reportChanged = !reportsMatch(
@@ -982,19 +1126,23 @@ export const useSecurityScore = () => {
             setSyncPending(true);
             /*
              * A second mutation landed while this calculation was running.
-             * Keep the dirty marker and queue one trailing silent scan so no
-             * password, 2FA, recovery, backup, family, or plan change is lost.
+             * Queue the trailing scan only after refreshPromiseRef is cleared;
+             * starting it here would reuse this same promise and leave stale
+             * recommendations visible.
              */
-            setTimeout(() => {
-              void refreshFromServer({ silent: true });
-            }, 0);
+            trailingRefreshRequestedRef.current = true;
           }
 
           applyReport(nextReport);
           return nextReport;
         } catch (error) {
           setSyncPending(false);
-          console.log('SECURITY SCORE ERROR:', error);
+          if (__DEV__) {
+            console.warn('[SECURITY_SCORE_REFRESH]', {
+              name: String((error as any)?.name || 'Error'),
+              code: String((error as any)?.code || 'SECURITY_REFRESH_FAILED'),
+            });
+          }
 
           const cached = await readCachedReport(email);
           if (cached) {
@@ -1022,6 +1170,13 @@ export const useSecurityScore = () => {
       } finally {
         if (refreshPromiseRef.current === refreshTask) {
           refreshPromiseRef.current = null;
+        }
+
+        if (trailingRefreshRequestedRef.current) {
+          trailingRefreshRequestedRef.current = false;
+          setTimeout(() => {
+            void refreshFromServer({ silent: true });
+          }, 0);
         }
       }
     },
@@ -1111,7 +1266,7 @@ export const useSecurityScore = () => {
     loading,
     syncing,
     pendingSync: syncPending,
-    updating: loading || syncing || syncPending,
+    updating: loading || syncing,
     reload: () => refreshFromServer({ silent: false }),
     reloadSilently: () => refreshFromServer({ silent: true }),
   };

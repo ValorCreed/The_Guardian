@@ -3,6 +3,8 @@ package com.vault.theguardian.autofill;
 import android.app.PendingIntent;
 import android.app.assist.AssistStructure;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.CancellationSignal;
 import android.service.autofill.AutofillService;
@@ -40,6 +42,7 @@ public class GuardianAutofillService extends AutofillService {
     public static final String EXTRA_SECURITY_CODE_IDS = "com.vault.theguardian.autofill.SECURITY_CODE_IDS";
     public static final String EXTRA_PACKAGE_NAME = "com.vault.theguardian.autofill.PACKAGE_NAME";
     public static final String EXTRA_WEB_DOMAIN = "com.vault.theguardian.autofill.WEB_DOMAIN";
+    public static final String EXTRA_APP_LABEL = "com.vault.theguardian.autofill.APP_LABEL";
 
     @Override
     public void onFillRequest(
@@ -143,7 +146,7 @@ public class GuardianAutofillService extends AutofillService {
             String target = !metadata.webDomain.isEmpty()
                     ? metadata.webDomain
                     : metadata.packageName;
-            String title = readableTarget(target);
+            String title = readableTarget(metadata);
 
             GuardianAutofillCredential credential = new GuardianAutofillCredential(
                     "",
@@ -213,6 +216,7 @@ public class GuardianAutofillService extends AutofillService {
         intent.putParcelableArrayListExtra(EXTRA_SECURITY_CODE_IDS, fields.securityCodeIds);
         intent.putExtra(EXTRA_PACKAGE_NAME, metadata.packageName);
         intent.putExtra(EXTRA_WEB_DOMAIN, metadata.webDomain);
+        intent.putExtra(EXTRA_APP_LABEL, readableTarget(metadata));
         return intent;
     }
 
@@ -256,8 +260,10 @@ public class GuardianAutofillService extends AutofillService {
             if (!value.isEmpty()) {
                 if (kind == FieldKind.USERNAME && captured.username.isEmpty()) {
                     captured.username = value;
-                } else if (kind == FieldKind.PASSWORD) {
+                } else if (kind == FieldKind.PASSWORD && isUsablePasswordValue(value)) {
                     // The final non-empty password is normally the new/confirmed password.
+                    // Ignore masked accessibility text such as "••••••" so it is never
+                    // committed to the vault as though it were the real password.
                     captured.password = value;
                 }
             }
@@ -365,13 +371,89 @@ public class GuardianAutofillService extends AutofillService {
         return builder.toString();
     }
 
-    private String readableTarget(String target) {
-        String clean = target == null ? "" : target.trim();
+    private String readableTarget(PageMetadata metadata) {
+        if (metadata != null && !metadata.webDomain.isEmpty()) {
+            return readableDomain(metadata.webDomain);
+        }
+
+        String packageName = metadata == null ? "" : metadata.packageName;
+        String applicationLabel = getApplicationLabel(packageName);
+        if (!applicationLabel.isEmpty()) return applicationLabel;
+
+        return humanizePackageName(packageName);
+    }
+
+    private String getApplicationLabel(String packageName) {
+        String cleanPackage = packageName == null ? "" : packageName.trim();
+        if (cleanPackage.isEmpty()) return "";
+
+        try {
+            PackageManager packageManager = getPackageManager();
+            ApplicationInfo applicationInfo = packageManager.getApplicationInfo(cleanPackage, 0);
+            CharSequence label = packageManager.getApplicationLabel(applicationInfo);
+            return label == null ? "" : label.toString().trim();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String readableDomain(String target) {
+        String clean = target == null ? "" : target.trim().toLowerCase(Locale.ROOT);
         if (clean.isEmpty()) return "Saved login";
-        clean = clean.replace("https://", "").replace("http://", "");
+
+        clean = clean.replace("https://", "").replace("http://", "").replace("www.", "");
         int slash = clean.indexOf('/');
         if (slash >= 0) clean = clean.substring(0, slash);
-        return clean;
+
+        String[] parts = clean.split("\\.");
+        if (parts.length == 0) return "Saved login";
+
+        int candidateIndex = Math.max(0, parts.length - 2);
+        String candidate = parts[candidateIndex];
+        if ((candidate.equals("accounts") || candidate.equals("login") || candidate.equals("auth"))
+                && candidateIndex > 0) {
+            candidate = parts[candidateIndex - 1];
+        }
+
+        return titleCase(candidate);
+    }
+
+    private String humanizePackageName(String packageName) {
+        String clean = safeLower(packageName);
+        if (clean.isEmpty()) return "Saved login";
+        if (clean.equals("host.exp.exponent")) return "Expo Go";
+
+        String[] parts = clean.split("\\.");
+        String candidate = parts.length == 0 ? clean : parts[parts.length - 1];
+        if ((candidate.equals("app") || candidate.equals("mobile") || candidate.equals("android"))
+                && parts.length > 1) {
+            candidate = parts[parts.length - 2];
+        }
+
+        return titleCase(candidate);
+    }
+
+    private String titleCase(String value) {
+        String clean = value == null ? "" : value.trim().replace('_', ' ').replace('-', ' ');
+        if (clean.isEmpty()) return "Saved login";
+
+        StringBuilder result = new StringBuilder();
+        for (String part : clean.split("\\s+")) {
+            if (part.isEmpty()) continue;
+            if (result.length() > 0) result.append(' ');
+            result.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) result.append(part.substring(1).toLowerCase(Locale.ROOT));
+        }
+        return result.length() == 0 ? "Saved login" : result.toString();
+    }
+
+    private boolean isUsablePasswordValue(String value) {
+        String clean = value == null ? "" : value.trim();
+        if (clean.isEmpty()) return false;
+
+        // Android and some WebViews expose redacted password text using only
+        // repeated mask glyphs. Real mixed passwords must continue to pass.
+        return !clean.matches("^[•●▪◦*\\u2022\\u25CF\\u25AA]+$");
     }
 
     private String safeLower(String value) {

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "858365187972",
+    "project_id": "the-guardian-ae841",
+    "storage_bucket": "the-guardian-ae841.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:858365187972:android:f388f2a1ead0f27392afd1",
+        "android_client_info": {
+          "package_name": "com.vault.theguardian"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBYpfp96t1jFNZBotnwefHSF5p8oY_HQmo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

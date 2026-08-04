@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -19,7 +18,7 @@ import type { ThemePalette } from '../constants/theme';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import AddScreenEntrance from '../components/AddScreenEntrance';
 import { hapticMedium, hapticWarning } from '../utils/haptics';
-import { api } from '../services/api';
+import { api, isDuressSession } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptJson } from '../utils/vaultcrypto';
 import CardBrandLogo from '../components/CardBrandLogo';
@@ -29,12 +28,15 @@ import {
 } from '../utils/cardBrand';
 import { formatExpiryInput, validateCardForm } from '../utils/cardValidation';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
 const FREE_CARD_LIMIT = 3;
 
 const AddCardScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
   const { colors: C } = useAppTheme();
@@ -80,14 +82,15 @@ const AddCardScreen = () => {
       try {
         setCheckingAccess(true);
 
-        const [subscription, savedCards] = await Promise.all([
-          api
-            .getSubscriptionFresh()
-            .catch(() =>
-              requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const }))
-            ),
-          requestApi.getCards().catch(() => []),
-        ]);
+        const duress = await isDuressSession();
+        const savedCards = await requestApi.getCards().catch(() => []);
+        const subscription = duress
+          ? ({ plan: 'PREMIUM' as const })
+          : await api
+              .getSubscriptionFresh()
+              .catch(() =>
+                requestApi.getSubscription().catch(() => ({ plan: 'FREE' as const }))
+              );
 
         if (!mounted) return;
 
@@ -118,7 +121,7 @@ const AddCardScreen = () => {
 
   const showUpgradeAlert = () => {
     hapticWarning();
-    Alert.alert(
+    screenAlert(
       'Card limit reached',
       `Free accounts can save up to ${FREE_CARD_LIMIT} cards. Upgrade to Premium or Family for unlimited card storage.`,
       [
@@ -163,7 +166,7 @@ const AddCardScreen = () => {
     });
 
     if (!validation.valid) {
-      Alert.alert(
+      screenAlert(
         validation.errorTitle || 'Invalid card details',
         validation.errorMessage || 'Check the card details and try again.'
       );
@@ -189,7 +192,7 @@ const AddCardScreen = () => {
 
       void syncGuardianAutofillCache().catch(() => undefined);
 
-      Alert.alert('Saved', `${savedCardName} saved securely to your vault.`, [
+      screenAlert('Saved', `${savedCardName} saved securely to your vault.`, [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
@@ -200,7 +203,7 @@ const AddCardScreen = () => {
         message.toUpperCase().includes('PLAN_LIMIT_REACHED') ||
         message.toLowerCase().includes('limit')
       ) {
-        Alert.alert(
+        screenAlert(
           'Card limit reached',
           `Free accounts can save up to ${FREE_CARD_LIMIT} cards. Upgrade to Premium or Family for unlimited card storage.`,
           [
@@ -214,7 +217,7 @@ const AddCardScreen = () => {
         return;
       }
 
-      Alert.alert('Save failed', message);
+      screenAlert('Save failed', message);
     } finally {
       setSaving(false);
     }

@@ -1,4 +1,5 @@
 export type ThemePalette = {
+  surfaceElevated(surfaceElevated: any, backgroundElement: string, surface: string): unknown;
   text: string;
   textSecondary: string;
   textPrimary: string;

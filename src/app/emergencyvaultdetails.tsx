@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -22,6 +21,8 @@ import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelab
 import { decryptJson, decryptPassword, maskCardNumber, maskPassword } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 type CardPayload = {
   cardholderName: string;
@@ -94,6 +95,8 @@ const formatCard = (value?: string) => {
 };
 
 export default function EmergencyVaultDetailsScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { requestId, itemId, itemType, ownerName, ownerEmail } = useLocalSearchParams<{
     requestId: string;
@@ -122,7 +125,7 @@ export default function EmergencyVaultDetailsScreen() {
       setItem(data);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not open emergency item', error.message || 'Please try again.');
+      screenAlert('Could not open emergency item', error.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -135,7 +138,7 @@ export default function EmergencyVaultDetailsScreen() {
   const copyValue = async (label: string, value?: string) => {
     if (!value) return;
     await setSecureClipboard(value);
-    Alert.alert('Copied', getSecureClipboardMessage(label));
+    screenAlert('Copied', getSecureClipboardMessage(label));
   };
 
   const card = useMemo<CardPayload>(() => {
@@ -181,7 +184,7 @@ export default function EmergencyVaultDetailsScreen() {
         await FileSystem.writeAsStringAsync(uri, base64Content, {
           encoding: FileSystem.EncodingType.Base64,
         });
-        Alert.alert('Downloaded', 'The document was saved successfully.');
+        screenAlert('Downloaded', 'The document was saved successfully.');
         return;
       }
 
@@ -191,17 +194,19 @@ export default function EmergencyVaultDetailsScreen() {
           dialogTitle: downloaded.fileName || safeName,
         });
       } else {
-        Alert.alert('Saved temporarily', downloaded.uri);
+        screenAlert('Saved temporarily', downloaded.uri);
       }
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Download failed', error.message || 'Could not download document.');
+      screenAlert('Download failed', error.message || 'Could not download document.');
     } finally {
       setDownloading(false);
     }
   };
 
-  const title = item?.title || item?.documentName || item?.fileName || 'Emergency item';
+  const title = item?.itemType === 'PASSWORD'
+    ? getFriendlyVaultTitle(item?.title, item?.website, 'Saved login')
+    : item?.title || item?.documentName || item?.fileName || 'Emergency item';
   const password = decryptStoredText(item?.encryptedPassword);
   const noteContent = decryptStoredText(item?.encryptedContent);
   const documentName = item?.fileName || item?.documentName || item?.title || 'Document';
@@ -258,7 +263,17 @@ export default function EmergencyVaultDetailsScreen() {
 
         {item.itemType === 'PASSWORD' && (
           <View style={styles.card}>
-            <InfoRow label="Website" value={item.website || item.title || ''} onCopy={() => copyValue('Website', item.website || item.title || '')} styles={styles} C={C} />
+            <InfoRow
+              label="Website / App"
+              value={getFriendlyVaultSubtitle(
+                undefined,
+                item.website || item.title,
+                'No website saved'
+              )}
+              onCopy={() => copyValue('Website', item.website || item.title || '')}
+              styles={styles}
+              C={C}
+            />
             <InfoRow label="Username" value={item.usernameValue || ''} onCopy={() => copyValue('Username', item.usernameValue || '')} styles={styles} C={C} />
             <InfoRow
               label="Password"

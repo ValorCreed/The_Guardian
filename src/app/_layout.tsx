@@ -1,8 +1,19 @@
-import React, { useCallback, useEffect, useRef } from 'react';
-import { BackHandler, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  Alert,
+  AppState,
+  BackHandler,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, router, useGlobalSearchParams, usePathname, type Href } from 'expo-router';
-import { BlurTargetView } from 'expo-blur';
+import { BlurTargetView, BlurView } from 'expo-blur';
+import { Ionicons } from '@expo/vector-icons';
 
 import { AppThemeProvider, useAppTheme } from '../context/ThemeContext';
 import { BlurTargetProvider } from '../context/BlurTargetContext';
@@ -10,9 +21,17 @@ import { AppAlertProvider } from '../context/AppAlertContext';
 import { useAutoLock } from '../hooks/useAutoLock';
 import FloatingTabBar from '../components/FloatingTabBar';
 import AnimatedBlurBackButton from '../components/AnimatedBlurBackButton';
+import AppErrorBoundary from '../components/AppErrorBoundary';
 import { AnalyticsProvider, AnalyticsRouteTracker } from '../services/analytics';
-import { hasStoredAuthToken } from '../services/api';
+import {
+  api,
+  consumeSessionEndMessage,
+  hasStoredAuthToken,
+  subscribeToSessionSecurityEvents,
+} from '../services/api';
 import { hasAcceptedLegalConsent } from '../services/legalConsent';
+import { startPushNotificationRuntime } from '../services/pushNotifications';
+import { safeLogError } from '../utils/asyncResilience';
 
 const TAB_SCREENS = ['/home', '/vault', '/security', '/family', '/settings'];
 const LEGAL_REVIEW_SCREENS = ['/verification', '/privacy', '/terms'];
@@ -28,12 +47,14 @@ const PUBLIC_AUTH_SCREENS = [
   '/verifyemail',
   '/twofactor',
   '/accountrecovery',
+  '/circlerecovery',
 ];
 
 const BACK_BUTTON_SCREENS = [
   '/about',
   '/backup',
   '/notifications',
+  '/notificationpreferences',
   '/devices',
   '/addcard',
   '/adddocument',
@@ -68,7 +89,14 @@ const BACK_BUTTON_SCREENS = [
   '/bugreport',
   '/privacy',
   '/terms',
-  '/editfamilyaccess'
+  '/editfamilyaccess',
+  '/safetycheck',
+  '/recoverycircle',
+  '/circlerecovery',
+  '/estateplaybooks',
+  '/continuitydrill',
+  '/duressmode',
+  '/incidentlockdown',
 ];
 
 const AUTH_SCREEN_OPTIONS = {
@@ -147,11 +175,20 @@ function resetToAuth(route: Href = '/login') {
 function AppStack() {
   useAutoLock();
 
+  useEffect(() => {
+    const stopPushRuntime = startPushNotificationRuntime();
+    return () => {
+      stopPushRuntime();
+    };
+  }, []);
+
   const pathname = normalizePath(usePathname());
   const routeParams = useGlobalSearchParams<{ from?: string; preview?: string }>();
   const blurTargetRef = useRef<View | null>(null);
   const authRedirectingRef = useRef(false);
-  const { colors } = useAppTheme();
+  const heartbeatRunningRef = useRef(false);
+  const [lockdownExitVisible, setLockdownExitVisible] = useState(false);
+  const { colors, isDark } = useAppTheme();
 
   const showTabBar = shouldShowTabBar(pathname);
   const isVerificationPreview =
@@ -170,7 +207,11 @@ function AppStack() {
     router.replace(fallbackRoute);
   }, []);
 
-  const handleGlobalBackPress = () => {
+  const showLockdownExitNotice = useCallback(() => {
+    setLockdownExitVisible(true);
+  }, []);
+
+  const handleGlobalBackPress = async () => {
     if (pathname === '/login') {
       return;
     }
@@ -198,11 +239,57 @@ function AppStack() {
       return goBackWithFallback('/home');
     }
 
+    if (pathname === '/notificationpreferences') {
+      return goBackWithFallback('/settings');
+    }
+
     if (pathname === '/autofill') {
       return router.replace('/settings');
     }
 
     if (pathname === '/recoverykit') {
+      return goBackWithFallback('/security');
+    }
+
+    if (pathname === '/safetycheck') {
+      return goBackWithFallback('/emergencyaccess');
+    }
+
+    if (pathname === '/recoverycircle') {
+      return goBackWithFallback('/recoverykit');
+    }
+
+    if (pathname === '/circlerecovery') {
+      return goBackWithFallback('/accountrecovery');
+    }
+
+    if (pathname === '/estateplaybooks') {
+      return goBackWithFallback('/security');
+    }
+
+    if (pathname === '/continuitydrill') {
+      return goBackWithFallback('/security');
+    }
+
+    if (pathname === '/duressmode') {
+      return goBackWithFallback('/security');
+    }
+
+    if (pathname === '/incidentlockdown') {
+      try {
+        const lockdownActive =
+          (await AsyncStorage.getItem('guardianIncidentLockdown')) === 'true';
+
+        if (lockdownActive) {
+          showLockdownExitNotice();
+          return;
+        }
+      } catch (error: unknown) {
+        safeLogError('LOCKDOWN_BACK_STATE', error);
+        showLockdownExitNotice();
+        return;
+      }
+
       return goBackWithFallback('/security');
     }
 
@@ -250,10 +337,45 @@ function AppStack() {
           return;
         }
 
+        const duressMode =
+          hasToken && (await AsyncStorage.getItem('guardianSessionMode')) === 'DURESS';
+        const incidentLockdown =
+          hasToken &&
+          !duressMode &&
+          (await AsyncStorage.getItem('guardianIncidentLockdown')) === 'true';
+
+        if (
+          incidentLockdown &&
+          !isPublic &&
+          pathname !== '/incidentlockdown'
+        ) {
+          authRedirectingRef.current = true;
+          router.replace('/incidentlockdown');
+          setTimeout(() => {
+            authRedirectingRef.current = false;
+          }, 250);
+          return;
+        }
+
+        const duressAllowed = [
+          '/home', '/vault', '/vaultdetails', '/notedetails',
+          '/addpassword', '/addcard', '/adddocument', '/addnote',
+        ].some((route) => pathname === route || pathname.startsWith(`${route}/`));
+
+        if (duressMode && !isPublic && !duressAllowed) {
+          authRedirectingRef.current = true;
+          router.replace('/home');
+          setTimeout(() => {
+            authRedirectingRef.current = false;
+          }, 250);
+          return;
+        }
+
         let legalConsentAccepted = true;
         const canCheckLegalConsent =
           hasToken &&
           !vaultLocked &&
+          !duressMode &&
           !LEGAL_REVIEW_SCREENS.includes(pathname);
 
         if (canCheckLegalConsent) {
@@ -283,10 +405,11 @@ function AppStack() {
             authRedirectingRef.current = false;
           }, 250);
         }
-      } catch {
+      } catch (error: unknown) {
+        safeLogError('AUTH_ROUTE_GUARD', error);
         /*
-         * If AsyncStorage temporarily fails, do not crash navigation. The API
-         * layer still protects data and the next route change will retry.
+         * If storage temporarily fails, keep the current safe screen visible.
+         * The next route or app-state change will try the guard again.
          */
       }
     };
@@ -295,6 +418,75 @@ function AppStack() {
 
     return () => {
       cancelled = true;
+    };
+  }, [pathname]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToSessionSecurityEvents((event) => {
+      void consumeSessionEndMessage()
+        .catch((error: unknown) => {
+          safeLogError('SESSION_END_MESSAGE', error);
+          return null;
+        })
+        .finally(() => {
+          resetToAuth('/signin');
+          setTimeout(() => {
+            Alert.alert(
+              'This device was signed out',
+              event.message,
+              [{ text: 'Sign in again' }],
+              { cancelable: false }
+            );
+          }, 120);
+        });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const validateSession = async () => {
+      if (cancelled || heartbeatRunningRef.current) return;
+      if (isPublicAuthScreen(pathname)) return;
+
+      try {
+        const [hasToken, locked, sessionMode] = await Promise.all([
+          hasStoredAuthToken().catch(() => false),
+          AsyncStorage.getItem('vaultLocked'),
+          AsyncStorage.getItem('guardianSessionMode'),
+        ]);
+
+        if (
+          cancelled ||
+          !hasToken ||
+          locked === 'true' ||
+          sessionMode === 'DURESS'
+        ) return;
+
+        heartbeatRunningRef.current = true;
+        await api.validateCurrentSession();
+      } catch (error: unknown) {
+        // Revoked-session and Lockdown responses are handled by the API layer.
+        safeLogError('SESSION_HEARTBEAT', error);
+      } finally {
+        heartbeatRunningRef.current = false;
+      }
+    };
+
+    void validateSession();
+    const intervalId = setInterval(() => void validateSession(), 20000);
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (state === 'active') void validateSession();
+    });
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+      appStateSubscription.remove();
     };
   }, [pathname]);
 
@@ -344,6 +536,52 @@ function AppStack() {
         return true;
       }
 
+      if (pathname === '/safetycheck') {
+        goBackWithFallback('/emergencyaccess');
+        return true;
+      }
+
+      if (pathname === '/recoverycircle') {
+        goBackWithFallback('/recoverykit');
+        return true;
+      }
+
+      if (pathname === '/circlerecovery') {
+        goBackWithFallback('/accountrecovery');
+        return true;
+      }
+
+      if (pathname === '/estateplaybooks') {
+        goBackWithFallback('/security');
+        return true;
+      }
+
+      if (pathname === '/continuitydrill') {
+        goBackWithFallback('/security');
+        return true;
+      }
+
+      if (pathname === '/duressmode') {
+        goBackWithFallback('/security');
+        return true;
+      }
+
+      if (pathname === '/incidentlockdown') {
+        void AsyncStorage.getItem('guardianIncidentLockdown')
+          .then((value) => {
+            if (value === 'true') {
+              showLockdownExitNotice();
+              return;
+            }
+            goBackWithFallback('/security');
+          })
+          .catch((error: unknown) => {
+            safeLogError('LOCKDOWN_HARDWARE_BACK_STATE', error);
+            showLockdownExitNotice();
+          });
+        return true;
+      }
+
       if (pathname === '/accountrecovery') {
         router.replace('/signin');
         return true;
@@ -354,11 +592,16 @@ function AppStack() {
         return true;
       }
 
+      if (pathname === '/notificationpreferences') {
+        goBackWithFallback('/settings');
+        return true;
+      }
+
       return false;
     });
 
     return () => subscription.remove();
-  }, [pathname, showTabBar, goBackWithFallback, isVerificationPreview]);
+  }, [pathname, showTabBar, goBackWithFallback, isVerificationPreview, showLockdownExitNotice]);
 
   return (
     <BlurTargetProvider targetRef={blurTargetRef}>
@@ -415,17 +658,32 @@ function AppStack() {
               <Stack.Screen name="autolock" options={{ headerShown: false }} />
               <Stack.Screen name="backup" options={{ headerShown: false }} />
               <Stack.Screen name="notifications" options={{ headerShown: false }} />
+              <Stack.Screen name="notificationpreferences" options={{ headerShown: false }} />
               <Stack.Screen name="devices" options={{ headerShown: false }} />
               <Stack.Screen name="passwordgenerator" options={{ headerShown: false }} />
               <Stack.Screen name="securityhealth" options={{ headerShown: false }} />
               <Stack.Screen name="recoverykit" options={{ headerShown: false }} />
+              <Stack.Screen name="recoverycircle" options={{ headerShown: false }} />
               <Stack.Screen name="accountrecovery" options={AUTH_SCREEN_OPTIONS} />
+              <Stack.Screen name="circlerecovery" options={AUTH_SCREEN_OPTIONS} />
               <Stack.Screen name="emergencyaccess" options={{ headerShown: false }} />
               <Stack.Screen name="addemergencycontact" options={{ headerShown: false }} />
               <Stack.Screen name="emergencydetails" options={{ headerShown: false }} />
               <Stack.Screen name="emergencyrequest" options={{ headerShown: false }} />
               <Stack.Screen name="emergencyvault" options={{ headerShown: false }} />
               <Stack.Screen name="emergencyvaultdetails" options={{ headerShown: false }} />
+              <Stack.Screen name="safetycheck" options={{ headerShown: false }} />
+              <Stack.Screen name="estateplaybooks" options={{ headerShown: false }} />
+              <Stack.Screen name="continuitydrill" options={{ headerShown: false }} />
+              <Stack.Screen name="duressmode" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="incidentlockdown"
+                options={{
+                  headerShown: false,
+                  gestureEnabled: false,
+                  fullScreenGestureEnabled: false,
+                }}
+              />
 
               <Stack.Screen name="addpassword" options={{ headerShown: false, animation: 'none' }} />
               <Stack.Screen name="addnote" options={{ headerShown: false, animation: 'none' }} />
@@ -441,22 +699,153 @@ function AppStack() {
           </BlurTargetView>
 
           {showBackButton && (
-            <AnimatedBlurBackButton onPress={handleGlobalBackPress} />
+            <AnimatedBlurBackButton onPress={() => void handleGlobalBackPress()} />
           )}
 
           {showTabBar && <FloatingTabBar />}
+
+          <Modal
+            visible={lockdownExitVisible}
+            transparent
+            animationType="fade"
+            statusBarTranslucent
+            onRequestClose={() => setLockdownExitVisible(false)}
+          >
+            <View style={layoutStyles.lockdownModalRoot}>
+              <BlurView
+                blurTarget={blurTargetRef as any}
+                blurMethod={
+                  Platform.OS === 'android'
+                    ? ('dimezisBlurViewSdk31Plus' as any)
+                    : undefined
+                }
+                blurReductionFactor={Platform.OS === 'android' ? 2 : undefined}
+                intensity={Platform.OS === 'android' ? 22 : 34}
+                tint={isDark ? 'dark' : 'light'}
+                style={StyleSheet.absoluteFill}
+              />
+              <View style={layoutStyles.lockdownModalOverlay} />
+              <Pressable
+                style={StyleSheet.absoluteFill}
+                onPress={() => setLockdownExitVisible(false)}
+              />
+              <View
+                style={[
+                  layoutStyles.lockdownModalCard,
+                  {
+                    backgroundColor: colors.backgroundElement,
+                    borderColor: colors.border,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    layoutStyles.lockdownModalIcon,
+                    { backgroundColor: `${colors.danger}18` },
+                  ]}
+                >
+                  <Ionicons name="lock-closed" size={26} color={colors.danger} />
+                </View>
+                <Text style={[layoutStyles.lockdownModalTitle, { color: colors.text }]}>
+                  Lockdown screen only
+                </Text>
+                <Text
+                  style={[
+                    layoutStyles.lockdownModalText,
+                    { color: colors.textSecondary },
+                  ]}
+                >
+                  Other Guardian features are unavailable while Incident Lockdown is active.
+                  Complete or safely cancel recovery before leaving this screen.
+                </Text>
+                <Pressable
+                  style={[
+                    layoutStyles.lockdownModalButton,
+                    { backgroundColor: colors.primary },
+                  ]}
+                  onPress={() => setLockdownExitVisible(false)}
+                >
+                  <Text style={layoutStyles.lockdownModalButtonText}>
+                    Continue recovery
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+          </Modal>
         </View>
       </AppAlertProvider>
     </BlurTargetProvider>
   );
 }
 
+const layoutStyles = StyleSheet.create({
+  lockdownModalRoot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+  },
+  lockdownModalOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  lockdownModalCard: {
+    width: '100%',
+    maxWidth: 390,
+    borderRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 18,
+  },
+  lockdownModalIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 15,
+  },
+  lockdownModalTitle: {
+    fontSize: 21,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  lockdownModalText: {
+    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
+  lockdownModalButton: {
+    width: '100%',
+    minHeight: 50,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+    paddingHorizontal: 18,
+  },
+  lockdownModalButtonText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+});
+
 export default function RootLayout() {
   return (
-    <AppThemeProvider>
-      <AnalyticsProvider>
-        <AppStack />
-      </AnalyticsProvider>
-    </AppThemeProvider>
+    <AppErrorBoundary>
+      <AppThemeProvider>
+        <AnalyticsProvider>
+          <AppStack />
+        </AnalyticsProvider>
+      </AppThemeProvider>
+    </AppErrorBoundary>
   );
 }

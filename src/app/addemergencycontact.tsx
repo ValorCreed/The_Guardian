@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -23,12 +22,15 @@ import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelab
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
 const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
 
 export default function AddEmergencyContactScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -40,7 +42,6 @@ export default function AddEmergencyContactScreen() {
   const [contactEmail, setContactEmail] = useState('');
   const [contactName, setContactName] = useState('');
   const [relationship, setRelationship] = useState('');
-  const [waitingPeriodHours, setWaitingPeriodHours] = useState(72);
   const [allowPasswords, setAllowPasswords] = useState(false);
   const [allowCards, setAllowCards] = useState(false);
   const [allowDocuments, setAllowDocuments] = useState(false);
@@ -71,13 +72,11 @@ export default function AddEmergencyContactScreen() {
   }, []);
 
   const isPaid = plan === 'PREMIUM' || plan === 'FAMILY';
-  const waitingOptions = isPaid ? [24, 48, 72] : [72];
-
   const effectiveAllowNotes = isPaid ? allowNotes : true;
 
   const planNote = useMemo(() => {
     if (plan === 'FREE') {
-      return 'Free users can add 1 emergency contact with a fixed 72-hour waiting period and emergency note access. Upgrade to share passwords, cards, and documents.';
+      return 'Free users can add 1 emergency contact with emergency note access. Upgrade to share passwords, cards, and documents.';
     }
 
     if (plan === 'PREMIUM') {
@@ -96,12 +95,12 @@ export default function AddEmergencyContactScreen() {
     const cleanEmergencyNote = emergencyNote.trim();
 
     if (!cleanEmail) {
-      Alert.alert('Missing email', 'Enter your trusted contact email address.');
+      screenAlert('Missing email', 'Enter your trusted contact email address.');
       return;
     }
 
     if (!isValidEmail(cleanEmail)) {
-      Alert.alert('Invalid email', 'Enter a valid email address for your trusted contact.');
+      screenAlert('Invalid email', 'Enter a valid email address for your trusted contact.');
       return;
     }
 
@@ -109,7 +108,7 @@ export default function AddEmergencyContactScreen() {
       const currentUserEmail = (await AsyncStorage.getItem('userEmail'))?.trim().toLowerCase();
 
       if (currentUserEmail && currentUserEmail === cleanEmail) {
-        Alert.alert(
+        screenAlert(
           'Use another email',
           'Your emergency contact should be a different trusted person, not your own account email.'
         );
@@ -121,7 +120,7 @@ export default function AddEmergencyContactScreen() {
     }
 
     if (isPaid && !allowPasswords && !allowCards && !allowDocuments && !allowNotes && !cleanEmergencyNote) {
-      Alert.alert(
+      screenAlert(
         'Choose access',
         'Select at least one emergency access option or write an emergency note before saving.'
       );
@@ -135,7 +134,7 @@ export default function AddEmergencyContactScreen() {
         contactEmail: cleanEmail,
         contactName: cleanName,
         relationship: cleanRelationship,
-        waitingPeriodHours: isPaid ? waitingPeriodHours : 72,
+        waitingPeriodHours: 72, // Legacy database field; request access is now owner-approval only.
         allowPasswords: isPaid && allowPasswords,
         allowCards: isPaid && allowCards,
         allowDocuments: isPaid && allowDocuments,
@@ -144,14 +143,14 @@ export default function AddEmergencyContactScreen() {
         active: true,
       });
 
-      Alert.alert(
+      screenAlert(
         'Emergency contact added',
-        'Your trusted contact has been added. They can request emergency access based on the waiting period and permissions you selected.',
+        'Your trusted contact has been added. They can request access, but release requires your approval unless Guardian Safety Check triggers automatically.',
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         'Could not add contact',
         error?.message || 'We could not add this emergency contact. Please check the details and try again.'
       );
@@ -229,7 +228,7 @@ export default function AddEmergencyContactScreen() {
           <View style={styles.infoCard}>
             <Ionicons name="information-circle-outline" size={20} color={C.primary} />
             <Text style={styles.infoText}>
-              Emergency contacts do not get instant access. They must request access first, and your selected waiting period controls when access becomes available.
+              Emergency contacts do not get instant access. A request requires your approval. Automatic release is handled separately by Guardian Safety Check.
             </Text>
           </View>
 
@@ -263,26 +262,6 @@ export default function AddEmergencyContactScreen() {
               value={relationship}
               onChangeText={setRelationship}
             />
-          </View>
-
-          <Text style={styles.sectionTitle}>Waiting period</Text>
-          <Text style={styles.sectionHint}>
-            Delay before access becomes available.
-          </Text>
-
-          <View style={styles.optionRow}>
-            {waitingOptions.map((hours) => (
-              <TouchableOpacity
-                key={hours}
-                style={[styles.waitOption, waitingPeriodHours === hours && styles.waitOptionActive]}
-                onPress={() => setWaitingPeriodHours(hours)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.waitOptionText, waitingPeriodHours === hours && styles.waitOptionTextActive]}>
-                  {hours}h
-                </Text>
-              </TouchableOpacity>
-            ))}
           </View>
 
           <Text style={styles.sectionTitle}>Allowed emergency access</Text>
@@ -427,10 +406,22 @@ const makeStyles = (C: any) => StyleSheet.create({
     paddingBottom: 130,
   },
   loadingPlanPill: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+
     alignSelf: 'flex-end',
     marginBottom: 22,
   },
   skeletonPlanPill: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+
     width: 96,
     height: 34,
   },
@@ -455,6 +446,12 @@ const makeStyles = (C: any) => StyleSheet.create({
     marginBottom: 18,
   },
   skeletonInfoIcon: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+
     width: 38,
     height: 38,
     borderRadius: 15,
@@ -474,6 +471,12 @@ const makeStyles = (C: any) => StyleSheet.create({
     marginBottom: 9,
   },
   skeletonField: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 7 },
+
     width: '100%',
     height: 48,
     borderRadius: 16,
@@ -512,10 +515,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     shadowColor: '#000',
-    shadowOpacity: 0.035,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 2,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
   },
   planPillText: {
     fontSize: 12,
@@ -549,10 +552,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.045,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   infoText: {
     flex: 1,
@@ -569,10 +572,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     padding: 16,
     marginBottom: 18,
     shadowColor: '#000',
-    shadowOpacity: 0.045,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   label: {
     color: C.text,
@@ -581,6 +584,12 @@ const makeStyles = (C: any) => StyleSheet.create({
     marginBottom: 8,
   },
   input: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 7 },
+
     backgroundColor: C.background,
     borderRadius: 16,
     borderWidth: 1,
@@ -665,10 +674,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     textAlignVertical: 'top',
     marginBottom: 18,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 6,
   },
   saveButton: {
     backgroundColor: C.backgroundbutton,
@@ -679,10 +688,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     shadowColor: C.primary,
-    shadowOpacity: 0.11,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   disabledButton: {
     opacity: 0.65,

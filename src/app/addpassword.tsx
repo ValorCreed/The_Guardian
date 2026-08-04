@@ -7,7 +7,6 @@ import {
   ScrollView,
   TextInput,
   Switch,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
@@ -18,11 +17,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppTheme } from '../context/ThemeContext';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import AddScreenEntrance from '../components/AddScreenEntrance';
-import { api } from '../services/api';
+import { api, isDuressSession } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptPassword } from '../utils/vaultcrypto';
 import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -65,6 +65,8 @@ const getStrengthScore = (value: string) => {
 };
 
 const AddPasswordScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
   const params = useLocalSearchParams<{ generatedPassword?: string }>();
@@ -98,12 +100,19 @@ const AddPasswordScreen = () => {
     const loadPlanLimits = async () => {
       try {
         setCheckingLimits(true);
-        const [subscription, vaultItems] = await Promise.all([
-          requestApi.getSubscription().catch(() => ({ plan: 'FREE' })),
-          requestApi.getVaultItems().catch(() => []),
-        ]);
+        const duress = await isDuressSession();
+        const vaultItems = await requestApi.getVaultItems().catch(() => []);
 
-        setPlan(subscription?.plan || 'FREE');
+        if (duress) {
+          // A valid duress session is already revalidated as Premium/Family by
+          // Auth Service. Never call Subscription Service from the decoy vault.
+          setPlan('PREMIUM');
+        } else {
+          const subscription = await requestApi
+            .getSubscription()
+            .catch(() => ({ plan: 'FREE' }));
+          setPlan(subscription?.plan || 'FREE');
+        }
         setPasswordCount(Array.isArray(vaultItems) ? vaultItems.length : 0);
       } finally {
         setCheckingLimits(false);
@@ -124,7 +133,7 @@ const AddPasswordScreen = () => {
   };
 
   const showPasswordLimitAlert = (message?: string) => {
-    Alert.alert(
+    screenAlert(
       'Password limit reached',
       message || `Your Free plan can save up to ${FREE_PASSWORD_LIMIT} passwords. Upgrade to Premium or Family for unlimited password storage.`,
       [
@@ -143,17 +152,17 @@ const AddPasswordScreen = () => {
     }
 
     if (!website.trim()) {
-      Alert.alert('Missing website', 'Please enter the website or app name.');
+      screenAlert('Missing website', 'Please enter the website or app name.');
       return;
     }
 
     if (!username.trim()) {
-      Alert.alert('Missing username', 'Please enter the username or email.');
+      screenAlert('Missing username', 'Please enter the username or email.');
       return;
     }
 
     if (!password) {
-      Alert.alert('Missing password', 'Please enter or generate a password.');
+      screenAlert('Missing password', 'Please enter or generate a password.');
       return;
     }
 
@@ -171,7 +180,7 @@ const AddPasswordScreen = () => {
 
       void syncGuardianAutofillCache().catch(() => undefined);
 
-      Alert.alert('Saved', 'Password saved securely to your vault.', [
+      screenAlert('Saved', 'Password saved securely to your vault.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
     } catch (error: any) {
@@ -190,7 +199,7 @@ const AddPasswordScreen = () => {
         return;
       }
 
-      Alert.alert('Save failed', message || 'Could not save password.');
+      screenAlert('Save failed', message || 'Could not save password.');
     } finally {
       setSaving(false);
     }
@@ -198,11 +207,11 @@ const AddPasswordScreen = () => {
 
   return (
     <AddScreenEntrance
-        style={styles.container}
-        backgroundColor={C.background}
-      >
+      style={styles.container}
+      backgroundColor={C.background}
+    >
       <KeyboardAvoidingView
-        style={{ flex: 1 }}
+        style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
@@ -214,24 +223,64 @@ const AddPasswordScreen = () => {
           contentContainerStyle={styles.scrollContent}
         >
           <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Add password</Text>
-            </View>
-            <TouchableOpacity style={styles.headerTool} onPress={() => router.push('/passwordgenerator')}>
-              <Ionicons name="sparkles-outline" size={17} color={C.primary} />
-              <Text style={styles.headerToolText}>Advanced generator</Text>
-            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Add password</Text>
+            {/* <Text>
+              
+            </Text> */}
           </View>
+
+          <TouchableOpacity
+            style={styles.advancedGeneratorCard}
+            activeOpacity={0.86}
+            onPress={() => {
+              hapticSelection();
+              router.push('/passwordgenerator');
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Open advanced password generator"
+          >
+            <View style={styles.advancedGeneratorIcon}>
+              <Ionicons name="sparkles" size={25} color="#FFFFFF" />
+            </View>
+
+            <View style={styles.advancedGeneratorCopy}>
+              <Text style={styles.advancedGeneratorEyebrow}>PASSWORD TOOL</Text>
+              <Text style={styles.advancedGeneratorTitle}>Advanced generator</Text>
+              <Text style={styles.advancedGeneratorText}>
+                Build a custom password with more controls.
+              </Text>
+            </View>
+
+            <View style={styles.advancedGeneratorArrow}>
+              <Ionicons name="arrow-forward" size={19} color={C.primary} />
+            </View>
+          </TouchableOpacity>
 
           {freePasswordLimitReached && (
             <View style={styles.limitBox}>
-              <Ionicons name="alert-circle-outline" size={20} color={C.warning} />
-              <Text style={styles.limitText}>You have reached the Free plan password limit. Upgrade to save more passwords.</Text>
+              <View style={styles.limitIcon}>
+                <Ionicons name="alert-circle-outline" size={21} color={C.warning} />
+              </View>
+              <Text style={styles.limitText}>
+                Free plan limit reached. Upgrade to save more passwords.
+              </Text>
             </View>
           )}
 
-          <View style={styles.form}>
-            <Text style={styles.label}>Website / App</Text>
+          <View style={styles.formCard}>
+            <View style={styles.sectionHeadingRow}>
+              <View style={styles.sectionIcon}>
+                <Ionicons name="key-outline" size={20} color={C.primary} />
+              </View>
+              <View style={styles.sectionHeadingCopy}>
+                <Text style={styles.sectionTitle}>Login details</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Enter the app or website and account information.
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.label}>Website or app</Text>
             <TextInput
               style={styles.input}
               placeholder="example.com"
@@ -242,7 +291,7 @@ const AddPasswordScreen = () => {
               autoCorrect={false}
             />
 
-            <Text style={styles.label}>Username or Email</Text>
+            <Text style={styles.label}>Username or email</Text>
             <TextInput
               style={styles.input}
               placeholder="you@example.com"
@@ -267,31 +316,58 @@ const AddPasswordScreen = () => {
                 autoComplete="new-password"
                 textContentType="newPassword"
               />
-              <TouchableOpacity onPress={() => regenerate()} style={styles.iconButton}>
-                <Ionicons name="refresh-outline" size={20} color={C.primary} />
+              <TouchableOpacity
+                onPress={() => regenerate()}
+                style={styles.iconButton}
+                activeOpacity={0.82}
+                accessibilityRole="button"
+                accessibilityLabel="Generate another password"
+              >
+                <Ionicons name="refresh-outline" size={21} color={C.primary} />
               </TouchableOpacity>
             </View>
 
-            <View style={styles.scoreRow}>
-              <View style={styles.scoreTrack}>
-                <View style={[styles.scoreFill, { width: `${score}%`, backgroundColor: scoreColor }]} />
+            <View style={styles.scorePanel}>
+              <View style={styles.scoreHeading}>
+                <Text style={styles.scoreTitle}>Password strength</Text>
+                <Text style={[styles.scoreLabel, { color: scoreColor }]}>
+                  {scoreLabel}
+                </Text>
               </View>
-              <Text style={[styles.scoreLabel, { color: scoreColor }]}>{scoreLabel}</Text>
+              <View style={styles.scoreTrack}>
+                <View
+                  style={[
+                    styles.scoreFill,
+                    {
+                      width: `${score}%`,
+                      backgroundColor: scoreColor,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.generatorCard}>
+            <View style={styles.generatorHeader}>
+              <View style={styles.generatorIcon}>
+                <Ionicons name="flash" size={20} color={C.primary} />
+              </View>
+              <View style={styles.generatorHeadingCopy}>
+                <Text style={styles.generatorTitle}>Quick generator</Text>
+                <Text style={styles.generatorSub}>
+                  Adjust the essentials without leaving this page.
+                </Text>
+              </View>
             </View>
 
-            <View style={styles.generatorCard}>
-              <View style={styles.generatorHeader}>
-                <Ionicons name="flash-outline" size={18} color={C.primary} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.generatorTitle}>Quick generator</Text>
-                </View>
-              </View>
-
+            <View style={styles.generatorControlCard}>
               <View style={styles.sliderRow}>
                 <Text style={styles.sliderLabel}>Length</Text>
                 <View style={styles.sliderControls}>
                   <TouchableOpacity
                     style={styles.sliderBtn}
+                    activeOpacity={0.8}
                     onPress={() => {
                       const newLen = Math.max(8, passLength - 1);
                       hapticSelection();
@@ -299,11 +375,16 @@ const AddPasswordScreen = () => {
                       regenerate(newLen, includeNumbers, includeSymbols);
                     }}
                   >
-                    <Ionicons name="remove" size={18} color={C.primary} />
+                    <Ionicons name="remove" size={19} color={C.primary} />
                   </TouchableOpacity>
-                  <Text style={styles.sliderValue}>{passLength}</Text>
+
+                  <View style={styles.sliderValuePill}>
+                    <Text style={styles.sliderValue}>{passLength}</Text>
+                  </View>
+
                   <TouchableOpacity
                     style={styles.sliderBtn}
+                    activeOpacity={0.8}
                     onPress={() => {
                       const newLen = Math.min(32, passLength + 1);
                       hapticSelection();
@@ -311,13 +392,18 @@ const AddPasswordScreen = () => {
                       regenerate(newLen, includeNumbers, includeSymbols);
                     }}
                   >
-                    <Ionicons name="add" size={18} color={C.primary} />
+                    <Ionicons name="add" size={19} color={C.primary} />
                   </TouchableOpacity>
                 </View>
               </View>
 
+              <View style={styles.toggleDivider} />
+
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Include numbers</Text>
+                <View style={styles.toggleCopy}>
+                  <Text style={styles.toggleLabel}>Include numbers</Text>
+                  <Text style={styles.toggleDescription}>Adds digits from 0 to 9.</Text>
+                </View>
                 <Switch
                   value={includeNumbers}
                   onValueChange={(val) => {
@@ -331,8 +417,13 @@ const AddPasswordScreen = () => {
                 />
               </View>
 
+              <View style={styles.toggleDivider} />
+
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Include symbols</Text>
+                <View style={styles.toggleCopy}>
+                  <Text style={styles.toggleLabel}>Include symbols</Text>
+                  <Text style={styles.toggleDescription}>Adds special characters.</Text>
+                </View>
                 <Switch
                   value={includeSymbols}
                   onValueChange={(val) => {
@@ -346,32 +437,62 @@ const AddPasswordScreen = () => {
                 />
               </View>
             </View>
+          </View>
 
-            <Text style={styles.label}>Notes</Text>
+          <View style={styles.notesCard}>
+            <View style={styles.notesHeader}>
+              <View style={styles.notesIcon}>
+                <Ionicons name="document-text-outline" size={19} color={C.primary} />
+              </View>
+              <Text style={styles.notesTitle}>Notes</Text>
+            </View>
+
             <TextInput
               style={styles.notesInput}
-              placeholder="Add a note..."
+              placeholder="Add an optional note..."
               placeholderTextColor={C.tabInactive}
               value={notes}
               onChangeText={setNotes}
               multiline
+              textAlignVertical="top"
             />
           </View>
 
           <TouchableOpacity
-            style={[styles.saveBtn, (saving || freePasswordLimitReached) && styles.disabledBtn]}
+            style={[
+              styles.saveBtn,
+              (saving || freePasswordLimitReached || checkingLimits) &&
+                styles.disabledBtn,
+            ]}
             onPress={handleSave}
-            disabled={saving}
+            disabled={saving || checkingLimits}
+            activeOpacity={0.87}
           >
-            {saving ? (
+            {saving || checkingLimits ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <Ionicons name={freePasswordLimitReached ? 'lock-closed-outline' : 'checkmark-circle-outline'} size={20} color="#fff" />
+              <Ionicons
+                name={
+                  freePasswordLimitReached
+                    ? 'lock-closed-outline'
+                    : 'checkmark-circle'
+                }
+                size={21}
+                color="#fff"
+              />
             )}
-            <Text style={styles.saveBtnText}>{saving ? 'Saving...' : freePasswordLimitReached ? 'Upgrade to Save More' : 'Save Password'}</Text>
+            <Text style={styles.saveBtnText}>
+              {checkingLimits
+                ? 'Checking plan...'
+                : saving
+                  ? 'Saving...'
+                  : freePasswordLimitReached
+                    ? 'Upgrade to Save More'
+                    : 'Save Password'}
+            </Text>
           </TouchableOpacity>
 
-          <View style={{ height: 90 }} />
+          <View style={styles.bottomSpace} />
         </ScrollView>
       </KeyboardAvoidingView>
     </AddScreenEntrance>
@@ -384,38 +505,127 @@ type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
 
 const makeStyles = (C: ThemeColors) =>
   StyleSheet.create({
-    container: { flex: 1, backgroundColor: C.background },
-    scrollContent: { paddingBottom: 24 },
-    header: {
+    container: {
+      flex: 1,
+      backgroundColor: C.background,
+    },
+    keyboardView: {
+      flex: 1,
+    },
+    scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 92,
-      paddingBottom: 12,
-      gap: 10,
+      paddingBottom: 28,
     },
-    headerTitle: { fontSize: 24, fontWeight: '900', color: C.text },
+    header: {
+      marginBottom: 18,
+    },
+    headerTitle: {
+      color: C.text,
+      fontSize: 31,
+      fontWeight: '900',
+      letterSpacing: -0.7,
+    },
     headerSubtitle: {
-      marginTop: 6,
       color: C.textSecondary,
-      fontSize: 13,
-      fontWeight: '700',
+      fontSize: 14,
+      lineHeight: 20,
+      fontWeight: '600',
+      marginTop: 6,
+    },
+    advancedGeneratorCard: {
+      minHeight: 112,
+      borderRadius: 26,
+      padding: 16,
+      marginBottom: 18,
+      backgroundColor: C.primary,
+      borderWidth: 1,
+      borderColor: `${C.primary}DD`,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 13,
+      shadowColor: '#000000',
+      shadowOpacity: 0.24,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 13 },
+      elevation: 11,
+    },
+    advancedGeneratorIcon: {
+      width: 54,
+      height: 54,
+      borderRadius: 19,
+      backgroundColor: 'rgba(255,255,255,0.18)',
+      borderWidth: 1,
+      borderColor: 'rgba(255,255,255,0.22)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.18,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 5,
+    },
+    advancedGeneratorCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    advancedGeneratorEyebrow: {
+      color: 'rgba(255,255,255,0.70)',
+      fontSize: 10,
+      fontWeight: '900',
+      letterSpacing: 0.9,
+    },
+    advancedGeneratorTitle: {
+      color: '#FFFFFF',
+      fontSize: 18,
+      lineHeight: 23,
+      fontWeight: '900',
+      marginTop: 3,
+    },
+    advancedGeneratorText: {
+      color: 'rgba(255,255,255,0.82)',
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+      marginTop: 3,
+    },
+    advancedGeneratorArrow: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      backgroundColor: '#FFFFFF',
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.18,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 5,
     },
     limitBox: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
+      gap: 11,
       borderWidth: 1,
-      borderColor: C.warning,
+      borderColor: `${C.warning}70`,
       backgroundColor: C.actionCard,
-      borderRadius: 18,
+      borderRadius: 21,
       padding: 14,
-      marginHorizontal: 20,
-      marginBottom: 16,
-
-      shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      marginBottom: 18,
+      shadowColor: '#000000',
+      shadowOpacity: 0.10,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 6,
+    },
+    limitIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 14,
+      backgroundColor: `${C.warning}18`,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     limitText: {
       flex: 1,
       color: C.text,
@@ -423,140 +633,370 @@ const makeStyles = (C: ThemeColors) =>
       lineHeight: 19,
       fontWeight: '700',
     },
-    headerTool: {
-      alignSelf: 'flex-start',
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-      backgroundColor: C.actionCard,
-      borderRadius: 999,
-      paddingHorizontal: 12,
-      paddingVertical: 8,
+    formCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 28,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 17,
+      marginBottom: 18,
+      shadowColor: '#000000',
+      shadowOpacity: 0.15,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 13 },
+      elevation: 10,
     },
-    headerToolText: { color: C.primary, fontWeight: '900', fontSize: 12 },
-    form: { paddingHorizontal: 20, paddingTop: 8 },
-    label: { fontSize: 14, color: C.text, fontWeight: '700', marginBottom: 8 },
-    input: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 50,
-      paddingHorizontal: 20,
-      paddingVertical: 16,
-      fontSize: 15,
-      color: C.text,
-      marginBottom: 20,
-      borderWidth: 1,
-      borderColor: C.border,
-    },
-    passwordRow: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 18,
-      paddingHorizontal: 16,
-      paddingVertical: 12,
+    sectionHeadingRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 10,
-      borderWidth: 1,
-      borderColor: C.border,
-
-      shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    passwordField: { flex: 1, fontSize: 15, color: C.text, minHeight: 34 },
-    iconButton: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: C.actionCard
-      ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
-    scoreTrack: { flex: 1, height: 8, backgroundColor: C.border, borderRadius: 99, overflow: 'hidden' },
-    scoreFill: { height: 8, borderRadius: 99 },
-    scoreLabel: { minWidth: 70, textAlign: 'right', fontSize: 12, fontWeight: '900' },
-    generatorCard: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 18,
-      padding: 16,
-      marginBottom: 20,
-      borderWidth: 1,
-      borderColor: C.border,
-
-      shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    generatorHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
-    generatorTitle: { fontSize: 15, fontWeight: '900', color: C.primary },
-    generatorSub: { fontSize: 12, color: C.textSecondary, marginTop: 2, lineHeight: 16 },
-    sliderRow: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+      gap: 12,
       marginBottom: 16,
     },
-    sliderLabel: { fontSize: 14, color: C.text, fontWeight: '700' },
-    sliderControls: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    sliderBtn: {
-      width: 30,
-      height: 30,
-      backgroundColor: C.backgroundSelected,
-      borderRadius: 15,
-      justifyContent: 'center',
+    sectionIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 16,
+      backgroundColor: C.actionCard,
       alignItems: 'center',
-
-      shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    sliderValue: {
-      fontSize: 15,
-      fontWeight: 'bold',
-      color: C.text,
-      minWidth: 24,
-      textAlign: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.09,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 4,
     },
-    toggleRow: {
+    sectionHeadingCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    sectionTitle: {
+      color: C.text,
+      fontSize: 17,
+      fontWeight: '900',
+    },
+    sectionSubtitle: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    label: {
+      color: C.text,
+      fontSize: 13,
+      fontWeight: '900',
+      marginBottom: 8,
+    },
+    input: {
+      minHeight: 55,
+      backgroundColor: C.background,
+      borderRadius: 19,
+      paddingHorizontal: 16,
+      fontSize: 15,
+      color: C.text,
+      marginBottom: 17,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.075,
+      shadowRadius: 11,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
+    },
+    passwordRow: {
+      minHeight: 60,
+      backgroundColor: C.background,
+      borderRadius: 20,
+      paddingLeft: 16,
+      paddingRight: 9,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.09,
+      shadowRadius: 13,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 5,
+    },
+    passwordField: {
+      flex: 1,
+      minHeight: 48,
+      fontSize: 15,
+      color: C.text,
+      paddingRight: 10,
+    },
+    iconButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 15,
+      backgroundColor: C.actionCard,
+      borderWidth: 1,
+      borderColor: C.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.12,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 5,
+    },
+    scorePanel: {
+      marginTop: 13,
+      padding: 13,
+      borderRadius: 18,
+      backgroundColor: C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.06,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 3,
+    },
+    scoreHeading: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 9,
+    },
+    scoreTitle: {
+      color: C.text,
+      fontSize: 12,
+      fontWeight: '800',
+    },
+    scoreLabel: {
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    scoreTrack: {
+      height: 9,
+      backgroundColor: C.border,
+      borderRadius: 999,
+      overflow: 'hidden',
+    },
+    scoreFill: {
+      height: 9,
+      borderRadius: 999,
+    },
+    generatorCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 28,
+      padding: 17,
+      marginBottom: 18,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.15,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 13 },
+      elevation: 10,
+    },
+    generatorHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginBottom: 14,
+    },
+    generatorIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 16,
+      backgroundColor: C.actionCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.10,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 4,
+    },
+    generatorHeadingCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    generatorTitle: {
+      color: C.text,
+      fontSize: 17,
+      fontWeight: '900',
+    },
+    generatorSub: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    generatorControlCard: {
+      borderRadius: 21,
+      paddingHorizontal: 14,
+      backgroundColor: C.background,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.08,
+      shadowRadius: 13,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 5,
+    },
+    sliderRow: {
+      minHeight: 68,
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      paddingVertical: 8,
-      borderTopWidth: 1,
-      borderTopColor: C.border,
+      gap: 12,
     },
-    toggleLabel: { fontSize: 14, color: C.text },
-    notesInput: {
-      backgroundColor: C.backgroundElement,
-      borderRadius: 16,
-      paddingHorizontal: 20,
-      paddingVertical: 16,
-      fontSize: 15,
+    sliderLabel: {
       color: C.text,
-      marginBottom: 20,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    sliderControls: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+    },
+    sliderBtn: {
+      width: 36,
+      height: 36,
+      backgroundColor: C.actionCard,
+      borderRadius: 13,
       borderWidth: 1,
       borderColor: C.border,
-      height: 110,
-      textAlignVertical: 'top',
+      justifyContent: 'center',
+      alignItems: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.10,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 4,
+    },
+    sliderValuePill: {
+      minWidth: 46,
+      height: 36,
+      borderRadius: 13,
+      backgroundColor: C.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: C.primary,
+      shadowOpacity: 0.20,
+      shadowRadius: 9,
+      shadowOffset: { width: 0, height: 5 },
+      elevation: 5,
+    },
+    sliderValue: {
+      color: '#FFFFFF',
+      fontSize: 15,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    toggleDivider: {
+      height: 1,
+      backgroundColor: C.border,
+    },
+    toggleRow: {
+      minHeight: 70,
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      gap: 12,
+    },
+    toggleCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    toggleLabel: {
+      color: C.text,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    toggleDescription: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '600',
+      marginTop: 2,
+    },
+    notesCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 26,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 16,
+      marginBottom: 19,
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 19,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 8,
+    },
+    notesHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginBottom: 12,
+    },
+    notesIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 14,
+      backgroundColor: C.actionCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000000',
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 3,
+    },
+    notesTitle: {
+      color: C.text,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    notesInput: {
+      minHeight: 112,
+      backgroundColor: C.background,
+      borderRadius: 19,
+      paddingHorizontal: 15,
+      paddingVertical: 14,
+      fontSize: 15,
+      color: C.text,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.07,
+      shadowRadius: 11,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
     },
     saveBtn: {
+      minHeight: 60,
       backgroundColor: C.backgroundbutton,
-      paddingVertical: 18,
-      borderRadius: 50,
+      borderRadius: 22,
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
       gap: 10,
-      marginHorizontal: 20,
-      marginTop: 4,
-      marginBottom: 20,
-
-      shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    disabledBtn: { opacity: 0.65 },
-    saveBtnText: { color: '#fff', fontSize: 16, fontWeight: 'bold' },
+      borderWidth: 1,
+      borderColor: `${C.primary}90`,
+      shadowColor: '#000000',
+      shadowOpacity: 0.24,
+      shadowRadius: 20,
+      shadowOffset: { width: 0, height: 13 },
+      elevation: 11,
+    },
+    disabledBtn: {
+      opacity: 0.65,
+      shadowOpacity: 0.08,
+      elevation: 4,
+    },
+    saveBtnText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    bottomSpace: {
+      height: 92,
+    },
   });

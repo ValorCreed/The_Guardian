@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -18,6 +17,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyAccessRequestResponse, EmergencyContactResponse, EmergencyOverviewResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not set';
@@ -38,6 +38,8 @@ const statusColor = (status: string, C: any) => {
 };
 
 export default function EmergencyAccessScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
@@ -54,7 +56,7 @@ export default function EmergencyAccessScreen() {
       setOverview(data);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not load emergency access', error.message || 'Please try again.');
+      screenAlert('Could not load emergency access', error.message || 'Please try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -89,7 +91,7 @@ export default function EmergencyAccessScreen() {
   );
 
   const approveRequest = (request: EmergencyAccessRequestResponse) => {
-    Alert.alert(
+    screenAlert(
       'Approve emergency access?',
       `${request.requesterEmail} will be approved for emergency access according to the permissions you set.`,
       [
@@ -104,7 +106,7 @@ export default function EmergencyAccessScreen() {
               await loadOverview(false);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Approval failed', error.message || 'Could not approve this request.');
+              screenAlert('Approval failed', error.message || 'Could not approve this request.');
             } finally {
               setWorkingRequestId(null);
             }
@@ -115,7 +117,7 @@ export default function EmergencyAccessScreen() {
   };
 
   const denyRequest = (request: EmergencyAccessRequestResponse) => {
-    Alert.alert(
+    screenAlert(
       'Deny emergency access?',
       `${request.requesterEmail} will not receive emergency access.`,
       [
@@ -131,7 +133,7 @@ export default function EmergencyAccessScreen() {
               await loadOverview(false);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Deny failed', error.message || 'Could not deny this request.');
+              screenAlert('Deny failed', error.message || 'Could not deny this request.');
             } finally {
               setWorkingRequestId(null);
             }
@@ -244,6 +246,56 @@ export default function EmergencyAccessScreen() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          style={styles.safetyCheckCardShell}
+          activeOpacity={0.84}
+          onPress={() => router.push('/safetycheck')}
+        >
+          <View style={styles.safetyCheckCard}>
+            <View style={styles.safetyCheckIcon}>
+              <Ionicons name="pulse-outline" size={23} color={C.primary} />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <View style={styles.safetyCheckTitleRow}>
+                <Text style={styles.safetyCheckTitle}>Guardian Safety Check</Text>
+                {/* <View style={styles.newBadge}>
+                  <Text style={styles.newBadgeText}>NEW</Text>
+                </View> */}
+              </View>
+              <Text style={styles.safetyCheckSub}>
+                Periodic check-ins with a grace period and automatic release to
+                one trusted contact.
+              </Text>
+            </View>
+
+            <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
+          </View>
+        </TouchableOpacity>
+
+
+        <TouchableOpacity
+          style={styles.safetyCheckCardShell}
+          activeOpacity={0.84}
+          onPress={() => router.push('/estateplaybooks')}
+        >
+          <View style={styles.safetyCheckCard}>
+            <View style={styles.safetyCheckIcon}>
+              <Ionicons name="book-outline" size={23} color={C.primary} />
+            </View>
+
+            <View style={{ flex: 1 }}>
+              <Text style={styles.safetyCheckTitle}>Digital Estate Playbooks</Text>
+              <Text style={styles.safetyCheckSub}>
+                Decide which vault items may be released, to whom, and what trusted
+                recipients should do with them.
+              </Text>
+            </View>
+
+            <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
+          </View>
+        </TouchableOpacity>
+
         {!canAddMore && (
           <TouchableOpacity style={styles.upgradeCard} onPress={() => router.push('/subscription?from=emergencyaccess')}>
             <Ionicons name="lock-closed-outline" size={20} color={C.warning} />
@@ -349,7 +401,7 @@ function ContactRow({ contact, index, total, C, styles }: { contact: EmergencyCo
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{contact.contactName || contact.contactEmail}</Text>
         <Text style={styles.rowSub}>{contact.contactEmail}</Text>
-        <Text style={styles.timeText}>{contact.waitingPeriodHours} hour waiting period</Text>
+        <Text style={styles.timeText}>Owner approval required</Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
     </TouchableOpacity>
@@ -367,7 +419,7 @@ function RequestRow({ request, index, total, C, styles, working, onApprove, onDe
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{request.requesterEmail}</Text>
         <Text style={styles.rowSub}>{request.message || 'Emergency access requested.'}</Text>
-        <Text style={[styles.statusText, { color }]}>{request.status}    {formatDate(request.availableAt)}</Text>
+        <Text style={[styles.statusText, { color }]}>{request.status} · requested {formatDate(request.requestedAt)}</Text>
         {canAct && (
           <View style={styles.requestActions}>
             <TouchableOpacity style={styles.approveMini} onPress={onApprove} disabled={working}>
@@ -412,7 +464,7 @@ function SentRequestRow({ request, index, total, C, styles }: any) {
             <Text style={styles.openVaultButtonText}>Open emergency vault</Text>
           </TouchableOpacity>
         ) : request.status === 'PENDING' ? (
-          <Text style={styles.waitingText}>Access opens after {formatDate(request.availableAt)} unless the owner approves earlier.</Text>
+          <Text style={styles.waitingText}>Waiting for the vault owner to approve or deny this request.</Text>
         ) : null}
       </View>
     </View>
@@ -431,7 +483,13 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   skeletonTitle: { width: 230, height: 30, marginBottom: 10 },
   skeletonSubtitle: { width: '86%', height: 13, marginBottom: 18 },
-  skeletonHeroIcon: { width: 56, height: 56, borderRadius: 18 },
+  skeletonHeroIcon: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+ width: 56, height: 56, borderRadius: 18 },
   skeletonHeroTitle: { width: '70%', height: 17, marginBottom: 9 },
   skeletonHeroSub: { width: '50%', height: 12 },
   skeletonActionShell: {
@@ -439,14 +497,26 @@ const makeStyles = (C: any) => StyleSheet.create({
     height: 50,
     borderRadius: 999,
     shadowColor: '#000',
-    shadowOpacity: 0.10,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
-  skeletonActionButton: { width: '100%', height: 50, borderRadius: 999 },
+  skeletonActionButton: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 10,
+    shadowOffset: { width: 0, height: 11 },
+ width: '100%', height: 50, borderRadius: 999 },
   skeletonSectionHeader: { width: 190, height: 18, marginTop: 10, marginBottom: 10 },
-  skeletonSmallIcon: { width: 38, height: 38, borderRadius: 14 },
+  skeletonSmallIcon: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+ width: 38, height: 38, borderRadius: 14 },
   skeletonRowTitle: { width: '66%', height: 14, marginBottom: 8 },
   skeletonRowSub: { width: '86%', height: 11 },
   safeArea: { flex: 1, backgroundColor: C.background },
@@ -460,12 +530,18 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderRadius: 24,
     marginBottom: 14,
     shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 7,
+    shadowOpacity: 0.24,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 12,
   },
   heroCard: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.24,
+    shadowRadius: 26,
+    elevation: 12,
+    shadowOffset: { width: 0, height: 14 },
+
     backgroundColor: C.backgroundElement,
     borderRadius: 24,
     padding: 18,
@@ -484,10 +560,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: C.primary,
-    shadowOpacity: 0.14,
+    shadowOpacity: 0.16,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 7 },
-    elevation: 4,
+    elevation: 6,
   },
   heroTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
   heroSub: { color: C.textSecondary, fontSize: 13, marginTop: 4 },
@@ -502,10 +578,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     shadowColor: C.primary,
-    shadowOpacity: 0.10,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 2,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   disabledAction: { opacity: 0.55 },
   actionButtonText: { color: '#fff', fontSize: 14, fontWeight: '900' },
@@ -527,6 +603,84 @@ const makeStyles = (C: any) => StyleSheet.create({
     elevation: 2,
   },
   secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
+  safetyCheckCardShell: {
+    borderRadius: 20,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  safetyCheckCard: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    elevation: 10,
+    shadowOffset: { width: 0, height: 12 },
+
+    minHeight: 92,
+    backgroundColor: C.backgroundElement,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: `${C.primary}42`,
+    paddingHorizontal: 15,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    overflow: 'hidden',
+  },
+  safetyCheckIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 17,
+    backgroundColor: C.actionCard,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: C.primary,
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  safetyCheckTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  safetyCheckTitle: {
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  safetyCheckSub: {
+    color: C.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 5,
+  },
+  newBadge: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    backgroundColor: `${C.primary}18`,
+    borderWidth: 1,
+    borderColor: `${C.primary}42`,
+  },
+  newBadgeText: {
+    color: C.primary,
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
   upgradeCard: {
     backgroundColor: C.securityScoreBg,
     borderRadius: 16,
@@ -538,22 +692,28 @@ const makeStyles = (C: any) => StyleSheet.create({
     gap: 10,
     marginBottom: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   upgradeText: { color: C.warning, flex: 1, fontSize: 13, fontWeight: '800', lineHeight: 18 },
   cardShell: {
     borderRadius: 20,
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.11,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 11 },
-    elevation: 6,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   card: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    elevation: 10,
+    shadowOffset: { width: 0, height: 12 },
+
     backgroundColor: C.backgroundElement,
     borderRadius: 20,
     borderWidth: 1,
@@ -565,9 +725,21 @@ const makeStyles = (C: any) => StyleSheet.create({
   auditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 15 },
   emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
   divider: { borderBottomWidth: 1, borderBottomColor: C.border },
-  avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
+  avatar: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+ width: 42, height: 42, borderRadius: 21, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
   avatarText: { color: '#fff', fontWeight: '900', fontSize: 16 },
-  smallIcon: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+  smallIcon: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+ width: 38, height: 38, borderRadius: 19, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
   rowTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
   rowSub: { color: C.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },
   timeText: { color: C.tabInactive, fontSize: 11, marginTop: 5, fontWeight: '700' },
@@ -588,10 +760,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     shadowColor: C.primary,
-    shadowOpacity: 0.17,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   openVaultButtonText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   waitingText: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 8, fontWeight: '700' },

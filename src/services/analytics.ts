@@ -4,6 +4,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
+import {
+  AppOperationError,
+  isTransientError,
+  retryAsync,
+  safeLogError,
+} from '../utils/asyncResilience';
 
 /**
  * Privacy-safe, storage-conscious analytics for The Guardian.
@@ -106,6 +112,21 @@ let currentSessionId: string | null = null;
 let currentSessionMetrics: SessionMetrics | null = null;
 let lastAppState: AppStateStatus = AppState.currentState;
 let screenEventsSent = new Set<string>();
+let duressAnalyticsSuppressed = false;
+
+export function setDuressAnalyticsSuppressed(suppressed: boolean) {
+  duressAnalyticsSuppressed = suppressed;
+
+  if (suppressed) {
+    // Do not let decoy-vault navigation or API activity leak later through a
+    // session summary after the owner returns to a normal session.
+    currentSessionId = null;
+    currentSessionMetrics = null;
+    lastScreenPath = null;
+    screenEventsSent = new Set<string>();
+  }
+}
+
 
 const eventCooldowns = new Map<
   string,
@@ -441,26 +462,75 @@ async function capturePostHogRaw(body: Record<string, any>) {
     return false;
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), POSTHOG_TIMEOUT_MS);
+  const insertId = `guardian_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  const deliveryBody = {
+    api_key: apiKey,
+    ...body,
+    properties: {
+      ...(body.properties || {}),
+      $insert_id: body.properties?.$insert_id || insertId,
+    },
+  };
 
   try {
-    const response = await fetch(`${getPostHogHost()}/capture/`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        api_key: apiKey,
-        ...body,
-      }),
-    });
+    return await retryAsync(
+      async () => {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(
+          () => controller.abort(),
+          POSTHOG_TIMEOUT_MS
+        );
 
-    return response.ok;
-  } catch (error) {
-    if (__DEV__) console.log('Analytics delivery skipped', error);
+        try {
+          const response = await fetch(`${getPostHogHost()}/capture/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify(deliveryBody),
+          });
+
+          if (!response.ok) {
+            const transient = [408, 425, 429, 500, 502, 503, 504].includes(
+              response.status
+            );
+
+            if (transient) {
+              throw new AppOperationError('Analytics service is unavailable.', {
+                status: response.status,
+                code: response.status === 429
+                  ? 'RATE_LIMITED'
+                  : 'SERVICE_UNAVAILABLE',
+                transient: true,
+              });
+            }
+
+            return false;
+          }
+
+          return true;
+        } catch (error: unknown) {
+          if (String((error as any)?.name || '').toLowerCase() === 'aborterror') {
+            throw new AppOperationError('Analytics request timed out.', {
+              code: 'REQUEST_TIMEOUT',
+              transient: true,
+            });
+          }
+
+          throw error;
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      },
+      {
+        maxAttempts: 2,
+        baseDelayMs: 600,
+        maxDelayMs: 1800,
+        shouldRetry: (error) => isTransientError(error),
+      }
+    );
+  } catch (error: unknown) {
+    safeLogError('ANALYTICS_DELIVERY', error);
     return false;
-  } finally {
-    clearTimeout(timeoutId);
   }
 }
 
@@ -534,7 +604,7 @@ export async function identifyAnalyticsUser(options: {
       },
     });
   } catch (error) {
-    if (__DEV__) console.log('Analytics identify skipped', error);
+    safeLogError('ANALYTICS_IDENTIFY', error);
   }
 }
 
@@ -560,6 +630,11 @@ export async function captureAnalyticsEvent(
   options: CaptureOptions = {}
 ) {
   try {
+    if (duressAnalyticsSuppressed) return false;
+    if ((await AsyncStorage.getItem('guardianSessionMode')) === 'DURESS') {
+      setDuressAnalyticsSuppressed(true);
+      return false;
+    }
     const apiKey = getPostHogApiKey();
 
     if (!apiKey) {
@@ -593,10 +668,7 @@ export async function captureAnalyticsEvent(
       },
     });
   } catch (error) {
-    if (__DEV__) {
-      console.log('Analytics event skipped', eventName, error);
-    }
-
+    safeLogError(`ANALYTICS_EVENT_${eventName}`, error);
     return false;
   }
 }
@@ -734,6 +806,7 @@ async function endAnalyticsSession(reason: 'background' | 'unmount') {
 }
 
 export function trackScreenView(pathname: string) {
+  if (duressAnalyticsSuppressed) return;
   ensureAnalyticsSession();
 
   const path = normalizePath(pathname);
@@ -765,6 +838,7 @@ export function trackFeatureAction(
   action: string,
   properties: AnalyticsProperties = {}
 ) {
+  if (duressAnalyticsSuppressed) return;
   ensureAnalyticsSession();
 
   const normalizedFeature = normalizeAnalyticsLabel(feature);
@@ -794,6 +868,7 @@ export function recordApiRequest(options: {
   retryCount?: number;
   networkStage?: string;
 }) {
+  if (duressAnalyticsSuppressed) return;
   ensureAnalyticsSession();
 
   const feature = inferFeatureFromPath(options.path);
@@ -865,6 +940,7 @@ export function trackApiFailure(
     networkStage?: string;
   } = {}
 ) {
+  if (duressAnalyticsSuppressed) return;
   const route = normalizePath(path);
   const feature = inferFeatureFromPath(path);
   const normalizedCode = normalizeAnalyticsLabel(code || 'UNKNOWN');
@@ -889,6 +965,7 @@ export function trackApiFailure(
 }
 
 export function trackPlanLimitReached(pathOrFeature: string, status?: number) {
+  if (duressAnalyticsSuppressed) return;
   const feature = pathOrFeature.startsWith('/')
     ? inferFeatureFromPath(pathOrFeature)
     : normalizeAnalyticsLabel(pathOrFeature);
@@ -907,6 +984,7 @@ export function trackPlanLimitReached(pathOrFeature: string, status?: number) {
 }
 
 export async function trackLoginSuccess() {
+  if (duressAnalyticsSuppressed) return false;
   ensureAnalyticsSession();
 
   if (currentSessionMetrics) {
@@ -918,6 +996,7 @@ export async function trackLoginSuccess() {
 }
 
 export async function trackLogout() {
+  if (duressAnalyticsSuppressed) return false;
   ensureAnalyticsSession();
 
   if (currentSessionMetrics) {

@@ -4,6 +4,8 @@ import android.app.Activity;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.res.Configuration;
 import android.net.Uri;
 import android.os.Bundle;
@@ -21,7 +23,10 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 public class AutofillUnlockActivity extends Activity {
     private static final int REQUEST_UNLOCK = 8107;
@@ -38,6 +43,7 @@ public class AutofillUnlockActivity extends Activity {
     private String fillKind = GuardianAutofillService.FILL_KIND_LOGIN;
     private String packageName = "";
     private String webDomain = "";
+    private String appLabel = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,6 +82,7 @@ public class AutofillUnlockActivity extends Activity {
         fillKind = stringExtra(intent, GuardianAutofillService.EXTRA_FILL_KIND);
         packageName = stringExtra(intent, GuardianAutofillService.EXTRA_PACKAGE_NAME);
         webDomain = stringExtra(intent, GuardianAutofillService.EXTRA_WEB_DOMAIN);
+        appLabel = stringExtra(intent, GuardianAutofillService.EXTRA_APP_LABEL);
 
         if (!GuardianAutofillService.FILL_KIND_CARD.equals(fillKind)) {
             fillKind = GuardianAutofillService.FILL_KIND_LOGIN;
@@ -127,19 +134,50 @@ public class AutofillUnlockActivity extends Activity {
     }
 
     private void showCredentialPicker() {
-        List<GuardianAutofillCredential> credentials = GuardianAutofillStore.filterCredentials(
-                GuardianAutofillStore.loadCredentials(this),
-                packageName,
-                webDomain
-        );
+        List<GuardianAutofillCredential> allCredentials =
+                GuardianAutofillStore.loadCredentials(this);
+        List<GuardianAutofillCredential> matchingCredentials =
+                GuardianAutofillStore.filterCredentials(
+                        allCredentials,
+                        packageName,
+                        webDomain
+                );
 
-        if (credentials.isEmpty()) {
-            showEmptyState("No matching logins", "Open The Guardian → Settings → Auto-fill and sync your vault.");
+        if (allCredentials.isEmpty()) {
+            showEmptyState(
+                    "No synced logins",
+                    "Open The Guardian → Settings → Auto-fill and sync your vault."
+            );
             return;
         }
 
-        LinearLayout root = createPickerRoot("Choose a saved login", targetLabel());
-        for (GuardianAutofillCredential credential : credentials) {
+        /*
+         * Relevant app/domain matches remain first for convenience, but the
+         * user can always choose any saved login. This avoids locking users
+         * out when a credential was saved with a different app title, package
+         * name, or website.
+         */
+        List<GuardianAutofillCredential> orderedCredentials = new ArrayList<>();
+        Set<String> addedIds = new HashSet<>();
+
+        for (GuardianAutofillCredential credential : matchingCredentials) {
+            if (addedIds.add(credential.id)) {
+                orderedCredentials.add(credential);
+            }
+        }
+
+        for (GuardianAutofillCredential credential : allCredentials) {
+            if (addedIds.add(credential.id)) {
+                orderedCredentials.add(credential);
+            }
+        }
+
+        String subtitle = matchingCredentials.isEmpty()
+                ? targetLabel() + " · All saved logins"
+                : targetLabel() + " · Suggested first, all logins available";
+
+        LinearLayout root = createPickerRoot("Choose a saved login", subtitle);
+        for (GuardianAutofillCredential credential : orderedCredentials) {
             root.addView(createCredentialRow(credential));
         }
         addCancelButton(root);
@@ -188,16 +226,18 @@ public class AutofillUnlockActivity extends Activity {
 
     private View createCredentialRow(GuardianAutofillCredential credential) {
         LinearLayout row = createRowContainer();
+        String friendlyTitle = friendlyCredentialTitle(credential);
 
-        TextView title = createRowTitle(credential.title);
+        TextView title = createRowTitle(friendlyTitle);
         row.addView(title);
 
         if (!credential.username.isEmpty()) {
             row.addView(createRowSubtitle(credential.username));
         }
 
-        if (!credential.website.isEmpty()) {
-            TextView website = createRowSubtitle(credential.website);
+        String friendlyTarget = friendlyTargetName(credential.website);
+        if (!friendlyTarget.isEmpty() && !friendlyTarget.equalsIgnoreCase(friendlyTitle)) {
+            TextView website = createRowSubtitle(friendlyTarget);
             website.setTextColor(0xFF1D9E75);
             row.addView(website);
         }
@@ -282,7 +322,10 @@ public class AutofillUnlockActivity extends Activity {
                 builder.setValue(
                         id,
                         AutofillValue.forText(credential.password),
-                        GuardianAutofillService.createPresentation(this, credential.title)
+                        GuardianAutofillService.createPresentation(
+                                this,
+                                friendlyCredentialTitle(credential)
+                        )
                 );
             }
 
@@ -423,11 +466,122 @@ public class AutofillUnlockActivity extends Activity {
     }
 
     private String targetLabel() {
-        if (!webDomain.trim().isEmpty()) return "For " + webDomain;
-        if (!packageName.trim().isEmpty()) return "For " + packageName;
+        if (!appLabel.trim().isEmpty()) return "For " + appLabel.trim();
+
+        String webLabel = friendlyTargetName(webDomain);
+        if (!webLabel.isEmpty()) return "For " + webLabel;
+
+        String appLabel = friendlyTargetName(packageName);
+        if (!appLabel.isEmpty()) return "For " + appLabel;
+
         return isCardFill()
                 ? "The Guardian will fill the detected payment fields."
                 : "The Guardian will fill the detected login fields.";
+    }
+
+    private String friendlyCredentialTitle(GuardianAutofillCredential credential) {
+        String title = friendlyTargetName(credential.title);
+        if (!title.isEmpty()) return title;
+
+        String target = friendlyTargetName(credential.website);
+        return target.isEmpty() ? "Saved login" : target;
+    }
+
+    private String friendlyTargetName(String rawValue) {
+        String value = rawValue == null ? "" : rawValue.trim();
+        if (value.isEmpty()) return "";
+
+        String normalized = value.toLowerCase(Locale.ROOT);
+        if (normalized.equals("host.exp.exponent")
+                || normalized.equals("com.exponent.group")
+                || normalized.equals("com.exponent.app")) {
+            return "Expo Go";
+        }
+
+        if (looksLikeAndroidPackage(normalized)) {
+            String installedLabel = installedApplicationLabel(normalized);
+            if (!installedLabel.isEmpty()) return installedLabel;
+            return humanizeIdentifier(normalized);
+        }
+
+        String host = normalized
+                .replaceFirst("^[a-z][a-z0-9+.-]*://", "")
+                .replaceFirst("^www\\.", "")
+                .split("/", 2)[0]
+                .split("\\?", 2)[0]
+                .split("#", 2)[0];
+
+        if (looksLikeAndroidPackage(host)) {
+            String installedLabel = installedApplicationLabel(host);
+            if (!installedLabel.isEmpty()) return installedLabel;
+            return humanizeIdentifier(host);
+        }
+
+        if (host.contains(".")) {
+            String[] parts = host.split("\\.");
+            if (parts.length >= 2) {
+                return titleCase(parts[parts.length - 2]);
+            }
+        }
+
+        return value;
+    }
+
+    private boolean looksLikeAndroidPackage(String value) {
+        return value.matches("^(?:com|org|net|io|app|dev|me|co|host)(?:\\.[a-z][a-z0-9_]*){2,}$");
+    }
+
+    private String installedApplicationLabel(String applicationId) {
+        try {
+            PackageManager packageManager = getPackageManager();
+            ApplicationInfo applicationInfo = packageManager.getApplicationInfo(applicationId, 0);
+            CharSequence label = packageManager.getApplicationLabel(applicationInfo);
+            return label == null ? "" : label.toString().trim();
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return "";
+        }
+    }
+
+    private String humanizeIdentifier(String value) {
+        String[] segments = value.split("\\.");
+        Set<String> generic = new HashSet<>();
+        generic.add("app");
+        generic.add("apps");
+        generic.add("android");
+        generic.add("mobile");
+        generic.add("client");
+        generic.add("group");
+        generic.add("release");
+        generic.add("prod");
+        generic.add("production");
+        generic.add("debug");
+        generic.add("dev");
+
+        for (int index = segments.length - 1; index >= 0; index--) {
+            String segment = segments[index];
+            if (!generic.contains(segment)) return titleCase(segment);
+        }
+
+        return segments.length == 0 ? "Saved app" : titleCase(segments[segments.length - 1]);
+    }
+
+    private String titleCase(String value) {
+        String cleaned = value
+                .replace('_', ' ')
+                .replace('-', ' ')
+                .trim();
+        if (cleaned.isEmpty()) return "";
+
+        StringBuilder result = new StringBuilder();
+        for (String part : cleaned.split("\\s+")) {
+            if (part.isEmpty()) continue;
+            if (result.length() > 0) result.append(' ');
+            result.append(Character.toUpperCase(part.charAt(0)));
+            if (part.length() > 1) {
+                result.append(part.substring(1).toLowerCase(Locale.ROOT));
+            }
+        }
+        return result.toString();
     }
 
     private boolean isCardFill() {

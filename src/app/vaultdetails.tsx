@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -24,7 +23,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
 import { hapticLight, hapticMedium, hapticWarning, hapticDelete, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
-import { api, VaultItem } from '../services/api';
+import { api, isDuressSession, VaultItem } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
 import {
@@ -48,6 +47,8 @@ import { detectCardBrand, formatCardNumber } from '../utils/cardBrand';
 import { formatExpiryInput, validateCardForm } from '../utils/cardValidation';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 type CardPayload = {
   cardholderName: string;
@@ -178,6 +179,8 @@ const getFriendlyDocumentType = (mimeType?: string | null, fileName?: string | n
 
 
 const VaultDetailsScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
   const { id, type, returnTab, mode } = useLocalSearchParams<{
@@ -223,6 +226,7 @@ const VaultDetailsScreen = () => {
   const [previewImageFile, setPreviewImageFile] = useState<PreviewImageFile | null>(null);
   const previewImageUriRef = useRef<string | null>(null);
   const [offlineMode, setOfflineMode] = useState(false);
+  const [duressMode, setDuressMode] = useState(true);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [offlineSecretsAvailable, setOfflineSecretsAvailable] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -252,6 +256,18 @@ const VaultDetailsScreen = () => {
   const [editCardCvv, setEditCardCvv] = useState('');
   const [editCardNotes, setEditCardNotes] = useState('');
   const [showEditCvv, setShowEditCvv] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void isDuressSession().then((value) => {
+      if (mounted) setDuressMode(value);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -445,7 +461,7 @@ const loadItem = async () => {
       }
     }
 
-    Alert.alert('Error', error.message || 'Could not load item.');
+    screenAlert('Error', error.message || 'Could not load item.');
   } finally {
     setLoading(false);
   }
@@ -458,11 +474,11 @@ const loadItem = async () => {
   const copyValue = async (label: string, value?: string) => {
     if (!value) return;
     await setSecureClipboard(value);
-    Alert.alert('Copied', getSecureClipboardMessage(label));
+    screenAlert('Copied', getSecureClipboardMessage(label));
   };
 
   const showOfflineWriteWarning = () => {
-    Alert.alert(
+    screenAlert(
       'Offline mode',
       offlineSecretsAvailable
         ? 'This item is available from the encrypted offline vault. Connect to The Guardian to edit or delete it.'
@@ -479,7 +495,7 @@ const loadItem = async () => {
     if (!item || saving) return;
 
     if (!editWebsite.trim() || !editUsername.trim() || !editPassword.trim()) {
-      Alert.alert('Missing info', 'Website, username and password are required.');
+      screenAlert('Missing info', 'Website, username and password are required.');
       return;
     }
 
@@ -509,10 +525,10 @@ const loadItem = async () => {
       setShowSecret(false);
       hapticSuccess();
       void syncGuardianAutofillCache().catch(() => undefined);
-      Alert.alert('Updated', 'Password updated successfully.');
+      screenAlert('Updated', 'Password updated successfully.');
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Update failed', error.message || 'Could not update password.');
+      screenAlert('Update failed', error.message || 'Could not update password.');
     } finally {
       setSaving(false);
     }
@@ -535,7 +551,7 @@ const loadItem = async () => {
     });
 
     if (!validation.valid) {
-      Alert.alert(
+      screenAlert(
         validation.errorTitle || 'Invalid card details',
         validation.errorMessage || 'Check the card details and try again.'
       );
@@ -566,10 +582,10 @@ const loadItem = async () => {
       setShowEditCvv(false);
       hapticSuccess();
       void syncGuardianAutofillCache().catch(() => undefined);
-      Alert.alert('Updated', 'Card updated successfully.');
+      screenAlert('Updated', 'Card updated successfully.');
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Update failed', error.message || 'Could not update card.');
+      screenAlert('Update failed', error.message || 'Could not update card.');
     } finally {
       setSaving(false);
     }
@@ -587,7 +603,7 @@ const loadItem = async () => {
 
   if (!item) return;
 
-  Alert.alert(
+  screenAlert(
     'Delete item',
     'Are you sure you want to delete this item? This cannot be undone.',
     [
@@ -609,13 +625,13 @@ const loadItem = async () => {
 
             hapticSuccess();
             void syncGuardianAutofillCache().catch(() => undefined);
-            Alert.alert('Deleted', 'Item deleted successfully.', [
+            screenAlert('Deleted', 'Item deleted successfully.', [
               { text: 'OK', onPress: goBackToVaultSection },
             ]);
           } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
             hapticWarning();
-            Alert.alert('Delete failed', error.message || 'Could not delete item.');
+            screenAlert('Delete failed', error.message || 'Could not delete item.');
           } finally {
             setDeleting(false);
           }
@@ -642,7 +658,7 @@ const loadItem = async () => {
 
     if ((item.sizeBytes || 0) > MAX_IMAGE_PREVIEW_BYTES) {
       hapticWarning();
-      Alert.alert(
+      screenAlert(
         'Preview too large',
         'For stability, images larger than 20 MB must be downloaded or shared instead of previewed in the app.'
       );
@@ -700,7 +716,7 @@ const loadItem = async () => {
 
       const message = String(error?.message || '').toLowerCase();
       hapticWarning();
-      Alert.alert(
+      screenAlert(
         'Preview unavailable',
         message.includes('timed out') || message.includes('timeout')
           ? 'The image preview took too long to load. Please try again on a stronger connection.'
@@ -722,7 +738,7 @@ const loadItem = async () => {
     }
 
     hapticWarning();
-    Alert.alert(
+    screenAlert(
       'Preview unavailable',
       'This image format could not be displayed on your device. You can still download or share the file.'
     );
@@ -762,7 +778,7 @@ const loadItem = async () => {
         });
 
         hapticSuccess();
-        Alert.alert('Downloaded', 'Document saved to the folder you selected.');
+        screenAlert('Downloaded', 'Document saved to the folder you selected.');
         return;
       }
 
@@ -773,13 +789,13 @@ const loadItem = async () => {
         });
         hapticSuccess();
       } else {
-        Alert.alert('Saved temporarily', downloaded.uri);
+        screenAlert('Saved temporarily', downloaded.uri);
       }
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
       const message = String(error?.message || '').toLowerCase();
       hapticWarning();
-      Alert.alert(
+      screenAlert(
         'Download failed',
         message.includes('timed out') || message.includes('timeout')
           ? 'The download took too long. Please try again on a stronger connection.'
@@ -978,8 +994,12 @@ const loadItem = async () => {
               </>
             ) : (
               <>
-                <Text style={styles.title}>{item.title || item.website}</Text>
-                <Text style={styles.subtitle}>{item.website}</Text>
+                <Text style={styles.title}>
+                  {getFriendlyVaultTitle(item.title, item.website, 'Saved login')}
+                </Text>
+                <Text style={styles.subtitle}>
+                  {getFriendlyVaultSubtitle(undefined, item.website, 'Login details')}
+                </Text>
 
                 <View style={styles.infoCard}>
                   <InfoRow label="Username" value={item.usernameValue || ''} onCopy={() => copyValue('Username', item.usernameValue)} styles={styles} C={C} />
@@ -1317,6 +1337,36 @@ const loadItem = async () => {
           </View>
         )}
 
+        {!offlineMode && !duressMode && item && !editingPassword && !editingCard && (
+          <View style={styles.estateActionWrap}>
+            <TouchableOpacity
+              style={styles.estateActionButton}
+              activeOpacity={0.84}
+              onPress={() => {
+                hapticLight();
+                router.push({
+                  pathname: '/estateplaybooks',
+                  params: {
+                    itemId: String(item.id),
+                    itemType: type || item.itemType,
+                  },
+                });
+              }}
+            >
+              <View style={styles.estateActionIcon}>
+                <Ionicons name="book-outline" size={20} color={C.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.estateActionTitle}>Digital Estate Playbook</Text>
+                <Text style={styles.estateActionText}>
+                  Control whether this item is released and provide trusted instructions.
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View style={{ height: 50 }} />
       </ScrollView>
       </KeyboardAvoidingView>
@@ -1489,6 +1539,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       marginBottom: 28,
     },
     skeletonIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 72,
       height: 72,
       borderRadius: 24,
@@ -1520,17 +1576,35 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       height: 15,
     },
     skeletonRoundButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       width: 36,
       height: 36,
       borderRadius: 18,
     },
     skeletonMainButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       width: '100%',
       height: 54,
       borderRadius: 999,
       marginTop: 8,
     },
     skeletonSecondaryButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       width: '100%',
       height: 54,
       borderRadius: 999,
@@ -1539,47 +1613,105 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 96, paddingBottom: 16 },
     backBtn: { width: 36, height: 36, backgroundColor: C.backgroundSelected, borderRadius: 18, justifyContent: 'center', alignItems: 'center'
      , shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     headerTitle: { fontSize: 18, fontWeight: '800', color: C.text },
     content: { paddingHorizontal: 20, alignItems: 'center' },
-    iconCircle: { width: 72, height: 72, borderRadius: 36, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
+    estateActionWrap: {
+      paddingHorizontal: 20,
+      marginTop: 4,
+    },
+    estateActionButton: {
+      width: '100%',
+      minHeight: 82,
+      borderRadius: 22,
+      padding: 15,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: C.backgroundElement,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
+    },
+    estateActionIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
+      width: 44,
+      height: 44,
+      borderRadius: 16,
+      backgroundColor: C.actionCard,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    estateActionTitle: {
+      color: C.text,
+      fontSize: 15,
+      fontWeight: '900',
+    },
+    estateActionText: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 4,
+    },
+    iconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 72, height: 72, borderRadius: 36, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
     title: { fontSize: 24, fontWeight: '800', color: C.text, textAlign: 'center' },
     subtitle: { fontSize: 14, color: C.textSecondary, textAlign: 'center', marginTop: 4, marginBottom: 22 },
     infoCard: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 18
     ,  shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 4 },
     infoLabel: { fontSize: 12, color: C.textSecondary, marginBottom: 4 },
     infoValue: { fontSize: 15, color: C.text, fontWeight: '600' },
     divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
     iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center'
     ,  shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     mainBtn: { width: '100%', backgroundColor: C.backgroundbutton, paddingVertical: 16, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, marginTop: 8
      , shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     mainBtnDisabled: { opacity: 0.65 },
     mainBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
     secondaryBtn: { width: '100%', backgroundColor: C.backgroundElement, paddingVertical: 16, borderRadius: 50, alignItems: 'center', borderWidth: 1, borderColor: C.border, marginTop: 10
     ,  shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     secondaryBtnText: { color: C.text, fontWeight: '800', fontSize: 15 },
-    deleteBtn: { flexDirection: 'row', justifyContent: 'center', gap: 8 },
+    deleteBtn: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ flexDirection: 'row', justifyContent: 'center', gap: 8 },
     deleteOverlay: {
       ...StyleSheet.absoluteFill,
       backgroundColor: 'rgba(0,0,0,0.38)',
@@ -1598,10 +1730,10 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       borderColor: C.border,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     deleteOverlayTitle: {
       color: C.text,
       fontSize: 18,
@@ -1617,18 +1749,36 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       textAlign: 'center',
     },
     label: { width: '100%', fontSize: 14, color: C.text, fontWeight: '700', marginBottom: 8 },
-    input: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
+    input: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ width: '100%', backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
     multilineInput: {
       minHeight: 96,
       paddingTop: 14,
     },
 
     secureInputWrap: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+
       width: '100%',
       position: 'relative',
       marginBottom: 16,
     },
     secureInput: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+
       width: '100%',
       backgroundColor: C.backgroundElement,
       borderRadius: 50,
@@ -1640,6 +1790,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       borderColor: C.border,
     },
     secureInputToggle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+
       position: 'absolute',
       right: 7,
       top: 6,
@@ -1650,20 +1806,44 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    notesInput: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16, minHeight: 90, textAlignVertical: 'top' },
+    notesInput: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ width: '100%', backgroundColor: C.backgroundElement, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16, minHeight: 90, textAlignVertical: 'top' },
     cardPreview: { width: '100%', backgroundColor: C.primary, borderRadius: 22, padding: 24, height: 200, justifyContent: 'space-between', marginBottom: 20
      , shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     previewTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-    chip: { width: 44, height: 32, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 6 },
+    chip: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 44, height: 32, backgroundColor: 'rgba(255,255,255,0.22)', borderRadius: 6 },
     bankPreview: { color: '#fff', fontWeight: '800', fontSize: 14 },
-    cardNumberPreview: { color: '#fff', fontSize: 19, fontWeight: '700', letterSpacing: 2 },
+    cardNumberPreview: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ color: '#fff', fontSize: 19, fontWeight: '700', letterSpacing: 2 },
     previewBottom: { flexDirection: 'row', justifyContent: 'space-between' },
     previewLabel: { color: 'rgba(255,255,255,0.65)', fontSize: 9, marginBottom: 4, letterSpacing: 1 },
-    cardNamePreview: { color: '#fff', fontWeight: '800', fontSize: 14 },
+    cardNamePreview: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ color: '#fff', fontWeight: '800', fontSize: 14 },
     documentPreviewPlaceholder: {
       width: '100%',
       borderRadius: 20,
@@ -1703,6 +1883,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       lineHeight: 20,
     },
     imagePreviewModal: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       flex: 1,
       justifyContent: 'center',
       paddingHorizontal: 18,
@@ -1750,6 +1936,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       fontWeight: '900',
     },
     imagePreviewModalType: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       color: C.primary,
       fontSize: 11,
       fontWeight: '900',
@@ -1757,6 +1949,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       letterSpacing: 0.5,
     },
     imagePreviewCloseButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       width: 40,
       height: 40,
       borderRadius: 20,

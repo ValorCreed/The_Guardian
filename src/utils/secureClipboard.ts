@@ -1,6 +1,12 @@
 import { AppState, AppStateStatus } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 
+import {
+  AppOperationError,
+  safeLogError,
+  toAppOperationError,
+} from './asyncResilience';
+
 const DEFAULT_CLEAR_AFTER_MS = 30_000;
 
 let clearTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,7 +28,7 @@ async function clearClipboardIfStillSensitive() {
 
     /*
      * Only clear if the clipboard still contains the sensitive value we copied.
-     * This prevents The Guardian from deleting something else the user copied later.
+     * This prevents The Guardian from deleting something else copied later.
      */
     if (currentClipboardValue === sensitiveValue) {
       await Clipboard.setStringAsync('');
@@ -30,18 +36,20 @@ async function clearClipboardIfStillSensitive() {
       lastCopiedAt = 0;
       return true;
     }
-  } catch {
+  } catch (readError) {
+    safeLogError('SECURE_CLIPBOARD_READ', readError);
+
     /*
-     * Some platforms/dev builds can fail on getStringAsync(). In that case, clear
-     * defensively only if we still have a known sensitive value pending.
+     * Some platforms can fail on getStringAsync(). Clear defensively only while
+     * a known sensitive value is pending.
      */
     try {
       await Clipboard.setStringAsync('');
       lastSensitiveValue = '';
       lastCopiedAt = 0;
       return true;
-    } catch {
-      // Clipboard clearing must never crash the app.
+    } catch (clearError) {
+      safeLogError('SECURE_CLIPBOARD_CLEAR', clearError);
     }
   }
 
@@ -62,64 +70,90 @@ function scheduleClipboardClear() {
   const delayMs = Math.max(0, clearAfterMs - (Date.now() - copiedAt));
 
   clearTimer = setTimeout(() => {
-    clearClipboardIfStillSensitive();
+    void clearClipboardIfStillSensitive().catch((error) =>
+      safeLogError('SECURE_CLIPBOARD_TIMER', error)
+    );
   }, delayMs);
 }
 
 function ensureClipboardLifecycleWatcher() {
   if (appStateSubscription) return;
 
-  appStateSubscription = AppState.addEventListener('change', async nextState => {
-    const previousState = currentAppState;
-    currentAppState = nextState;
+  appStateSubscription = AppState.addEventListener('change', (nextState) => {
+    void (async () => {
+      try {
+        const previousState = currentAppState;
+        currentAppState = nextState;
 
-    if (!lastSensitiveValue || !lastCopiedAt) return;
+        if (!lastSensitiveValue || !lastCopiedAt) return;
 
-    const ageMs = Date.now() - lastCopiedAt;
+        const ageMs = Date.now() - lastCopiedAt;
 
-    /*
-     * When the app returns from background, JS timers may have been paused.
-     * If the clear time already passed while the app was inactive, clear now.
-     */
-    if (
-      previousState.match(/inactive|background/) &&
-      nextState === 'active' &&
-      ageMs >= clearAfterMs
-    ) {
-      clearPendingTimer();
-      await clearClipboardIfStillSensitive();
-      return;
-    }
+        /*
+         * JS timers may pause in the background. Clear immediately after resume
+         * when the configured lifetime has already elapsed.
+         */
+        if (
+          previousState.match(/inactive|background/) &&
+          nextState === 'active' &&
+          ageMs >= clearAfterMs
+        ) {
+          clearPendingTimer();
+          await clearClipboardIfStillSensitive();
+          return;
+        }
 
-    /*
-     * Keep the timer accurate after app-state changes while the app is still alive.
-     */
-    if (nextState === 'active') {
-      scheduleClipboardClear();
-    }
+        if (nextState === 'active') {
+          scheduleClipboardClear();
+        }
+      } catch (error) {
+        safeLogError('SECURE_CLIPBOARD_LIFECYCLE', error);
+      }
+    })();
   });
 }
 
-export async function setSecureClipboard(value: string, options?: { clearAfterMs?: number }) {
+export async function setSecureClipboard(
+  value: string,
+  options?: { clearAfterMs?: number }
+) {
   const text = normalizeClipboardValue(value);
 
-  if (!text) return;
+  if (!text) {
+    throw new AppOperationError('There is nothing to copy.', {
+      code: 'UNKNOWN_ERROR',
+    });
+  }
 
-  ensureClipboardLifecycleWatcher();
+  try {
+    ensureClipboardLifecycleWatcher();
 
-  clearAfterMs = options?.clearAfterMs ?? DEFAULT_CLEAR_AFTER_MS;
-  lastSensitiveValue = text;
-  lastCopiedAt = Date.now();
+    clearAfterMs = Math.max(
+      1_000,
+      Math.min(options?.clearAfterMs ?? DEFAULT_CLEAR_AFTER_MS, 120_000)
+    );
+    await Clipboard.setStringAsync(text);
 
-  await Clipboard.setStringAsync(text);
-  scheduleClipboardClear();
+    // Commit the in-memory marker only after the platform confirms the copy.
+    lastSensitiveValue = text;
+    lastCopiedAt = Date.now();
+    scheduleClipboardClear();
+  } catch (error) {
+    safeLogError('SECURE_CLIPBOARD_COPY', error);
+    throw toAppOperationError(error, 'Could not copy this value.');
+  }
 }
 
 export async function clearSensitiveClipboardNow() {
   clearPendingTimer();
-  await clearClipboardIfStillSensitive();
+
+  try {
+    await clearClipboardIfStillSensitive();
+  } catch (error) {
+    safeLogError('SECURE_CLIPBOARD_CLEAR_NOW', error);
+  }
 }
 
 export function getSecureClipboardMessage(label: string) {
-  return `${label} copied. For your safety, the clipboard will clear in 30 seconds.`;
+  return `${label} copied. The clipboard will clear in 30 seconds.`;
 }

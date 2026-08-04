@@ -35,6 +35,22 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 type IssueGroup = 'all' | 'shared' | 'danger' | 'warning';
 
+type ProtectionTool = {
+  title: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  route: string;
+  danger?: boolean;
+};
+
+type ProtectionGroup = {
+  key: string;
+  title: string;
+  description: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  tools: ProtectionTool[];
+};
+
 function getScoreColor(score: number, C: ThemePalette) {
   if (score >= 80) return '#FFFFFF';
   if (score >= 55) return C.warning;
@@ -309,19 +325,16 @@ export default function SecurityScreen() {
   const setupItems = [
     {
       title: 'Verify account email',
-      subtitle: 'Confirm account ownership.',
       complete: Boolean(report.emailVerified),
       route: '/userinfo',
     },
     {
       title: 'Enable two-factor authentication',
-      subtitle: 'Add a sign-in code.',
       complete: Boolean(report.twoFactorEnabled),
       route: '/twofasetup',
     },
     {
       title: 'Create a recovery kit',
-      subtitle: 'Create an offline recovery option.',
       complete: Boolean(report.recoveryKitCreated),
       route: '/recoverykit',
     },
@@ -331,7 +344,7 @@ export default function SecurityScreen() {
     .map((issue) => ({ issue, gain: getEstimatedScoreGain(issue) }))
     .filter((item) => item.gain > 0)
     .sort((a, b) => b.gain - a.gain)
-    .slice(0, 3);
+    .slice(0, 2);
 
   const filteredIssues = report.issues.filter((issue) => {
     if (selectedIssueGroup === 'shared') return isSharedSecurityIssue(issue);
@@ -432,6 +445,86 @@ export default function SecurityScreen() {
     },
   ];
 
+  const protectionGroups: ProtectionGroup[] = [
+    {
+      key: 'account',
+      title: 'Sign-in & recovery',
+      description: 'Sign-in and account recovery.',
+      icon: 'shield-checkmark-outline' as const,
+      tools: [
+        {
+          title: 'Two-factor authentication',
+          description: report.twoFactorEnabled
+            ? 'Enabled'
+            : 'Add a second sign-in check',
+          icon: 'keypad-outline' as const,
+          route: '/twofasetup',
+        },
+        {
+          title: 'Recovery Kit',
+          description: report.recoveryKitCreated
+            ? 'Ready'
+            : 'Create an offline recovery option',
+          icon: 'medkit-outline' as const,
+          route: '/recoverykit',
+        },
+      ],
+    },
+    {
+      key: 'continuity',
+      title: 'Continuity',
+      description: 'Trusted recovery and release plans.',
+      icon: 'people-outline' as const,
+      tools: [
+        {
+          title: 'Recovery Circle',
+          description: 'Multi-person recovery approval',
+          icon: 'people-circle-outline' as const,
+          route: '/recoverycircle',
+        },
+        {
+          title: 'Digital Estate Playbooks',
+          description: 'Item-specific release instructions',
+          icon: 'book-outline' as const,
+          route: '/estateplaybooks',
+        },
+        {
+          title: 'Continuity Drill',
+          description: 'Test recovery readiness',
+          icon: 'analytics-outline' as const,
+          route: '/continuitydrill',
+        },
+      ],
+    },
+    {
+      key: 'emergency',
+      title: 'Emergency controls',
+      description: 'Emergency and compromise controls.',
+      icon: 'warning-outline' as const,
+      tools: [
+        {
+          title: 'Guardian Safety Check',
+          description: 'Scheduled check-ins and approved release',
+          icon: 'pulse-outline' as const,
+          route: '/safetycheck',
+        },
+        {
+          title: 'Duress Mode',
+          description: 'Coercion-safe decoy vault',
+          icon: 'shield-half-outline' as const,
+          route: '/duressmode',
+        },
+        {
+          title: 'Incident Lockdown',
+          description: 'Contain compromise and recover',
+          icon: 'lock-closed-outline' as const,
+          route: '/incidentlockdown',
+          danger: true,
+        },
+      ],
+    },
+  ];
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
@@ -449,12 +542,14 @@ export default function SecurityScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.title}>Vault protection</Text>
-            {/* <Text style={styles.headerSub}>{report.totalPasswords} protected logins</Text> */}
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>Security center</Text>
+            <Text style={styles.headerSub}>
+              Review risks and essential protection tools.
+            </Text>
           </View>
 
-          {/* <TouchableOpacity
+          <TouchableOpacity
             style={styles.iconButton}
             onPress={() => {
               hapticLight();
@@ -467,7 +562,7 @@ export default function SecurityScreen() {
             ) : (
               <Ionicons name="refresh" size={20} color={C.primary} />
             )}
-          </TouchableOpacity> */}
+          </TouchableOpacity>
         </View>
 
         <View style={styles.heroCard}>
@@ -555,47 +650,11 @@ export default function SecurityScreen() {
                   color={item.complete ? '#FFFFFF' : C.textSecondary}
                 />
               </View>
-              <View style={styles.flexibleTextBlock}>
-                <Text style={styles.setupTitle}>{item.title}</Text>
-                <Text style={styles.setupSubtitle}>{item.subtitle}</Text>
-              </View>
+              <Text style={styles.setupTitle}>{item.title}</Text>
               <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
             </TouchableOpacity>
           ))}
         </View>
-
-        {scoreRecommendations.length > 0 && (
-          <>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Best ways to improve</Text>
-            </View>
-            {/* <Text style={styles.scoreGainHelper}>
-              “+10 score” is the estimated increase after completing that fix.
-            </Text> */}
-
-            <View style={styles.recommendationCard}>
-              {scoreRecommendations.map(({ issue, gain }, index) => (
-                <TouchableOpacity
-                  key={`recommendation-${issue.id}`}
-                  style={[
-                    styles.recommendationRow,
-                    index !== scoreRecommendations.length - 1 && styles.setupRowDivider,
-                  ]}
-                  activeOpacity={0.82}
-                  onPress={() => openIssue(issue)}
-                >
-                  <View style={styles.gainPill}>
-                    <Text style={styles.gainText}>+{gain} points</Text>
-                  </View>
-                  <Text style={styles.recommendationTitle}>
-                    {issue.title}
-                  </Text>
-                  <Ionicons name="arrow-forward" size={17} color={C.primary} />
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        )}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Issues to review</Text>
@@ -641,41 +700,111 @@ export default function SecurityScreen() {
           ))}
         </View>
 
+        {scoreRecommendations.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionCopy}>
+                <Text style={styles.sectionTitle}>Best ways to improve</Text>
+                <Text style={styles.sectionIntro}>
+                  Review what is wrong, then open the item to fix it.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.recommendationCard}>
+              {scoreRecommendations.map(({ issue, gain }, index) => (
+                <TouchableOpacity
+                  key={`recommendation-${issue.id}`}
+                  style={[
+                    styles.recommendationRow,
+                    index !== scoreRecommendations.length - 1 && styles.setupRowDivider,
+                  ]}
+                  activeOpacity={0.82}
+                  onPress={() => openIssue(issue)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${issue.title}. ${issue.subtitle}. Fixing this may add ${gain} points.`}
+                >
+                  <View style={styles.gainPill}>
+                    <Text style={styles.gainText}>+{gain} points</Text>
+                  </View>
+
+                  <View style={styles.recommendationCopy}>
+                    <Text style={styles.recommendationTitle}>
+                      {issue.title}
+                    </Text>
+                    <Text style={styles.recommendationDescription}>
+                      {issue.subtitle}
+                    </Text>
+                  </View>
+
+                  <Ionicons
+                    name="arrow-forward"
+                    size={17}
+                    color={C.primary}
+                    style={styles.recommendationArrow}
+                  />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
+
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Protection tools</Text>
+          <View style={styles.sectionCopy}>
+            <Text style={styles.sectionTitle}>Protection tools</Text>
+          </View>
         </View>
 
-        <View style={styles.actionGrid}>
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => {
-              hapticLight();
-              router.push('/twofasetup');
-            }}
-            activeOpacity={0.86}
-          >
-            <View style={styles.actionIcon}>
-              <Ionicons name="keypad-outline" size={21} color={C.primary} />
-            </View>
-            <Text style={styles.actionTitle}>Two-factor auth</Text>
-            <Ionicons name="chevron-forward" size={17} color={C.tabInactive} />
-          </TouchableOpacity>
+        {protectionGroups.map((group) => (
+          <View key={group.key} style={styles.toolGroupShell}>
+            <View style={styles.toolGroupCard}>
+              <View style={styles.toolGroupHeader}>
+                <View style={styles.toolGroupHeaderIcon}>
+                  <Ionicons name={group.icon} size={21} color={C.primary} />
+                </View>
+                <View style={styles.flexibleTextBlock}>
+                  <Text style={styles.toolGroupTitle}>{group.title}</Text>
+                </View>
+              </View>
 
-          <TouchableOpacity
-            style={styles.actionCard}
-            onPress={() => {
-              hapticLight();
-              router.push('/recoverykit');
-            }}
-            activeOpacity={0.86}
-          >
-            <View style={styles.actionIcon}>
-              <Ionicons name="medkit-outline" size={21} color={C.primary} />
+              {group.tools.map((tool, index) => (
+                <TouchableOpacity
+                  key={tool.route}
+                  style={[
+                    styles.toolRow,
+                    index !== group.tools.length - 1 && styles.toolRowDivider,
+                    tool.danger && styles.dangerToolRow,
+                  ]}
+                  onPress={() => {
+                    tool.danger ? hapticWarning() : hapticLight();
+                    router.push(tool.route as any);
+                  }}
+                  activeOpacity={0.84}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${tool.title}. ${tool.description}`}
+                >
+                  <View
+                    style={[
+                      styles.actionIcon,
+                      tool.danger && { backgroundColor: `${C.danger}12` },
+                    ]}
+                  >
+                    <Ionicons
+                      name={tool.icon}
+                      size={21}
+                      color={tool.danger ? C.danger : C.primary}
+                    />
+                  </View>
+                  <View style={styles.flexibleTextBlock}>
+                    <Text style={styles.actionTitle}>{tool.title}</Text>
+                    {/* <Text style={styles.toolDescription}>{tool.description}</Text> */}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+                </TouchableOpacity>
+              ))}
             </View>
-            <Text style={styles.actionTitle}>Recovery kit</Text>
-            <Ionicons name="chevron-forward" size={17} color={C.tabInactive} />
-          </TouchableOpacity>
-        </View>
+          </View>
+        ))}
       </ScrollView>
 
       <SecurityIssueModal
@@ -742,14 +871,19 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     scrollContent: {
       paddingHorizontal: 20,
-      paddingTop: 26,
+      paddingTop: 22,
       paddingBottom: 150,
     },
     headerRow: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'space-between',
       marginBottom: 18,
+      gap: 12,
+    },
+    headerCopy: {
+      flex: 1,
+      minWidth: 0,
     },
     title: {
       color: C.text,
@@ -759,9 +893,10 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     headerSub: {
       color: C.textSecondary,
-      fontSize: 13,
-      fontWeight: '700',
-      marginTop: 4,
+      fontSize: 15,
+      lineHeight: 21,
+      fontWeight: '600',
+      marginTop: 6,
     },
     iconButton: {
       width: 44,
@@ -865,6 +1000,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     flexibleTextBlock: {
       flex: 1,
       minWidth: 0,
+      top: 9,
     },
     recoveryTitle: {
       color: '#FFFFFF',
@@ -880,14 +1016,25 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     sectionHeader: {
       flexDirection: 'row',
-      alignItems: 'center',
+      alignItems: 'flex-start',
       justifyContent: 'space-between',
       marginBottom: 10,
+    },
+    sectionCopy: {
+      flex: 1,
+      minWidth: 0,
     },
     sectionTitle: {
       color: C.text,
       fontSize: 17,
       fontWeight: '900',
+    },
+    sectionIntro: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      marginTop: 4,
+      maxWidth: 330,
     },
     sectionAction: {
       color: C.primary,
@@ -934,8 +1081,9 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       elevation: 2,
     },
     setupRow: {
+      minHeight: 66,
       paddingHorizontal: 14,
-      paddingVertical: 14,
+      paddingVertical: 12,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 11,
@@ -956,25 +1104,13 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       backgroundColor: C.success,
     },
     setupTitle: {
+      flex: 1,
+      minWidth: 0,
       color: C.text,
       fontSize: 14,
+      lineHeight: 20,
       fontWeight: '900',
-      flexShrink: 1,
-    },
-    setupSubtitle: {
-      color: C.textSecondary,
-      fontSize: 12,
-      lineHeight: 17,
-      marginTop: 2,
-      flexShrink: 1,
-    },
-    scoreGainHelper: {
-      color: C.textSecondary,
-      fontSize: 11,
-      lineHeight: 16,
-      fontWeight: '700',
-      marginTop: -4,
-      marginBottom: 10,
+      textAlignVertical: 'center',
     },
     recommendationCard: {
       backgroundColor: C.backgroundElement,
@@ -991,16 +1127,16 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     recommendationRow: {
       paddingHorizontal: 14,
-      paddingVertical: 13,
+      paddingVertical: 14,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 11,
     },
     gainPill: {
       minWidth: 82,
-      borderRadius: 13,
+      borderRadius: 20,
       paddingHorizontal: 10,
-      paddingVertical: 9,
+      paddingVertical: 10,
       backgroundColor: C.primary,
       borderWidth: 1,
       borderColor: isDark ? 'rgba(255,255,255,0.24)' : C.primaryDark,
@@ -1018,13 +1154,25 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       fontWeight: '900',
       letterSpacing: 0.1,
     },
-    recommendationTitle: {
+    recommendationCopy: {
       flex: 1,
       minWidth: 0,
+    },
+    recommendationTitle: {
       color: C.text,
       fontSize: 14,
       lineHeight: 20,
       fontWeight: '900',
+    },
+    recommendationDescription: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      fontWeight: '600',
+      marginTop: 4,
+    },
+    recommendationArrow: {
+      marginTop: 10,
     },
     issueSummaryCard: {
       backgroundColor: C.backgroundElement,
@@ -1086,6 +1234,66 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     actionGrid: {
       gap: 10,
     },
+    toolGroupShell: {
+      borderRadius: 24,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOpacity: 0.075,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 9 },
+      elevation: 4,
+    },
+    toolGroupCard: {
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: C.border,
+      overflow: 'hidden',
+    },
+    toolGroupHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingHorizontal: 15,
+      paddingVertical: 15,
+      backgroundColor: C.backgroundSelected,
+      borderBottomWidth: 1,
+      borderBottomColor: C.border,
+    },
+    toolGroupHeaderIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.actionCard,
+      flexShrink: 0,
+    },
+    toolGroupTitle: {
+      color: C.text,
+      fontSize: 16,
+      fontWeight: '900',
+    },
+    toolGroupDescription: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 3,
+    },
+    toolRow: {
+      paddingHorizontal: 14,
+      paddingVertical: 13,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 11,
+    },
+    toolRowDivider: {
+      borderBottomWidth: 1,
+      borderBottomColor: C.border,
+    },
+    dangerToolRow: {
+      backgroundColor: `${C.danger}08`,
+    },
     actionCard: {
       backgroundColor: C.backgroundElement,
       borderRadius: 20,
@@ -1114,8 +1322,14 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       flex: 1,
       flexShrink: 1,
       color: C.text,
-      fontSize: 14,
+      fontSize: 15,
       fontWeight: '900',
+    },
+    toolDescription: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 18,
+      marginTop: 3,
     },
   });
 }

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Alert,
   Linking,
   RefreshControl,
   ScrollView,
@@ -13,13 +12,14 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, Clock3, Crown, ShieldCheck, UsersRound, XCircle } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronUp, Clock3, Crown, ShieldCheck, UsersRound, XCircle } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 
 import { api } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from '../context/ThemeContext';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type PlanType = 'FREE' | 'PREMIUM' | 'FAMILY';
 type ThemeColors = ReturnType<typeof useAppTheme>['colors'];
@@ -89,6 +89,63 @@ const FeatureRow = ({
   </View>
 );
 
+
+const FeatureDisclosure = ({
+  label,
+  details,
+  styles,
+  colors,
+  accentColor,
+  textColor,
+}: {
+  label: string;
+  details: string;
+  styles: ScreenStyles;
+  colors: ThemeColors;
+  accentColor?: string;
+  textColor?: string;
+}) => {
+  const [expanded, setExpanded] = useState(false);
+  const accent = accentColor || colors.primary;
+
+  return (
+    <View style={styles.featureDisclosure}>
+      <TouchableOpacity
+        style={styles.featureDisclosureHeader}
+        activeOpacity={0.78}
+        onPress={() => setExpanded((current) => !current)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`${label}. ${expanded ? 'Hide details' : 'Show details'}`}
+      >
+        <View style={[styles.featureCheck, { backgroundColor: `${accent}18` }]}>
+          <Check size={15} color={accent} strokeWidth={3} />
+        </View>
+        <Text
+          style={[
+            styles.featureLabel,
+            textColor ? { color: textColor } : null,
+            styles.featureDisclosureLabel,
+          ]}
+        >
+          {label}
+        </Text>
+        {expanded ? (
+          <ChevronUp size={18} color={accent} strokeWidth={2.6} />
+        ) : (
+          <ChevronDown size={18} color={accent} strokeWidth={2.6} />
+        )}
+      </TouchableOpacity>
+
+      {expanded && (
+        <View style={styles.featureDisclosureBody}>
+          <Text style={styles.featureDisclosureText}>{details}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
 const PriceTag = ({
   price,
   period,
@@ -147,12 +204,32 @@ const getEntryContext = (from?: string | string[]) => {
     case 'backup':
       return {
         title: 'Encrypted backup upgrade',
-        message: 'Premium and Family unlock encrypted cloud backups.',
+        message: 'Premium and Family unlock encrypted backups.',
       };
     case 'emergencyaccess':
       return {
         title: 'Emergency access upgrade',
         message: 'Paid plans unlock more emergency contacts and advanced emergency sharing controls.',
+      };
+    case 'estateplaybooks':
+      return {
+        title: 'Digital Estate Playbooks',
+        message: 'Premium and Family unlock controlled item-level release rules and trusted instructions.',
+      };
+    case 'continuitydrill':
+      return {
+        title: 'Guardian Continuity Drill',
+        message: 'Family unlocks multi-person continuity rehearsals and readiness reports without releasing secrets.',
+      };
+    case 'duressmode':
+      return {
+        title: 'Coercion-Safe Decoy Vault',
+        message: 'Premium and Family unlock a separate duress password, isolated decoy items, and optional delayed trusted-contact alerts.',
+      };
+    case 'incidentlockdown':
+      return {
+        title: 'Incident Lockdown & Recovery Autopilot',
+        message: 'Premium and Family unlock one-action containment, a safe recovery device, prioritized recovery tasks, and a tamper-evident incident timeline.',
       };
     case 'family':
       return {
@@ -173,11 +250,6 @@ const getEntryContext = (from?: string | string[]) => {
       return {
         title: 'Security Health upgrade',
         message: 'Premium and Family unlock advanced breach monitoring and deeper security reports.',
-      };
-    case 'settings':
-      return {
-        title: 'Manage your plan',
-        message: 'Review your current plan and upgrade options.',
       };
     default:
       return null;
@@ -260,8 +332,38 @@ const PremiumPlanCard = ({
           styles={styles}
           colors={colors}
         />
+        <FeatureDisclosure
+          label="Guardian Safety Check"
+          details="Set scheduled proof-of-life check-ins and release only the emergency information you approved after a visible grace period."
+          styles={styles}
+          colors={colors}
+        />
+        <FeatureDisclosure
+          label="Recovery Circle"
+          details="Require several trusted people plus your private recovery code before the account password can be reset."
+          styles={styles}
+          colors={colors}
+        />
+        <FeatureDisclosure
+          label="Digital Estate Playbooks"
+          details="Assign item-level instructions, recipients and release triggers without exposing an entire vault category."
+          styles={styles}
+          colors={colors}
+        />
+        <FeatureDisclosure
+          label="Coercion-Safe Decoy Vault"
+          details="Use a separate duress password to open believable decoy items while your real vault remains isolated."
+          styles={styles}
+          colors={colors}
+        />
+        <FeatureDisclosure
+          label="Incident Lockdown & Recovery Autopilot"
+          details="Contain a suspected compromise, revoke other sessions and follow a prioritized recovery checklist on one trusted device."
+          styles={styles}
+          colors={colors}
+        />
         <FeatureRow
-          label="Encrypted cloud backup"
+          label="Encrypted backup"
           styles={styles}
           colors={colors}
         />
@@ -378,6 +480,14 @@ const FamilyPlanCard = ({
           accentColor={FAMILY_ACCENT_LIGHT}
           textColor={colors.text}
         />
+        <FeatureDisclosure
+          label="Guardian Continuity Drill"
+          details="Run a safe household rehearsal that verifies contacts, Recovery Circle, Recovery Kit, Safety Check and Estate Playbooks without releasing secrets."
+          styles={styles}
+          colors={colors}
+          accentColor={FAMILY_ACCENT_LIGHT}
+          textColor={colors.text}
+        />
         <FeatureRow
           label="Up to 6 emergency contacts"
           styles={styles}
@@ -463,6 +573,8 @@ function AnimatedSkeleton({
 }
 
 export default function PlansScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { colors, isDark } = useAppTheme();
   const styles = makeStyles(colors, isDark);
@@ -539,21 +651,21 @@ export default function PlansScreen() {
         response?.data?.authorizationUrl;
 
       if (!paymentUrl) {
-        Alert.alert('Payment error', 'No payment link was returned.');
+        screenAlert('Payment error', 'No payment link was returned.');
         return;
       }
 
       await Linking.openURL(paymentUrl);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Payment failed', error.message || 'Please try again.');
+      screenAlert('Payment failed', error.message || 'Please try again.');
     } finally {
       setUpgradingPlan(null);
     }
   };
 
   const handleCancelSubscription = () => {
-    Alert.alert(
+    screenAlert(
       'Cancel subscription?',
       'Your plan will return to Free and Premium or Family features will be locked.',
       [
@@ -571,13 +683,13 @@ export default function PlansScreen() {
               await requestApi.cancelSubscription();
               await loadCurrentSubscription(true);
 
-              Alert.alert(
+              screenAlert(
                 'Subscription cancelled',
                 'Your account has been moved to the Free plan.'
               );
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert(
+              screenAlert(
                 'Cancel failed',
                 error.message || 'Could not cancel your subscription.'
               );
@@ -829,6 +941,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     skeletonButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       height: 48,
       borderRadius: 999,
       marginTop: 8,
@@ -841,6 +959,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     entryContextCard: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       backgroundColor: C.backgroundSelected,
       borderColor: C.primary,
       borderWidth: 1,
@@ -871,10 +995,10 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     warningTitle: {
       color: C.text,
@@ -920,12 +1044,18 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     currentPlanIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 22,
@@ -958,17 +1088,29 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     freeCard: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       backgroundColor: isDark ? C.backgroundElement : '#F8FAFC',
       borderColor: isDark ? C.border : '#CBD5E1',
     },
 
     freeBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       alignSelf: 'flex-start',
       backgroundColor: isDark ? C.backgroundSelected : '#E2E8F0',
       paddingHorizontal: 11,
@@ -991,10 +1133,10 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       paddingTop: 16,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     planSubtitle: {
       color: C.textSecondary,
@@ -1014,7 +1156,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       shadowOpacity: isDark ? 0.30 : 0.18,
       shadowRadius: 24,
       shadowOffset: { width: 0, height: 12 },
-      elevation: 8,
+      elevation: 10,
     },
 
     familyGlowLarge: {
@@ -1050,6 +1192,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     familyBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       flexDirection: 'row',
       alignItems: 'center',
       gap: 7,
@@ -1068,6 +1216,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     familyCoverageBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
@@ -1141,6 +1295,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     familyMembersIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 34,
       height: 34,
       borderRadius: 12,
@@ -1165,6 +1325,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
 
 
     cardHeaderRow: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       flexDirection: 'row',
       alignItems: 'flex-start',
       justifyContent: 'space-between',
@@ -1193,6 +1359,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     badge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       alignSelf: 'flex-start',
       backgroundColor: C.securityScore,
       paddingHorizontal: 12,
@@ -1209,6 +1381,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     currentBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       alignSelf: 'flex-start',
       backgroundColor: C.primary,
       paddingHorizontal: 12,
@@ -1218,6 +1396,12 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     familyCurrentBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       backgroundColor: isDark ? '#A78BFA' : '#6D28D9',
     },
 
@@ -1236,6 +1420,43 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       flexDirection: 'row',
       alignItems: 'center',
       marginBottom: 12,
+    },
+
+    featureDisclosure: {
+      marginBottom: 10,
+      borderRadius: 15,
+      overflow: 'hidden',
+    },
+
+    featureDisclosureHeader: {
+      minHeight: 42,
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 6,
+    },
+
+    featureDisclosureLabel: {
+      fontWeight: '800',
+    },
+
+    featureDisclosureBody: {
+      marginLeft: 35,
+      marginRight: 4,
+      marginTop: -2,
+      marginBottom: 7,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      borderRadius: 13,
+      backgroundColor: C.backgroundSelected,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: C.border,
+    },
+
+    featureDisclosureText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 19,
+      fontWeight: '600',
     },
 
     featureCheck: {
@@ -1269,10 +1490,10 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       minHeight: 52,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     upgradeButtonText: {
       fontSize: 16,
@@ -1290,9 +1511,9 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     
       shadowColor: FAMILY_ACCENT,
       shadowOpacity: 0.28,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 6,},
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     chooseFamilyButtonText: {
       fontSize: 15,
@@ -1320,10 +1541,10 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     disabledButton: {
       opacity: 0.65,

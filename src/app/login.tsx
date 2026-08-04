@@ -43,13 +43,13 @@ const WelcomeScreen = () => {
   const entranceAnim = useRef(new Animated.Value(0)).current;
 
   const palette = useMemo(() => {
-    const background = pick(C.background, C.backgroundPrimary, '#F5F7FA');
-    const surface = pick(C.surface, C.backgroundElement, C.card, '#FFFFFF');
-    const elevated = pick(C.surfaceElevated, C.backgroundElement, surface);
-    const primary = pick(C.primary, C.backgroundbutton, C.tint, '#1D9E75');
+    const background = pick(C.background, '#F5F7FA');
+    const surface = pick(C.surface, C.backgroundElement, '#FFFFFF');
+    const elevated = pick( C.backgroundElement, surface);
+    const primary = pick(C.primary, C.backgroundbutton, '#1D9E75');
     const primaryDark = pick(C.primaryDark, '#145A3E');
     const text = pick(C.textPrimary, C.text, '#101828');
-    const muted = pick(C.textSecondary, C.muted, '#667085');
+    const muted = pick(C.textSecondary, '#667085');
     const border = pick(C.border, 'rgba(148, 163, 184, 0.26)');
     const dark = isVeryDarkColor(background);
 
@@ -210,7 +210,7 @@ const WelcomeScreen = () => {
             {/* <Text style={styles.eyebrow}>Encrypted life vault</Text> */}
             <Text style={styles.title}>The Guardian</Text>
             <Text style={styles.subtitle}>
-              Your private vault for passwords, cards, documents and notes.
+              Your Life, Protected.
             </Text>
           </View>
         </View>

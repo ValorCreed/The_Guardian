@@ -9,7 +9,6 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   BackHandler,
   ActivityIndicator,
   ScrollView,
@@ -19,12 +18,21 @@ import { router, useFocusEffect } from "expo-router";
 import * as LocalAuthentication from "expo-local-authentication";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-import { api, saveLoginSession, isDeviceLimitError } from "../services/api";
+import {
+  api,
+  consumeSessionEndMessage,
+  saveLoginSession,
+  isDeviceLimitError,
+} from "../services/api";
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from "../context/ThemeContext";
 import { saveBiometricCredentials, biometricLogin } from "../utils/secureAuth";
+import { safeLogError } from "../utils/asyncResilience";
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 export default function UnlockScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C, reloadTheme } = useAppTheme();
   const styles = makeStyles(C);
@@ -43,6 +51,26 @@ export default function UnlockScreen() {
       reloadTheme?.();
     }, [reloadTheme]),
   );
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      void consumeSessionEndMessage()
+        .then((message) => {
+          if (!active || !message) return;
+          screenAlert('This device was signed out', message, undefined, {
+            cancelable: false,
+          });
+        })
+        .catch((error: unknown) => {
+          safeLogError('SIGNIN_SESSION_MESSAGE', error);
+        });
+
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
 
   useEffect(() => {
     const checkBiometricAndLockState = async () => {
@@ -112,7 +140,7 @@ export default function UnlockScreen() {
       router.replace("/home");
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         "Biometric login failed",
         error.message || "Please sign in with your email and password first.",
       );
@@ -132,7 +160,8 @@ export default function UnlockScreen() {
     }
 
     await saveLoginSession(data);
-    if (biometricEnabled) {
+    const duressSession = String(data?.sessionMode || 'NORMAL').toUpperCase() === 'DURESS';
+    if (biometricEnabled && !duressSession) {
       await saveBiometricCredentials(cleanEmail, cleanPassword);
     }
     await reloadTheme?.();
@@ -159,7 +188,7 @@ export default function UnlockScreen() {
     const cleanPassword = password;
 
     if (!cleanEmail || !cleanPassword) {
-      Alert.alert(
+      screenAlert(
         "Missing details",
         "Please enter both your email and master password.",
       );
@@ -171,13 +200,25 @@ export default function UnlockScreen() {
       await performLogin(false);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      const message =
+      const rawMessage =
         error.message ||
         "We could not sign you in. Please check your details and try again.";
+      const rawNormalizedMessage = String(rawMessage).toLowerCase();
+      const genericPermissionFailure =
+        (error?.status === 401 || error?.status === 403) &&
+        (rawNormalizedMessage.includes('not allowed') ||
+          rawNormalizedMessage.includes('permission') ||
+          rawNormalizedMessage.includes('forbidden') ||
+          rawNormalizedMessage.includes('access denied') ||
+          rawNormalizedMessage.includes('bad credentials') ||
+          rawNormalizedMessage.includes('invalid credentials'));
+      const message = genericPermissionFailure
+        ? 'The email or password is incorrect. Please check your details and try again.'
+        : rawMessage;
       const normalizedMessage = String(message).toLowerCase();
 
       if (normalizedMessage.includes("finish email verification")) {
-        Alert.alert(
+        screenAlert(
           "Verification required",
           "Your account has not been created yet. Confirm the code sent to your email to finish registration.",
           [
@@ -201,7 +242,7 @@ export default function UnlockScreen() {
       }
 
       if (normalizedMessage.includes("verify your email before signing in")) {
-        Alert.alert(
+        screenAlert(
           "Verification required",
           "This older account must verify its email before it can access the app.",
           [
@@ -224,7 +265,7 @@ export default function UnlockScreen() {
       }
 
       if (isDeviceLimitError(error)) {
-        Alert.alert(
+        screenAlert(
           "Device limit reached",
           "Your free plan allows one trusted device at a time. This looks like a different device from the one currently signed in.\n\nYou can remove the previous device and continue signing in on this device.",
           [
@@ -241,7 +282,7 @@ export default function UnlockScreen() {
                   await performLogin(true);
                 } catch (retryError: any) {
     if (isScreenRequestCancelled(retryError)) return;
-                  Alert.alert(
+                  screenAlert(
                     "Login failed",
                     retryError.message ||
                       "We could not sign you in on this device. Please try again.",
@@ -257,7 +298,7 @@ export default function UnlockScreen() {
         return;
       }
 
-      Alert.alert("Login failed", message);
+      screenAlert("Login failed", message);
     } finally {
       setLoading(false);
     }

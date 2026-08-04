@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -35,6 +34,8 @@ import PulsingSkeleton from '../components/PulsingSkeleton';
 import { decryptJson } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 type SharedItemType = 'PASSWORD' | 'CARD' | 'DOCUMENT' | 'NOTE';
 
@@ -174,6 +175,8 @@ const decryptSharedValue = (value?: string | null) => {
 };
 
 export default function SharedVaultDetailsScreen() {
+  const screenAlert = useScreenAlert();
+
   const { id, type } = useLocalSearchParams<{
     id: string;
     type?: string;
@@ -275,7 +278,7 @@ export default function SharedVaultDetailsScreen() {
         ownerEmail: data.ownerEmail,
       });
     } catch (error: any) {
-      Alert.alert(
+      screenAlert(
         'Could not open item',
         error.message || 'This shared item could not be loaded.'
       );
@@ -295,12 +298,12 @@ export default function SharedVaultDetailsScreen() {
     const cleaned = cleanSharedValue(value);
 
     if (!cleaned) {
-      Alert.alert('Nothing to copy', `${label} is empty.`);
+      screenAlert('Nothing to copy', `${label} is empty.`);
       return;
     }
 
     await setSecureClipboard(cleaned);
-    Alert.alert('Copied', getSecureClipboardMessage(label));
+    screenAlert('Copied', getSecureClipboardMessage(label));
   };
 
   const hideValue = (value?: string) => {
@@ -343,7 +346,7 @@ export default function SharedVaultDetailsScreen() {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        Alert.alert('Document saved', 'The shared document was saved to your selected folder.');
+        screenAlert('Document saved', 'The shared document was saved to your selected folder.');
         return;
       }
 
@@ -355,9 +358,9 @@ export default function SharedVaultDetailsScreen() {
         return;
       }
 
-      Alert.alert('Saved temporarily', downloaded.uri);
+      screenAlert('Saved temporarily', downloaded.uri);
     } catch (error: any) {
-      Alert.alert(
+      screenAlert(
         'Download failed',
         error?.message || 'This shared document could not be downloaded.'
       );
@@ -416,7 +419,11 @@ export default function SharedVaultDetailsScreen() {
         ? cleanSharedValue(item.documentName || item.title) || 'Shared document'
         : itemType === 'NOTE'
           ? cleanSharedValue(item.title) || 'Shared SecureNote'
-          : cleanSharedValue(item.title) || 'Shared password';
+          : getFriendlyVaultTitle(
+              cleanSharedValue(item.title),
+              cleanSharedValue(item.website),
+              'Shared password'
+            );
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -550,7 +557,11 @@ function SharedPasswordDetails({
       <InfoRow
         icon={<Globe size={19} color={C.primary} />}
         label="Website"
-        value={cleanSharedValue(item.website) || 'No website saved'}
+        value={getFriendlyVaultSubtitle(
+          undefined,
+          cleanSharedValue(item.website),
+          'No website saved'
+        )}
         onCopy={() => copyValue('Website', item.website)}
         styles={styles}
         C={C}

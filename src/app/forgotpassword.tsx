@@ -108,7 +108,13 @@ const makeStyles = (C: any) =>
       paddingTop: 108,
       paddingBottom: 160,
     },
-    logoBox: { marginBottom: 20 },
+    logoBox: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ marginBottom: 20 },
     title: {
       fontSize: 32,
       fontWeight: '900',
@@ -134,10 +140,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,},
     dangerCard: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -150,10 +156,10 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,},
     cardIcon: {
       width: 48,
       height: 48,
@@ -163,11 +169,17 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     dangerIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 48,
       height: 48,
       borderRadius: 18,
@@ -175,7 +187,13 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
     },
-    cardTextWrap: { flex: 1 },
+    cardTextWrap: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ flex: 1 },
     cardTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginBottom: 3 },
     cardText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: '700' },
     warningBox: {
@@ -189,10 +207,10 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     warningText: {
       flex: 1,
       color: C.textSecondary,
@@ -200,6 +218,12 @@ const makeStyles = (C: any) =>
       lineHeight: 20,
       fontWeight: '700',
     },
-    backButton: { alignItems: 'center', paddingVertical: 14 },
+    backButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ alignItems: 'center', paddingVertical: 14 },
     backButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '800' },
   });

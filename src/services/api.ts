@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, Platform } from 'react-native';
+import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import * as Device from 'expo-device';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -17,12 +18,25 @@ import {
   trackLoginSuccess,
   trackLogout,
   trackPlanLimitReached,
+  setDuressAnalyticsSuppressed,
 } from './analytics';
+import {
+  secureJsonRequestBody,
+  validateDocumentUploadInput,
+  validateDocumentUploadMetadata,
+} from '../utils/inputSecurity';
+import {
+  AppOperationError,
+  getExponentialBackoffDelay,
+  isTransientError,
+  retryAsync,
+  sanitizeErrorPayload,
+  safeLogError,
+  toUserMessage,
+  waitForRetry,
+} from '../utils/asyncResilience';
 
-export const API_BASE_URL = (//'http://10.229.93.37:8080'
-  process.env.EXPO_PUBLIC_API_URL ||
-  'https://guardian-vault-gateway.onrender.com'
-).replace(/\/+$/, '');
+const API_BASE_URL = 'https://guardian-vault-gateway.onrender.com';
 /**\
  * REQUEST TIMEOUT SETTINGS
  *
@@ -55,7 +69,8 @@ const DOCUMENT_UPLOAD_TIMEOUT_MS = 180000; // Multipart uploads get a longer dea
  * creation, password reset, verification-email delivery, and similar POSTs are
  * sent only once so the app never duplicates a state-changing request.
  */
-const LOGIN_TRANSPORT_RETRY_DELAYS_MS = [1000, 2500, 5000] as const;
+const LOGIN_TRANSPORT_RETRY_DELAYS_MS = [800, 1600, 3200] as const;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
 const AUTH_APP_ACTIVE_WAIT_MS = 4000;
 const AUTH_NETWORK_SETTLE_MS = 350;
 const REACHABILITY_TIMEOUT_MS = 6000;
@@ -73,12 +88,136 @@ const AUTH_TOKEN_SECURE_STORE_KEY = 'guardian.auth-token';
 const LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY = 'token';
 const LEGACY_BIOMETRIC_PASSWORD_SECURE_STORE_KEY = 'biometricPassword';
 
+const SESSION_END_MESSAGE_KEY = 'guardianSessionEndMessage';
+
+export type SessionSecurityEvent = {
+  type: 'SESSION_REVOKED';
+  message: string;
+};
+
+type SessionSecurityListener = (event: SessionSecurityEvent) => void;
+
+const sessionSecurityListeners = new Set<SessionSecurityListener>();
+let sessionInvalidationPromise: Promise<void> | null = null;
+
+export function subscribeToSessionSecurityEvents(
+  listener: SessionSecurityListener
+) {
+  sessionSecurityListeners.add(listener);
+  return () => sessionSecurityListeners.delete(listener);
+}
+
+export async function consumeSessionEndMessage() {
+  const message = await AsyncStorage.getItem(SESSION_END_MESSAGE_KEY);
+  if (message) {
+    await AsyncStorage.removeItem(SESSION_END_MESSAGE_KEY);
+  }
+  return message;
+}
+
+async function invalidateRevokedSession(message?: string) {
+  if (sessionInvalidationPromise) return sessionInvalidationPromise;
+
+  sessionInvalidationPromise = (async () => {
+    const hadToken = await hasStoredAuthToken().catch(() => false);
+    if (!hadToken) return;
+
+    const friendlyMessage = message?.trim() ||
+      'This device was signed out because its Guardian session is no longer active. This can happen after a remote sign-out or Incident Lockdown. Sign in again only if you still trust this device.';
+
+    tokenCache = null;
+    clearOfflineVaultMemoryCache();
+    setDuressAnalyticsSuppressed(false);
+
+    await Promise.allSettled([
+      SecureStore.deleteItemAsync(AUTH_TOKEN_SECURE_STORE_KEY),
+      SecureStore.deleteItemAsync('biometricEmail'),
+      SecureStore.deleteItemAsync('guardian.biometric-credential'),
+      SecureStore.deleteItemAsync(LEGACY_BIOMETRIC_PASSWORD_SECURE_STORE_KEY),
+      markOfflineVaultStale(),
+    ]);
+
+    try {
+      const { suspendGuardianAutofillForDuressSession } = await import('./autofillSync');
+      await suspendGuardianAutofillForDuressSession();
+    } catch {
+      // Revocation must still complete when native autofill is unavailable.
+    }
+
+    await AsyncStorage.multiSet([
+      ['vaultLocked', 'true'],
+      [SESSION_END_MESSAGE_KEY, friendlyMessage],
+    ]);
+
+    await AsyncStorage.multiRemove([
+      LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY,
+      'userName',
+      'userEmail',
+      'userId',
+      'subscriptionPlan',
+      'emailVerified',
+      'twoFactorEnabled',
+      'guardianSessionMode',
+      'guardianIncidentLockdown',
+      'biometricUnlock',
+      'guardian.biometric-credential-present',
+    ]);
+
+    await clearAnalyticsUser().catch(() => undefined);
+    clearCache();
+
+    const event: SessionSecurityEvent = {
+      type: 'SESSION_REVOKED',
+      message: friendlyMessage,
+    };
+    sessionSecurityListeners.forEach((listener) => {
+      try {
+        listener(event);
+      } catch {
+        // One screen listener must not prevent the remaining listeners from running.
+      }
+    });
+  })().finally(() => {
+    sessionInvalidationPromise = null;
+  });
+
+  return sessionInvalidationPromise;
+}
+
 type ScopedApiRequestOptions = {
   signal?: AbortSignal;
   __guardianScreenRequest?: true;
 };
 
 let activeScopedSignal: AbortSignal | null = null;
+
+let incidentRedirectScheduled = false;
+
+const activateIncidentLockdownRedirect = async () => {
+  /*
+   * A 423 may also be returned to an unauthenticated login attempt from a
+   * non-recovery device. Do not persist a protected-route redirect unless this
+   * installation already holds a Guardian session token.
+   */
+  const hasToken = await hasStoredAuthToken().catch(() => false);
+  if (!hasToken) return;
+
+  await AsyncStorage.setItem('guardianIncidentLockdown', 'true');
+
+  if (incidentRedirectScheduled) return;
+  incidentRedirectScheduled = true;
+
+  setTimeout(() => {
+    try {
+      router.replace('/incidentlockdown');
+    } catch {
+      // The root navigator may still be mounting. The layout guard will retry
+      // from the persisted marker on the next route or app-state transition.
+    } finally {
+      incidentRedirectScheduled = false;
+    }
+  }, 0);
+};
 
 const createAbortError = () => {
   const error = new Error('The request was cancelled because the screen is no longer active.');
@@ -88,8 +227,28 @@ const createAbortError = () => {
 
 const getScopedSignal = () => activeScopedSignal;
 
-const wait = (delayMs: number) =>
-  new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+const wait = (delayMs: number, signal?: AbortSignal | null) =>
+  waitForRetry(delayMs, signal).catch((error: unknown) => {
+    if (signal?.aborted) throw createAbortError();
+    throw error;
+  });
+
+const isTransientHttpStatus = (status?: number) =>
+  Boolean(status && TRANSIENT_HTTP_STATUSES.has(status));
+
+const getRetryAfterDelayMs = (response?: Response | null) => {
+  const raw = response?.headers?.get?.('Retry-After');
+  if (!raw) return 0;
+
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.min(15_000, Math.round(seconds * 1000));
+  }
+
+  const retryAt = new Date(raw).getTime();
+  if (Number.isNaN(retryAt)) return 0;
+  return Math.max(0, Math.min(15_000, retryAt - Date.now()));
+};
 
 type AuthTransportResponse = {
   ok: boolean;
@@ -321,6 +480,7 @@ export type LoginResponse = {
   emailVerified?: boolean;
   twoFactorEnabled?: boolean;
   requiresTwoFactor?: boolean;
+  sessionMode?: 'NORMAL' | 'DURESS' | string;
   user?: {
     id?: number;
     userId?: number;
@@ -334,6 +494,30 @@ export type LoginResponse = {
 export type BiometricEnrollmentResponse = {
   credentialToken: string;
   expiresAt: string;
+};
+
+export type DuressContactOption = {
+  contactId: number;
+  userId: number;
+  name: string;
+  email: string;
+  relationship: string;
+};
+
+export type DuressSettingsResponse = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | 'UNKNOWN' | string;
+  eligible: boolean;
+  canConfigure: boolean;
+  enabled: boolean;
+  alertEnabled: boolean;
+  alertContactUserId?: number | null;
+  alertContactEmail?: string | null;
+  alertContactName?: string | null;
+  alertDelayMinutes: number;
+  pendingAlertCount: number;
+  updatedAt?: string | null;
+  message: string;
+  contacts: DuressContactOption[];
 };
 
 export type LegalConsentResponse = {
@@ -368,13 +552,15 @@ export class GuardianApiError extends Error {
       data?: any;
     } = {}
   ) {
-    super(message);
+    super(toUserMessage(message));
     this.name = 'GuardianApiError';
     this.status = options.status;
     this.path = options.path;
-    this.rawMessage = options.rawMessage;
+    this.rawMessage = options.rawMessage
+      ? toUserMessage(options.rawMessage, 'Request failed.')
+      : undefined;
     this.code = options.code;
-    this.data = options.data;
+    this.data = sanitizeErrorPayload(options.data);
   }
 }
 
@@ -549,6 +735,52 @@ export type EmergencyOverviewResponse = {
   receivedRequests: EmergencyAccessRequestResponse[];
   sentRequests: EmergencyAccessRequestResponse[];
   auditLogs: EmergencyAuditLogResponse[];
+};
+
+
+export type GuardianSafetyCheckStatus =
+  | 'DISABLED'
+  | 'ACTIVE'
+  | 'GRACE'
+  | 'TRIGGERED'
+  | string;
+
+export type GuardianSafetyCheckContact = {
+  id: number;
+  name: string;
+  email: string;
+  relationship: string;
+  registered: boolean;
+  active: boolean;
+  hasSharedItems: boolean;
+};
+
+export type GuardianSafetyCheckResponse = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | string;
+  eligible: boolean;
+  canConfigure: boolean;
+  configured: boolean;
+  enabled: boolean;
+  status: GuardianSafetyCheckStatus;
+  contactId?: number | null;
+  contactName?: string | null;
+  contactEmail?: string | null;
+  intervalDays?: number | null;
+  gracePeriodHours?: number | null;
+  lastCheckInAt?: string | null;
+  nextCheckInAt?: string | null;
+  graceStartedAt?: string | null;
+  triggeredAt?: string | null;
+  triggeredRequestId?: number | null;
+  contacts: GuardianSafetyCheckContact[];
+  message: string;
+};
+
+export type UpdateGuardianSafetyCheckBody = {
+  enabled: boolean;
+  contactId?: number | null;
+  intervalDays?: number | null;
+  gracePeriodHours?: number | null;
 };
 
 export type EmergencyVaultItemResponse = {
@@ -782,6 +1014,8 @@ export type DeviceSession = {
 
 export type AppNotificationType =
   | 'WELCOME'
+  | 'TWO_FACTOR_ENABLED'
+  | 'TWO_FACTOR_DISABLED'
   | 'SUBSCRIPTION_ACTIVATED'
   | 'SUBSCRIPTION_CANCELLED'
   | 'SUBSCRIPTION_EXPIRED'
@@ -801,9 +1035,45 @@ export type AppNotificationType =
   | 'EMERGENCY_ACCESS_APPROVED'
   | 'EMERGENCY_ACCESS_DENIED'
   | 'EMERGENCY_ACCESS_AVAILABLE'
+  | 'EMERGENCY_VAULT_VIEWED'
+  | 'SAFETY_CHECK_CONFIGURED'
+  | 'SAFETY_CHECK_COMPLETED'
+  | 'SAFETY_CHECK_GRACE_STARTED'
+  | 'SAFETY_CHECK_TRIGGERED'
+  | 'SAFETY_CHECK_DISABLED'
   | 'RECOVERY_KIT_CREATED'
   | 'RECOVERY_KIT_USED'
   | 'RECOVERY_KIT_REVOKED'
+  | 'ACCOUNT_RESET_VAULT_ERASED'
+  | 'RECOVERY_CIRCLE_CONFIGURED'
+  | 'RECOVERY_CIRCLE_DISABLED'
+  | 'RECOVERY_CIRCLE_MEMBER_ADDED'
+  | 'RECOVERY_CIRCLE_APPROVAL_REQUESTED'
+  | 'RECOVERY_CIRCLE_REQUEST_STARTED'
+  | 'RECOVERY_CIRCLE_VOTE_RECORDED'
+  | 'RECOVERY_CIRCLE_APPROVED'
+  | 'RECOVERY_CIRCLE_DENIED'
+  | 'RECOVERY_CIRCLE_CANCELLED'
+  | 'RECOVERY_CIRCLE_COMPLETED'
+  | 'ESTATE_PLAYBOOK_CREATED'
+  | 'ESTATE_PLAYBOOK_UPDATED'
+  | 'ESTATE_PLAYBOOK_ARCHIVED'
+  | 'ESTATE_PLAYBOOK_RELEASED'
+  | 'ESTATE_PLAYBOOK_VIEWED'
+  | 'ESTATE_PLAYBOOK_COMPLETED'
+  | 'ESTATE_PLAYBOOK_CANCELLED'
+  | 'CONTINUITY_DRILL_STARTED'
+  | 'CONTINUITY_DRILL_ACK_REQUESTED'
+  | 'CONTINUITY_DRILL_ACKNOWLEDGED'
+  | 'CONTINUITY_DRILL_COMPLETED'
+  | 'CONTINUITY_DRILL_EXPIRED'
+  | 'CONTINUITY_DRILL_CANCELLED'
+  | 'DURESS_ALERT'
+  | 'INCIDENT_LOCKDOWN_STARTED'
+  | 'INCIDENT_PASSWORD_ROTATED'
+  | 'INCIDENT_LOCKDOWN_COMPLETED'
+  | 'INCIDENT_LOCKDOWN_RECOVERED'
+  | 'INCIDENT_LOCKDOWN_CANCELLED'
   | 'SECURITY_ALERT'
   | 'PASSWORD_BREACHED'
   | 'SECURITY_SCAN_ALERT'
@@ -824,6 +1094,33 @@ export type AppNotification = {
 export type NotificationUnreadCountResponse = {
   unreadCount: number;
 };
+
+export type RegisterPushTokenRequest = {
+  installationId: string;
+  expoPushToken: string;
+  platform: 'android' | 'ios';
+  deviceName: string;
+  appVersion?: string | null;
+};
+
+export type PushTokenResponse = {
+  registered: boolean;
+  installationId: string;
+  platform: string;
+  deviceName: string;
+  lastSeenAt: string;
+};
+
+export type NotificationPreferences = {
+  pushEnabled: boolean;
+  securityAlerts: boolean;
+  emergencyRecovery: boolean;
+  continuityReminders: boolean;
+  billing: boolean;
+  productUpdates: boolean;
+};
+
+export type UpdateNotificationPreferences = Partial<NotificationPreferences>;
 
 export type SecurityScanAlertRequest = {
   score: number;
@@ -865,6 +1162,347 @@ export type AccountResetEraseBody = {
   newPassword: string;
 };
 
+
+export type RecoveryCircleCandidate = {
+  contactId: number;
+  userId: number;
+  name: string;
+  email: string;
+  relationship: string;
+};
+
+export type RecoveryCircleMember = {
+  id: number;
+  userId: number;
+  name: string;
+  email: string;
+};
+
+export type RecoveryCircleRequest = {
+  requestId: string;
+  ownerName: string;
+  ownerEmail: string;
+  status: 'PENDING' | 'APPROVED' | 'DENIED' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED' | string;
+  approvalCount: number;
+  denialCount: number;
+  threshold: number;
+  memberCount: number;
+  createdAt: string;
+  expiresAt: string;
+  approvedAt?: string | null;
+  completedAt?: string | null;
+  canVote: boolean;
+  currentUserDecision?: 'APPROVED' | 'DENIED' | string | null;
+};
+
+export type RecoveryCircleOverview = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | 'UNKNOWN' | string;
+  eligible: boolean;
+  canConfigure: boolean;
+  configured: boolean;
+  enabled: boolean;
+  threshold: number;
+  members: RecoveryCircleMember[];
+  candidates: RecoveryCircleCandidate[];
+  ownedRequests: RecoveryCircleRequest[];
+  approvalRequests: RecoveryCircleRequest[];
+  recoveryCode?: string | null;
+  message: string;
+};
+
+export type UpdateRecoveryCircleBody = {
+  enabled: boolean;
+  threshold?: number;
+  memberUserIds?: number[];
+  password: string;
+};
+
+export type StartRecoveryCircleResponse = {
+  requestId: string;
+  threshold: number;
+  expiresAt: string;
+  message: string;
+};
+
+export type RecoveryCirclePublicStatus = {
+  status: 'PENDING' | 'APPROVED' | 'DENIED' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED' | string;
+  approvalCount: number;
+  threshold: number;
+  expiresAt: string;
+  canComplete: boolean;
+  message: string;
+};
+
+export type RecoveryCircleCredentials = {
+  requestId: string;
+  recoveryCode: string;
+};
+
+export type EstateActionType =
+  | 'RELEASE'
+  | 'TRANSFER'
+  | 'CANCEL'
+  | 'DELETE'
+  | 'ARCHIVE'
+  | 'NEVER_RELEASE';
+
+export type EstateTriggerType =
+  | 'OWNER_RELEASE'
+  | 'EMERGENCY_APPROVAL'
+  | 'SAFETY_CHECK';
+
+export type EstateContactOption = {
+  contactId: number;
+  userId?: number | null;
+  name: string;
+  email: string;
+  relationship: string;
+  registered: boolean;
+  active: boolean;
+  allowPasswords: boolean;
+  allowCards: boolean;
+  allowDocuments: boolean;
+  allowNotes: boolean;
+};
+
+export type EstateVaultItemOption = {
+  id: number;
+  itemType: VaultItemType;
+  title: string;
+  updatedAt?: string | null;
+};
+
+export type EstatePlaybook = {
+  id: number;
+  itemType: VaultItemType;
+  itemId: number;
+  itemTitle: string;
+  actionType: EstateActionType;
+  triggerType: EstateTriggerType;
+  recipientContactId?: number | null;
+  recipientUserId?: number | null;
+  recipientName?: string | null;
+  recipientEmail?: string | null;
+  instructions: string;
+  status: 'ACTIVE' | 'PAUSED' | 'ARCHIVED' | string;
+  itemAvailable: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EstateExecution = {
+  id: number;
+  playbookId: number;
+  ownerName: string;
+  ownerEmail: string;
+  recipientName: string;
+  recipientEmail: string;
+  itemType: VaultItemType;
+  itemId: number;
+  itemTitle: string;
+  actionType: Exclude<EstateActionType, 'NEVER_RELEASE'>;
+  sourceType: 'OWNER_RELEASE' | 'EMERGENCY_REQUEST' | 'SAFETY_CHECK' | string;
+  status: 'RELEASED' | 'VIEWED' | 'COMPLETED' | 'CANCELLED' | string;
+  instructions: string;
+  itemAvailable: boolean;
+  canOpen: boolean;
+  canCancel: boolean;
+  canComplete: boolean;
+  releasedAt: string;
+  viewedAt?: string | null;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+};
+
+export type EstateOverview = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | 'UNKNOWN' | string;
+  eligible: boolean;
+  canConfigure: boolean;
+  vaultAvailable: boolean;
+  contacts: EstateContactOption[];
+  vaultItems: EstateVaultItemOption[];
+  playbooks: EstatePlaybook[];
+  releasedByMe: EstateExecution[];
+  received: EstateExecution[];
+  message: string;
+};
+
+export type EstatePlaybookBody = {
+  itemType: VaultItemType;
+  itemId: number;
+  actionType: EstateActionType;
+  triggerType: EstateTriggerType;
+  recipientContactId?: number | null;
+  instructions?: string;
+};
+
+export type EstateReleasedItem = {
+  executionId: number;
+  ownerName: string;
+  ownerEmail: string;
+  actionType: Exclude<EstateActionType, 'NEVER_RELEASE'>;
+  instructions: string;
+  itemType: VaultItemType;
+  itemId: number;
+  title: string;
+  usernameValue?: string | null;
+  password?: string | null;
+  website?: string | null;
+  notes?: string | null;
+  cardName?: string | null;
+  cardNumber?: string | null;
+  expiryDate?: string | null;
+  cvv?: string | null;
+  cardholderName?: string | null;
+  documentName?: string | null;
+  documentType?: string | null;
+  sizeBytes?: number | null;
+  documentNotes?: string | null;
+  category?: string | null;
+  content?: string | null;
+  pinned?: boolean | null;
+  releasedAt: string;
+  viewedAt?: string | null;
+  itemCreatedAt?: string | null;
+  itemUpdatedAt?: string | null;
+};
+
+export type ContinuityCheckStatus = 'PASS' | 'WARN' | 'FAIL';
+export type ContinuityDrillStatus = 'RUNNING' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED';
+export type ContinuityParticipantStatus = 'PENDING' | 'ACKNOWLEDGED';
+
+export type ContinuityCheck = {
+  code: string;
+  title: string;
+  status: ContinuityCheckStatus;
+  detail: string;
+  actionRoute?: string | null;
+  weight: number;
+  earnedPoints: number;
+};
+
+export type ContinuityParticipant = {
+  userId?: number | null;
+  name: string;
+  email: string;
+  roles: string;
+  status: ContinuityParticipantStatus;
+  eligible: boolean;
+  notifiedAt?: string | null;
+  acknowledgedAt?: string | null;
+};
+
+export type ContinuityDrill = {
+  id: number;
+  publicId: string;
+  status: ContinuityDrillStatus;
+  score: number;
+  staticScore: number;
+  acknowledgedCount: number;
+  participantCount: number;
+  startedAt: string;
+  expiresAt: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  canComplete: boolean;
+  canCancel: boolean;
+  checks: ContinuityCheck[];
+  participants: ContinuityParticipant[];
+};
+
+export type ContinuityIncomingRequest = {
+  publicId: string;
+  ownerName: string;
+  ownerEmail: string;
+  roles: string;
+  status: ContinuityParticipantStatus;
+  startedAt: string;
+  expiresAt: string;
+  acknowledgedAt?: string | null;
+  canAcknowledge: boolean;
+};
+
+export type ContinuityAcknowledgement = {
+  publicId: string;
+  status: ContinuityParticipantStatus;
+  acknowledgedAt?: string | null;
+  message: string;
+};
+
+export type ContinuityOverview = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | 'UNKNOWN' | string;
+  eligible: boolean;
+  canRun: boolean;
+  subscriptionExpiresAt?: string | null;
+  message: string;
+  activeDrill?: ContinuityDrill | null;
+  history: ContinuityDrill[];
+  receivedRequests: ContinuityIncomingRequest[];
+};
+
+
+export type SecurityIncidentType =
+  | 'LOST_OR_STOLEN_DEVICE'
+  | 'MASTER_PASSWORD_EXPOSED'
+  | 'EMAIL_COMPROMISED'
+  | 'PHISHING_ATTACK'
+  | 'UNKNOWN_LOGIN'
+  | 'SIM_SWAP'
+  | 'FAMILY_MISUSE'
+  | 'DURESS_EVENT_ENDED'
+  | 'OTHER';
+
+export type IncidentTaskStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
+export type SecurityIncidentStatus = 'ACTIVE' | 'COMPLETED' | 'RECOVERED' | 'CANCELLED';
+
+export type IncidentRecoveryTask = {
+  id: number;
+  code: string;
+  title: string;
+  detail: string;
+  actionRoute?: string | null;
+  required: boolean;
+  priority: number;
+  status: IncidentTaskStatus;
+  completedAt?: string | null;
+};
+
+export type IncidentTimelineEvent = {
+  eventType: string;
+  title: string;
+  detail?: string | null;
+  createdAt: string;
+};
+
+export type SecurityIncident = {
+  id: number;
+  publicId: string;
+  type: SecurityIncidentType;
+  status: SecurityIncidentStatus;
+  planSnapshot: string;
+  safeDeviceName: string;
+  note?: string | null;
+  progress: number;
+  sessionsRevoked: number;
+  biometricsRevoked: number;
+  startedAt: string;
+  completedAt?: string | null;
+  cancelledAt?: string | null;
+  canComplete: boolean;
+  canCancel: boolean;
+  tasks: IncidentRecoveryTask[];
+  timeline: IncidentTimelineEvent[];
+};
+
+export type IncidentOverview = {
+  plan: 'FREE' | 'PREMIUM' | 'FAMILY' | 'UNKNOWN' | string;
+  eligible: boolean;
+  canStart: boolean;
+  message: string;
+  activeIncident?: SecurityIncident | null;
+  history: SecurityIncident[];
+};
+
 type CreateVaultItemBody = {
   itemType: VaultItemType;
   title: string;
@@ -887,9 +1525,11 @@ type CacheEntry<T> = {
 };
 
 const CACHE_TIME_MS = 45000;
+const STALE_CACHE_GRACE_MS = 5 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 80;
 const cache = new Map<string, CacheEntry<any>>();
 let tokenCache: string | null | undefined = undefined;
+let volatileDeviceId: string | null = null;
 
 const GUARDIAN_DEVICE_ID_KEY = 'guardian.device-id';
 const GUARDIAN_DEVICE_ID_FALLBACK_KEY = 'guardianDeviceIdFallback';
@@ -904,41 +1544,68 @@ function createLocalDeviceId() {
 }
 
 async function getGuardianDeviceId() {
-  /*
-   * Older builds used a SecureStore key containing a colon. Preserve the
-   * existing AsyncStorage fallback ID first so upgrading does not make the same
-   * physical installation appear as a new trusted device.
-   */
-  const fallbackExisting = await AsyncStorage.getItem(
-    GUARDIAN_DEVICE_ID_FALLBACK_KEY
-  );
+  let fallbackExisting: string | null = null;
+
+  try {
+    fallbackExisting = await AsyncStorage.getItem(
+      GUARDIAN_DEVICE_ID_FALLBACK_KEY
+    );
+  } catch (error: unknown) {
+    safeLogError('DEVICE_ID_FALLBACK_READ', error);
+  }
 
   try {
     const secureExisting = await SecureStore.getItemAsync(
       GUARDIAN_DEVICE_ID_KEY
     );
 
-    if (secureExisting) return secureExisting;
+    if (secureExisting) {
+      volatileDeviceId = secureExisting;
+      return secureExisting;
+    }
 
     if (fallbackExisting) {
       await SecureStore.setItemAsync(
         GUARDIAN_DEVICE_ID_KEY,
         fallbackExisting
-      );
+      ).catch((error: unknown) => {
+        safeLogError('DEVICE_ID_SECURE_MIGRATION', error);
+      });
+      volatileDeviceId = fallbackExisting;
       return fallbackExisting;
     }
-
-    const created = createLocalDeviceId();
-    await SecureStore.setItemAsync(GUARDIAN_DEVICE_ID_KEY, created);
-    await AsyncStorage.setItem(GUARDIAN_DEVICE_ID_FALLBACK_KEY, created);
-    return created;
-  } catch {
-    if (fallbackExisting) return fallbackExisting;
-
-    const created = createLocalDeviceId();
-    await AsyncStorage.setItem(GUARDIAN_DEVICE_ID_FALLBACK_KEY, created);
-    return created;
+  } catch (error: unknown) {
+    safeLogError('DEVICE_ID_SECURE_READ', error);
   }
+
+  if (fallbackExisting) {
+    volatileDeviceId = fallbackExisting;
+    return fallbackExisting;
+  }
+
+  if (!volatileDeviceId) {
+    volatileDeviceId = createLocalDeviceId();
+  }
+
+  const created = volatileDeviceId;
+
+  await Promise.allSettled([
+    SecureStore.setItemAsync(GUARDIAN_DEVICE_ID_KEY, created),
+    AsyncStorage.setItem(GUARDIAN_DEVICE_ID_FALLBACK_KEY, created),
+  ]).then((results) => {
+    results.forEach((result) => {
+      if (result.status === 'rejected') {
+        safeLogError('DEVICE_ID_PERSIST', result.reason);
+      }
+    });
+  });
+
+  return created;
+}
+
+
+export async function getGuardianInstallationId() {
+  return getGuardianDeviceId();
 }
 
 function getReadableDeviceName() {
@@ -985,38 +1652,66 @@ async function getGuardianDeviceHeaders() {
 async function getToken() {
   if (tokenCache !== undefined) return tokenCache;
 
-  // Older releases stored the reusable account password for biometric login.
-  // Remove that legacy secret before reading the current device-bound token.
   await SecureStore.deleteItemAsync(
     LEGACY_BIOMETRIC_PASSWORD_SECURE_STORE_KEY
-  ).catch(() => undefined);
+  ).catch((error: unknown) => {
+    safeLogError('LEGACY_BIOMETRIC_SECRET_CLEAR', error);
+  });
+
+  let secureStoreFailed = false;
 
   try {
-    const secureToken = await SecureStore.getItemAsync(AUTH_TOKEN_SECURE_STORE_KEY);
+    const secureToken = await SecureStore.getItemAsync(
+      AUTH_TOKEN_SECURE_STORE_KEY
+    );
     if (secureToken) {
       tokenCache = secureToken;
       return secureToken;
     }
-  } catch {
-    // Continue to the one-time legacy migration below.
+  } catch (error: unknown) {
+    secureStoreFailed = true;
+    safeLogError('AUTH_TOKEN_SECURE_READ', error);
   }
 
-  const legacyToken = await AsyncStorage.getItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
+  let legacyToken: string | null = null;
+  let legacyStorageFailed = false;
+
+  try {
+    legacyToken = await AsyncStorage.getItem(
+      LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY
+    );
+  } catch (error: unknown) {
+    legacyStorageFailed = true;
+    safeLogError('AUTH_TOKEN_LEGACY_READ', error);
+  }
 
   if (legacyToken) {
     try {
       await SecureStore.setItemAsync(AUTH_TOKEN_SECURE_STORE_KEY, legacyToken, {
         keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
       });
-      await AsyncStorage.removeItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
-    } catch {
-      // Keep the legacy token for this session if SecureStore is temporarily unavailable.
+      await AsyncStorage.removeItem(
+        LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY
+      ).catch((error: unknown) => {
+        safeLogError('AUTH_TOKEN_LEGACY_CLEAR', error);
+      });
+    } catch (error: unknown) {
+      safeLogError('AUTH_TOKEN_MIGRATION', error);
+      // Keep the legacy token in memory for this session.
     }
+  }
+
+  if (!legacyToken && secureStoreFailed && legacyStorageFailed) {
+    throw new GuardianApiError(
+      'Your secure session could not be read. Please reopen the app.',
+      { code: 'STORAGE_UNAVAILABLE' }
+    );
   }
 
   tokenCache = legacyToken;
   return tokenCache;
 }
+
 
 export async function hasStoredAuthToken() {
   return Boolean(await getToken());
@@ -1049,6 +1744,8 @@ function clearVaultCaches(securityReason?: string) {
   clearCache('GET:/vault/emergency/requests');
   clearCache('GET:/vault/emergency/audit');
   clearCache('GET:/vault/emergency/requests/');
+  clearCache('GET:/vault/safety-check');
+  clearCache('GET:/vault/estate-playbooks');
   clearCache('GET:/vault/api/subscriptions/me');
   clearCache('GET:/vault/notifications');
   clearCache('GET:/vault/sessions');
@@ -1060,14 +1757,26 @@ function getServerMessage(data: any, fallbackText?: string) {
 
   if (typeof data === 'string') return data;
 
-  return (
+  const firstFieldError = Array.isArray(data?.fieldErrors)
+    ? data.fieldErrors.find((item: any) => item?.message)?.message
+    : undefined;
+  const firstValidationError = data?.errors && typeof data.errors === 'object'
+    ? Object.values(data.errors).find((value) => typeof value === 'string')
+    : undefined;
+  const firstLegacyError = Array.isArray(data?.errors)
+    ? data.errors.find((item: any) => item?.defaultMessage)?.defaultMessage
+    : undefined;
+
+  return String(
     data?.message ||
-    data?.error ||
-    data?.detail ||
-    data?.title ||
-    data?.errors?.[0]?.defaultMessage ||
-    fallbackText ||
-    ''
+      firstFieldError ||
+      firstValidationError ||
+      firstLegacyError ||
+      data?.error ||
+      data?.detail ||
+      data?.title ||
+      fallbackText ||
+      ''
   );
 }
 
@@ -1085,6 +1794,20 @@ async function hasAuthToken() {
   return !!token;
 }
 
+
+function isRevokedSessionResponse(
+  status: number,
+  code?: string,
+  message?: string
+) {
+  if (status !== 401) return false;
+  const normalizedCode = String(code || '').trim().toUpperCase();
+  const normalizedMessage = String(message || '').trim().toLowerCase();
+  return normalizedCode === 'SESSION_REVOKED' ||
+    normalizedMessage.includes('invalid or revoked session') ||
+    normalizedMessage.includes('session has been revoked');
+}
+
 async function isFamilyPlanCached() {
   const plan = String(await AsyncStorage.getItem('subscriptionPlan') || '').toUpperCase();
   return plan === 'FAMILY';
@@ -1100,6 +1823,36 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
   const lower = message.toLowerCase();
   const upper = message.toUpperCase();
   const route = path || '';
+  const isPasswordLoginRoute = route.includes('/vault/auth/login');
+  const isSpecialLoginState =
+    lower.includes('verify your email') ||
+    lower.includes('finish email verification') ||
+    lower.includes('two-factor') ||
+    lower.includes('2fa') ||
+    lower.includes('device_limit_reached') ||
+    lower.includes('trusted device') ||
+    lower.includes('incident lockdown') ||
+    lower.includes('account lockdown') ||
+    lower.includes('too many attempts') ||
+    lower.includes('rate limit');
+  const isCredentialRejection =
+    !isSpecialLoginState &&
+    (status === 401 ||
+    upper.includes('BAD_CREDENTIALS') ||
+    lower.includes('bad credentials') ||
+    lower.includes('invalid credentials') ||
+    lower.includes('incorrect password') ||
+    lower.includes('invalid email or password') ||
+    lower.includes('invalid username or password') ||
+    (status === 403 &&
+      (lower === 'forbidden' ||
+        lower.includes('access denied') ||
+        lower.includes('not allowed to do this') ||
+        lower.includes('not permitted to do this'))));
+
+  if (isPasswordLoginRoute && isCredentialRejection) {
+    return 'The email or password is incorrect. Please check your details and try again.';
+  }
 
   const serviceUnavailable =
     status === 502 ||
@@ -1213,6 +1966,7 @@ export function getFriendlyErrorMessage(status?: number, path?: string, rawMessa
       if (route.includes('/verify-2fa')) return 'The verification code is incorrect or has expired.';
       return 'Your session has expired. Please sign in again.';
     }
+    if (status === 423) return 'Incident Lockdown is active. Continue recovery on the designated device.';
     if (status === 403) return 'You do not have permission to do this.';
     if (status === 404) return 'We could not find what you are looking for.';
     if (status === 409) return 'This request conflicts with your current account state. Please try again.';
@@ -1335,6 +2089,8 @@ async function authRequest<T>(
   retryLoginTransport = false,
   timeoutMs = AUTH_REQUEST_TIMEOUT_MS
 ): Promise<T> {
+  const requestMethod = String(options.method || 'POST').toUpperCase();
+  const securedBody = secureJsonRequestBody(path, requestMethod, options.body);
   const scopedSignal = getScopedSignal();
   if (scopedSignal?.aborted) throw createAbortError();
 
@@ -1342,7 +2098,6 @@ async function authRequest<T>(
   if (scopedSignal?.aborted) throw createAbortError();
 
   const deviceHeaders = await getGuardianDeviceHeaders();
-  const requestMethod = String(options.method || 'POST').toUpperCase();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json, text/plain, */*',
@@ -1363,10 +2118,23 @@ async function authRequest<T>(
         `${API_BASE_URL}${path}`,
         requestMethod,
         headers,
-        options.body,
+        securedBody,
         timeoutMs,
         scopedSignal
       );
+
+      if (
+        !response.ok &&
+        retryLoginTransport &&
+        isTransientHttpStatus(response.status) &&
+        attempt < retryDelays.length
+      ) {
+        const delayMs = retryDelays[attempt];
+        attempt += 1;
+        await wait(delayMs, scopedSignal);
+        await waitForAuthAppState();
+        continue;
+      }
 
       const text = response.bodyText;
       let data: any = null;
@@ -1397,6 +2165,15 @@ async function authRequest<T>(
           retryCount: attempt,
           networkStage: 'HTTP_RESPONSE',
         });
+
+        if (response.status === 423 || derivedCode === 'ACCOUNT_LOCKDOWN_ACTIVE') {
+          await activateIncidentLockdownRedirect();
+        }
+
+        if (isRevokedSessionResponse(response.status, derivedCode, serverMessage)) {
+          await invalidateRevokedSession();
+          throw createAbortError();
+        }
 
         throw new GuardianApiError(
           getFriendlyErrorMessage(response.status, path, serverMessage),
@@ -1432,12 +2209,12 @@ async function authRequest<T>(
         error?.code || error?.name || 'NETWORK_UNREACHABLE'
       ).toUpperCase();
       const timeout = code === 'REQUEST_TIMEOUT';
-      const canRetry = !timeout && attempt < retryDelays.length;
+      const canRetry = attempt < retryDelays.length;
 
       if (canRetry) {
         const delayMs = retryDelays[attempt];
         attempt += 1;
-        await wait(delayMs);
+        await wait(delayMs, scopedSignal);
         await waitForAuthAppState();
         continue;
       }
@@ -1498,6 +2275,8 @@ async function request<T>(
   useAuth = true,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS
 ): Promise<T> {
+  const requestMethod = String(options.method || 'GET').toUpperCase();
+  const securedBody = secureJsonRequestBody(path, requestMethod, options.body);
   const scopedSignal = getScopedSignal();
   if (scopedSignal?.aborted) throw createAbortError();
 
@@ -1509,6 +2288,29 @@ async function request<T>(
    */
   await waitForAuthAppState();
   if (scopedSignal?.aborted) throw createAbortError();
+
+  const duressSession = useAuth && (await isDuressSession());
+  if (useAuth) setDuressAnalyticsSuppressed(Boolean(duressSession));
+
+  if (duressSession) {
+    const allowed =
+      path === '/api/vault' ||
+      path.startsWith('/api/vault/') ||
+      path === '/vault/cards' ||
+      path.startsWith('/vault/cards/') ||
+      path === '/vault/documents' ||
+      path.startsWith('/vault/documents/') ||
+      path === '/vault/notes' ||
+      path.startsWith('/vault/notes/');
+    if (!allowed) {
+      throw new GuardianApiError('This action is not available in this vault session.', {
+        status: 403,
+        path,
+        code: 'DURESS_SESSION_RESTRICTED',
+        rawMessage: 'Duress session route restriction',
+      });
+    }
+  }
 
   const token = useAuth ? await getToken() : null;
   const deviceHeaders = await getGuardianDeviceHeaders();
@@ -1522,7 +2324,6 @@ async function request<T>(
   if (useAuth && token) headers.Authorization = `Bearer ${token}`;
 
   const requestStartedAt = Date.now();
-  const requestMethod = String(options.method || 'GET').toUpperCase();
   const retryCount = requestMethod === 'GET' || requestMethod === 'HEAD' ? 2 : 0;
 
   let response: Response | null = null;
@@ -1544,9 +2345,29 @@ async function request<T>(
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
         ...options,
+        body: securedBody,
         headers,
         signal: controller.signal,
       });
+
+      if (
+        isTransientHttpStatus(response.status) &&
+        attempt < retryCount
+      ) {
+        const retryAfterMs = getRetryAfterDelayMs(response);
+        const delayMs = Math.max(
+          retryAfterMs,
+          getExponentialBackoffDelay(attempt + 1, {
+            baseDelayMs: 900,
+            maxDelayMs: 5000,
+          })
+        );
+
+        attempt += 1;
+        await wait(delayMs, scopedSignal);
+        await waitForAuthAppState();
+        continue;
+      }
 
       break;
     } catch (error: any) {
@@ -1564,6 +2385,17 @@ async function request<T>(
       if (wasAborted) {
         if (scopedSignal?.aborted && !timedOut) {
           throw createAbortError();
+        }
+
+        if (timedOut && attempt < retryCount) {
+          const delayMs = getExponentialBackoffDelay(attempt + 1, {
+            baseDelayMs: 900,
+            maxDelayMs: 5000,
+          });
+          attempt += 1;
+          await wait(delayMs, scopedSignal);
+          await waitForAuthAppState();
+          continue;
         }
 
         recordApiRequest({
@@ -1596,31 +2428,18 @@ async function request<T>(
         attemptDurationMs <= TRANSIENT_NETWORK_FAILURE_WINDOW_MS;
 
       if (canRetry) {
-        const delayMs = attempt === 0 ? 1200 : 3000;
-
-        if (__DEV__) {
-          console.log('TRANSIENT NETWORK FAILURE - RETRYING', {
-            path,
-            method: requestMethod,
-            attempt: attempt + 1,
-            delayMs,
-          });
-        }
+        const delayMs = getExponentialBackoffDelay(attempt + 1, {
+          baseDelayMs: 900,
+          maxDelayMs: 5000,
+        });
 
         attempt += 1;
-        await wait(delayMs);
+        await wait(delayMs, scopedSignal);
         await waitForAuthAppState();
         continue;
       }
 
-      if (__DEV__) {
-        console.log('FETCH ERROR', {
-          path,
-          method: requestMethod,
-          name: error?.name,
-          message: error?.message,
-        });
-      }
+      safeLogError(`API_FETCH_${requestMethod}_${path}`, error);
 
       /*
        * A fetch status-0 error does not prove the server is down. Probe the
@@ -1694,7 +2513,22 @@ async function request<T>(
     );
   }
 
-  const text = await response.text();
+  let text = '';
+
+  try {
+    text = await response.text();
+  } catch (error: unknown) {
+    safeLogError(`API_RESPONSE_READ_${requestMethod}_${path}`, error);
+    throw new GuardianApiError(
+      'The server returned an incomplete response. Please try again.',
+      {
+        status: response.status,
+        path,
+        code: 'INVALID_RESPONSE',
+      }
+    );
+  }
+
   let data: any = null;
 
   try {
@@ -1709,11 +2543,10 @@ async function request<T>(
     const quietOptional401 = isOptionalFamily401(path, response.status);
 
     if (__DEV__ && !quietOptional401) {
-      console.log('API RESPONSE ERROR', {
+      console.warn('[API_RESPONSE_ERROR]', {
         path,
         status: response.status,
-        code: rawCode || undefined,
-        message: serverMessage,
+        code: rawCode || 'HTTP_ERROR',
       });
     }
 
@@ -1743,6 +2576,15 @@ async function request<T>(
 
     if (derivedCode === 'PLAN_LIMIT_REACHED') {
       trackPlanLimitReached(path, response.status);
+    }
+
+    if (response.status === 423 || derivedCode === 'ACCOUNT_LOCKDOWN_ACTIVE') {
+      await activateIncidentLockdownRedirect();
+    }
+
+    if (isRevokedSessionResponse(response.status, derivedCode, serverMessage)) {
+      await invalidateRevokedSession();
+      throw createAbortError();
     }
 
     throw new GuardianApiError(
@@ -1786,10 +2628,22 @@ async function cachedGet<T>(
   }
 
   if (scopedSignal) {
-    const raw = await request<any>(path, {}, true, timeoutMs);
-    const data = normalize ? normalize(raw) : (raw as T);
-    cache.set(key, { time: Date.now(), data });
-    return data;
+    try {
+      const raw = await request<any>(path, {}, true, timeoutMs);
+      const data = normalize ? normalize(raw) : (raw as T);
+      cache.set(key, { time: Date.now(), data });
+      return data;
+    } catch (error: unknown) {
+      const withinGracePeriod =
+        existing?.data !== undefined &&
+        now - existing.time <= STALE_CACHE_GRACE_MS;
+
+      if (withinGracePeriod && isTransientError(error)) {
+        return existing.data as T;
+      }
+
+      throw error;
+    }
   }
 
   if (existing?.promise) {
@@ -1804,8 +2658,17 @@ async function cachedGet<T>(
       if (oldestKey) cache.delete(oldestKey);
     }
     return data;
-  }).catch((error) => {
+  }).catch((error: unknown) => {
     cache.delete(key);
+
+    const withinGracePeriod =
+      existing?.data !== undefined &&
+      now - existing.time <= STALE_CACHE_GRACE_MS;
+
+    if (withinGracePeriod && isTransientError(error)) {
+      return existing.data as T;
+    }
+
     throw error;
   });
 
@@ -1925,82 +2788,125 @@ async function downloadAuthenticatedFile(
   const token = await getToken();
 
   if (!token) {
-    throw new Error('You are not logged in. Please log in again.');
+    throw new GuardianApiError('Please sign in again.', {
+      status: 401,
+      path,
+      code: 'UNAUTHENTICATED',
+    });
   }
 
   const deviceHeaders = await getGuardianDeviceHeaders();
   const safeFallbackName = sanitizeDownloadFileName(fallbackFileName);
   const destination = `${FileSystem.cacheDirectory}${Date.now()}-${safeFallbackName}`;
   const downloadStartedAt = Date.now();
-
-  let result: any;
+  let completedAttempt = 0;
 
   try {
-    result = await FileSystem.downloadAsync(
-      `${API_BASE_URL}${path}`,
-      destination,
+    const result = await retryAsync(
+      async (attempt) => {
+        completedAttempt = attempt;
+        let downloaded: any;
+
+        try {
+          downloaded = await FileSystem.downloadAsync(
+            `${API_BASE_URL}${path}`,
+            destination,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                ...deviceHeaders,
+              },
+            }
+          );
+        } catch (error: unknown) {
+          safeLogError('DOCUMENT_DOWNLOAD_ATTEMPT', error);
+          throw new AppOperationError('The document could not be downloaded.', {
+            code: 'NETWORK_UNREACHABLE',
+            transient: true,
+          });
+        }
+
+        if (downloaded.status < 200 || downloaded.status >= 300) {
+          await FileSystem.deleteAsync(downloaded.uri, { idempotent: true }).catch(
+            (error: unknown) => safeLogError('DOCUMENT_DOWNLOAD_CLEANUP', error)
+          );
+
+          throw new GuardianApiError(
+            getFriendlyErrorMessage(
+              downloaded.status,
+              path,
+              'Document download failed'
+            ),
+            {
+              status: downloaded.status,
+              path,
+              rawMessage: 'Document download failed',
+              code: isTransientHttpStatus(downloaded.status)
+                ? 'SERVICE_UNAVAILABLE'
+                : 'DOWNLOAD_HTTP_ERROR',
+            }
+          );
+        }
+
+        return downloaded;
+      },
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...deviceHeaders,
-        },
+        maxAttempts: 3,
+        baseDelayMs: 900,
+        maxDelayMs: 4500,
+        shouldRetry: (error) => isTransientError(error),
+        onRetry: (error) => safeLogError('DOCUMENT_DOWNLOAD_RETRY', error),
       }
     );
-  } catch (error) {
-    recordApiRequest({
-      path,
-      method: 'GET',
-      durationMs: Date.now() - downloadStartedAt,
-      success: false,
-      code: 'DOWNLOAD_NETWORK_ERROR',
-    });
-    throw error;
-  }
 
-  if (result.status < 200 || result.status >= 300) {
+    const contentDisposition = getHeaderValue(
+      result.headers,
+      'content-disposition'
+    );
+    const contentType =
+      getHeaderValue(result.headers, 'content-type') || fallbackMimeType;
+    const fileNameFromHeader = getFileNameFromContentDisposition(
+      contentDisposition
+    );
+    const info = await FileSystem.getInfoAsync(result.uri).catch((error) => {
+      safeLogError('DOCUMENT_DOWNLOAD_INFO', error);
+      return null as any;
+    });
+
     recordApiRequest({
       path,
       method: 'GET',
       status: result.status,
       durationMs: Date.now() - downloadStartedAt,
-      success: false,
-      code: 'DOWNLOAD_HTTP_ERROR',
+      success: true,
+      retryCount: Math.max(0, completedAttempt - 1),
     });
-    try {
-      await FileSystem.deleteAsync(result.uri, { idempotent: true });
-    } catch {
-      // Ignore cleanup errors.
-    }
 
-    throw new GuardianApiError(
-      getFriendlyErrorMessage(result.status, path, 'Document download failed'),
-      {
-        status: result.status,
-        path,
-        rawMessage: 'Document download failed',
-      }
-    );
+    return {
+      uri: result.uri,
+      fileName: sanitizeDownloadFileName(
+        fileNameFromHeader || fallbackFileName
+      ),
+      mimeType: contentType,
+      sizeBytes: info?.exists ? info.size : undefined,
+    };
+  } catch (error: unknown) {
+    recordApiRequest({
+      path,
+      method: 'GET',
+      durationMs: Date.now() - downloadStartedAt,
+      success: false,
+      code: String((error as any)?.code || 'DOWNLOAD_FAILED'),
+      retryCount: Math.max(0, completedAttempt - 1),
+    });
+
+    if (error instanceof GuardianApiError) throw error;
+
+    throw new GuardianApiError('The document could not be downloaded.', {
+      path,
+      code: 'DOWNLOAD_FAILED',
+    });
   }
-
-  const contentDisposition = getHeaderValue(result.headers, 'content-disposition');
-  const contentType = getHeaderValue(result.headers, 'content-type') || fallbackMimeType;
-  const fileNameFromHeader = getFileNameFromContentDisposition(contentDisposition);
-  const info = await FileSystem.getInfoAsync(result.uri).catch(() => null as any);
-
-  recordApiRequest({
-    path,
-    method: 'GET',
-    status: result.status,
-    durationMs: Date.now() - downloadStartedAt,
-    success: true,
-  });
-
-  return {
-    uri: result.uri,
-    fileName: sanitizeDownloadFileName(fileNameFromHeader || fallbackFileName),
-    mimeType: contentType,
-    sizeBytes: info?.exists ? info.size : undefined,
-  };
 }
 
 async function parseUploadResult(result: FileSystem.FileSystemUploadResult) {
@@ -2014,7 +2920,20 @@ async function parseUploadResult(result: FileSystem.FileSystemUploadResult) {
 
   if (result.status < 200 || result.status >= 300) {
     const serverMessage = getServerMessage(data, result.body);
-    throw new Error(getFriendlyErrorMessage(result.status, '/vault/documents/upload', serverMessage));
+    throw new GuardianApiError(
+      getFriendlyErrorMessage(
+        result.status,
+        '/vault/documents/upload',
+        serverMessage
+      ),
+      {
+        status: result.status,
+        path: '/vault/documents/upload',
+        rawMessage: serverMessage,
+        code: String(data?.code || data?.errorCode || 'UPLOAD_HTTP_ERROR'),
+        data,
+      }
+    );
   }
 
   clearVaultCaches('vault-item');
@@ -2097,6 +3016,143 @@ const apiImplementation = {
     request<{ message: string }>('/vault/auth/biometric', {
       method: 'DELETE',
     }),
+
+  getDuressSettings: () =>
+    request<DuressSettingsResponse>('/vault/auth/duress'),
+
+  configureDuressMode: (body: {
+    currentPassword: string;
+    duressPassword: string;
+    alertEnabled: boolean;
+    alertContactUserId?: number | null;
+    alertDelayMinutes: number;
+  }) =>
+    request<DuressSettingsResponse>('/vault/auth/duress', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  disableDuressMode: (currentPassword: string) =>
+    request<{ message: string }>('/vault/auth/duress', {
+      method: 'DELETE',
+      body: JSON.stringify({ currentPassword }),
+    }),
+
+  openDuressPreview: (currentPassword: string) =>
+    request<LoginResponse>('/vault/auth/duress/preview', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword }),
+    }),
+
+
+  getIncidentOverview: async () => {
+    const result = await request<IncidentOverview>('/vault/auth/incidents');
+    try {
+      if (result.activeIncident?.status === 'ACTIVE') {
+        await AsyncStorage.setItem('guardianIncidentLockdown', 'true');
+      } else {
+        await AsyncStorage.removeItem('guardianIncidentLockdown');
+      }
+    } catch {
+      // The server response is authoritative. A local storage failure must not
+      // turn a successful incident-status read into a false API failure.
+    }
+    return result;
+  },
+
+  startIncidentLockdown: async (body: {
+    type: SecurityIncidentType;
+    currentPassword: string;
+    note?: string;
+  }) => {
+    const result = await request<SecurityIncident>('/vault/auth/incidents/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: body.type,
+        currentPassword: body.currentPassword,
+        note: body.note?.trim() || null,
+      }),
+    });
+    clearOfflineVaultMemoryCache();
+    try {
+      await markOfflineVaultStale();
+      await AsyncStorage.setItem('guardianIncidentLockdown', 'true');
+    } catch {
+      /*
+       * Lockdown is already active on the backend. Never report a false start
+       * failure merely because local storage cleanup failed on this device.
+       */
+    }
+    try {
+      const { suspendGuardianAutofillForDuressSession } = await import('./autofillSync');
+      await suspendGuardianAutofillForDuressSession();
+    } catch {
+      // Native autofill cleanup is best-effort; backend restrictions remain authoritative.
+    }
+    return result;
+  },
+
+  updateIncidentTask: async (
+    incidentId: number | string,
+    taskId: number | string,
+    status: IncidentTaskStatus
+  ) => {
+    const result = await request<SecurityIncident>(
+      `/vault/auth/incidents/${incidentId}/tasks/${taskId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ status }),
+      }
+    );
+    return result;
+  },
+
+  rotateIncidentMasterPassword: async (
+    incidentId: number | string,
+    currentPassword: string,
+    newPassword: string
+  ) => {
+    const result = await request<SecurityIncident>(
+      `/vault/auth/incidents/${incidentId}/rotate-password`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      }
+    );
+    return result;
+  },
+
+  completeIncidentLockdown: async (incidentId: number | string) => {
+    const result = await request<SecurityIncident>(
+      `/vault/auth/incidents/${incidentId}/complete`,
+      { method: 'POST' }
+    );
+    try {
+      await AsyncStorage.removeItem('guardianIncidentLockdown');
+    } catch {
+      // A later overview refresh will reconcile the local navigation marker.
+    }
+    return result;
+  },
+
+  cancelIncidentLockdown: async (
+    incidentId: number | string,
+    currentPassword: string
+  ) => {
+    const result = await request<SecurityIncident>(
+      `/vault/auth/incidents/${incidentId}/cancel`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword }),
+      }
+    );
+    try {
+      await AsyncStorage.removeItem('guardianIncidentLockdown');
+    } catch {
+      // A later overview refresh will reconcile the local navigation marker.
+    }
+    return result;
+  },
 
   getLegalConsent: (version: string) =>
     request<LegalConsentResponse>(
@@ -2221,6 +3277,104 @@ const apiImplementation = {
     }, false, AUTH_REQUEST_TIMEOUT_MS);
 
     trackFeatureAction('ACCOUNT', 'RESET_AND_VAULT_ERASED');
+    return result;
+  },
+
+
+  getRecoveryCircleOverview: () =>
+    request<RecoveryCircleOverview>('/vault/recovery-circle'),
+
+  updateRecoveryCircle: async (body: UpdateRecoveryCircleBody) => {
+    const result = await request<RecoveryCircleOverview>('/vault/recovery-circle', {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: Boolean(body.enabled),
+        threshold: body.threshold ?? 2,
+        memberUserIds: body.memberUserIds ?? [],
+        password: body.password,
+      }),
+    }, true, AUTH_REQUEST_TIMEOUT_MS);
+    clearCache('GET:/vault/recovery-circle');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_CIRCLE', body.enabled ? 'CONFIGURED' : 'DISABLED', {
+      threshold: body.threshold ?? 2,
+      member_count: body.memberUserIds?.length ?? 0,
+    });
+    return result;
+  },
+
+  approveRecoveryCircleRequest: async (requestId: string) => {
+    const result = await request<RecoveryCircleRequest>(
+      `/vault/recovery-circle/requests/${encodeURIComponent(requestId)}/approve`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/recovery-circle');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_CIRCLE', 'REQUEST_APPROVED');
+    return result;
+  },
+
+  denyRecoveryCircleRequest: async (requestId: string) => {
+    const result = await request<RecoveryCircleRequest>(
+      `/vault/recovery-circle/requests/${encodeURIComponent(requestId)}/deny`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/recovery-circle');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_CIRCLE', 'REQUEST_DENIED');
+    return result;
+  },
+
+  cancelRecoveryCircleRequest: async (requestId: string) => {
+    const result = await request<{ message: string }>(
+      `/vault/recovery-circle/requests/${encodeURIComponent(requestId)}/cancel`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/recovery-circle');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('RECOVERY_CIRCLE', 'REQUEST_CANCELLED');
+    return result;
+  },
+
+  startRecoveryCircle: (body: { email: string; recoveryCode: string }) =>
+    request<StartRecoveryCircleResponse>('/vault/recovery-circle/recovery/start', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: body.email.trim().toLowerCase(),
+        recoveryCode: body.recoveryCode.trim(),
+      }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS),
+
+  getRecoveryCircleStatus: (body: RecoveryCircleCredentials) =>
+    request<RecoveryCirclePublicStatus>('/vault/recovery-circle/recovery/status', {
+      method: 'POST',
+      body: JSON.stringify({
+        requestId: body.requestId.trim().toUpperCase(),
+        recoveryCode: body.recoveryCode.trim(),
+      }),
+    }, false, AUTH_REQUEST_TIMEOUT_MS),
+
+  completeRecoveryCircle: async (
+    body: RecoveryCircleCredentials & { newPassword: string }
+  ) => {
+    const result = await request<{ message: string }>(
+      '/vault/recovery-circle/recovery/complete',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          requestId: body.requestId.trim().toUpperCase(),
+          recoveryCode: body.recoveryCode.trim(),
+          newPassword: body.newPassword,
+        }),
+      },
+      false,
+      AUTH_REQUEST_TIMEOUT_MS
+    );
+    trackFeatureAction('RECOVERY_CIRCLE', 'PASSWORD_RESET_COMPLETED');
     return result;
   },
 
@@ -2394,6 +3548,7 @@ const apiImplementation = {
     size?: number;
     documentTitle: string;
   }) => {
+    const safeFile = validateDocumentUploadInput(file);
     const token = await getToken();
 
     if (!token) {
@@ -2422,14 +3577,14 @@ const apiImplementation = {
          * more consistently and still lets us abort the upload.
          */
         formData.append('file', {
-          uri: file.uri,
-          name: file.name || `document_${Date.now()}`,
-          type: file.type || 'application/octet-stream',
+          uri: safeFile.uri,
+          name: safeFile.name || `document_${Date.now()}`,
+          type: safeFile.type || 'application/octet-stream',
         } as any);
 
-        formData.append('documentName', file.documentTitle || file.name || 'Document');
-        formData.append('documentType', file.type || 'application/octet-stream');
-        formData.append('sizeBytes', String(file.size || 0));
+        formData.append('documentName', safeFile.documentTitle || safeFile.name || 'Document');
+        formData.append('documentType', safeFile.type || 'application/octet-stream');
+        formData.append('sizeBytes', String(safeFile.size || 0));
 
         xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE_URL}/vault/documents/upload`);
@@ -2476,8 +3631,8 @@ const apiImplementation = {
             clearVaultCaches('vault-item');
             void captureAnalyticsEvent('vault_item_created', {
               item_type: 'DOCUMENT',
-              file_kind: getAnalyticsFileKind(file.type),
-              size_bucket: getAnalyticsSizeBucket(file.size),
+              file_kind: getAnalyticsFileKind(safeFile.type),
+              size_bucket: getAnalyticsSizeBucket(safeFile.size),
             });
             resolve(data);
             return;
@@ -2565,9 +3720,20 @@ const apiImplementation = {
         };
 
         xhr.send(formData);
-      } catch (error) {
+      } catch (error: unknown) {
         if (timeoutId) clearTimeout(timeoutId);
-        reject(error);
+        safeLogError('DOCUMENT_UPLOAD_SETUP', error);
+        reject(
+          error instanceof GuardianApiError
+            ? error
+            : new GuardianApiError(
+                'The upload could not start. Please try again.',
+                {
+                  path: '/vault/documents/upload',
+                  code: 'UPLOAD_SETUP_FAILED',
+                }
+              )
+        );
       }
     });
 
@@ -2586,32 +3752,46 @@ const apiImplementation = {
     size?: number;
     documentTitle: string;
   }) => {
+    const safeFile = validateDocumentUploadInput(file);
     const token = await getToken();
 
     if (!token) {
-      throw new Error('You are not logged in. Please log in again.');
+      throw new GuardianApiError('Please sign in again.', {
+        status: 401,
+        path: '/vault/documents/upload',
+        code: 'UNAUTHENTICATED',
+      });
     }
 
-    const result = await FileSystem.uploadAsync(
-      `${API_BASE_URL}/vault/documents/upload`,
-      file.uri,
-      {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType: file.type || 'application/octet-stream',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        parameters: {
-          documentName: file.documentTitle,
-          documentType: file.type || 'application/octet-stream',
-          sizeBytes: String(file.size || 0),
-        },
-      }
-    );
+    try {
+      const result = await FileSystem.uploadAsync(
+        `${API_BASE_URL}/vault/documents/upload`,
+        safeFile.uri,
+        {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType: safeFile.type || 'application/octet-stream',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          parameters: {
+            documentName: safeFile.documentTitle,
+            documentType: safeFile.type || 'application/octet-stream',
+            sizeBytes: String(safeFile.size || 0),
+          },
+        }
+      );
 
-    return parseUploadResult(result);
+      return parseUploadResult(result);
+    } catch (error: unknown) {
+      safeLogError('DOCUMENT_MULTIPART_UPLOAD', error);
+      if (error instanceof GuardianApiError) throw error;
+      throw new GuardianApiError('The document could not be uploaded.', {
+        path: '/vault/documents/upload',
+        code: 'UPLOAD_FAILED',
+      });
+    }
   },
 
   createDocumentFromPickedFile: async (
@@ -2623,28 +3803,45 @@ const apiImplementation = {
       documentTitle: string;
     }
   ) => {
+    const safeFile = validateDocumentUploadMetadata(file);
     const token = await getToken();
 
     if (!token) {
-      throw new Error('You are not logged in. Please log in again.');
+      throw new GuardianApiError('Please sign in again.', {
+        status: 401,
+        path: '/vault/documents/upload',
+        code: 'UNAUTHENTICATED',
+      });
     }
 
-    const result = await pickedFile.upload(`${API_BASE_URL}/vault/documents/upload`, {
-      httpMethod: 'POST',
-      uploadType: UploadType.MULTIPART,
-      fieldName: 'file',
-      mimeType: file.type || 'application/octet-stream',
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-      parameters: {
-        documentName: file.documentTitle,
-        documentType: file.type || 'application/octet-stream',
-        sizeBytes: String(file.size || 0),
-      },
-    });
+    try {
+      const result = await pickedFile.upload(
+        `${API_BASE_URL}/vault/documents/upload`,
+        {
+          httpMethod: 'POST',
+          uploadType: UploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType: safeFile.type || 'application/octet-stream',
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          parameters: {
+            documentName: safeFile.documentTitle,
+            documentType: safeFile.type || 'application/octet-stream',
+            sizeBytes: String(safeFile.size || 0),
+          },
+        }
+      );
 
-    return parseUploadResult(result);
+      return parseUploadResult(result);
+    } catch (error: unknown) {
+      safeLogError('DOCUMENT_PICKED_FILE_UPLOAD', error);
+      if (error instanceof GuardianApiError) throw error;
+      throw new GuardianApiError('The document could not be uploaded.', {
+        path: '/vault/documents/upload',
+        code: 'UPLOAD_FAILED',
+      });
+    }
   },
 
   createDocument: async (body: {
@@ -2801,8 +3998,232 @@ const apiImplementation = {
     return result;
   },
 
+  getEstateOverview: () =>
+    request<EstateOverview>('/vault/estate-playbooks'),
+
+  createEstatePlaybook: async (body: EstatePlaybookBody) => {
+    const result = await request<EstatePlaybook>('/vault/estate-playbooks', {
+      method: 'POST',
+      body: JSON.stringify({
+        itemType: body.itemType,
+        itemId: body.itemId,
+        actionType: body.actionType,
+        triggerType: body.triggerType,
+        recipientContactId: body.recipientContactId ?? null,
+        instructions: body.instructions?.trim() || '',
+      }),
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/emergency/overview');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'CREATED', {
+      action_type: body.actionType,
+      trigger_type: body.triggerType,
+      item_type: body.itemType,
+    });
+    return result;
+  },
+
+  updateEstatePlaybook: async (id: number | string, body: EstatePlaybookBody) => {
+    const result = await request<EstatePlaybook>(`/vault/estate-playbooks/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        itemType: body.itemType,
+        itemId: body.itemId,
+        actionType: body.actionType,
+        triggerType: body.triggerType,
+        recipientContactId: body.recipientContactId ?? null,
+        instructions: body.instructions?.trim() || '',
+      }),
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/emergency/overview');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'UPDATED', {
+      action_type: body.actionType,
+      trigger_type: body.triggerType,
+      item_type: body.itemType,
+    });
+    return result;
+  },
+
+  archiveEstatePlaybook: async (id: number | string) => {
+    const result = await request<void>(`/vault/estate-playbooks/${id}`, {
+      method: 'DELETE',
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/emergency/overview');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'ARCHIVED');
+    return result;
+  },
+
+  pauseEstatePlaybook: async (id: number | string) => {
+    const result = await request<EstatePlaybook>(`/vault/estate-playbooks/${id}/pause`, {
+      method: 'POST',
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'PAUSED');
+    return result;
+  },
+
+  resumeEstatePlaybook: async (id: number | string) => {
+    const result = await request<EstatePlaybook>(`/vault/estate-playbooks/${id}/resume`, {
+      method: 'POST',
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'RESUMED');
+    return result;
+  },
+
+  releaseEstatePlaybook: async (id: number | string) => {
+    const result = await request<EstateExecution>(`/vault/estate-playbooks/${id}/release`, {
+      method: 'POST',
+    });
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'RELEASED');
+    return result;
+  },
+
+  cancelEstateExecution: async (id: number | string) => {
+    const result = await request<EstateExecution>(
+      `/vault/estate-playbooks/executions/${id}/cancel`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'RELEASE_CANCELLED');
+    return result;
+  },
+
+  completeEstateExecution: async (id: number | string) => {
+    const result = await request<EstateExecution>(
+      `/vault/estate-playbooks/executions/${id}/complete`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/estate-playbooks');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'TASK_COMPLETED');
+    return result;
+  },
+
+  getEstateReleasedItem: (id: number | string) =>
+    request<EstateReleasedItem>(`/vault/estate-playbooks/executions/${id}/item`),
+
+  downloadEstateDocumentToCache: async (
+    executionId: number | string,
+    fileName = 'estate-document',
+    mimeType = 'application/octet-stream'
+  ) => {
+    const result = await downloadAuthenticatedFile(
+      `/vault/estate-playbooks/executions/${executionId}/document`,
+      fileName,
+      mimeType
+    );
+    trackFeatureAction('ESTATE_PLAYBOOKS', 'DOCUMENT_DOWNLOADED', {
+      file_kind: getAnalyticsFileKind(mimeType),
+      size_bucket: getAnalyticsSizeBucket(result.sizeBytes),
+    });
+    return result;
+  },
+
+  getContinuityOverview: () =>
+    request<ContinuityOverview>('/vault/continuity-drill'),
+
+  startContinuityDrill: async () => {
+    const result = await request<ContinuityDrill>('/vault/continuity-drill/start', {
+      method: 'POST',
+    });
+    clearCache('GET:/vault/continuity-drill');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('CONTINUITY_DRILL', 'STARTED', {
+      participant_count: result.participantCount,
+      static_score: result.staticScore,
+    });
+    return result;
+  },
+
+  completeContinuityDrill: async (drillId: number | string) => {
+    const result = await request<ContinuityDrill>(
+      `/vault/continuity-drill/${drillId}/complete`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/continuity-drill');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('CONTINUITY_DRILL', 'COMPLETED', { score: result.score });
+    return result;
+  },
+
+  cancelContinuityDrill: async (drillId: number | string) => {
+    const result = await request<ContinuityDrill>(
+      `/vault/continuity-drill/${drillId}/cancel`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/continuity-drill');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('CONTINUITY_DRILL', 'CANCELLED');
+    return result;
+  },
+
+  acknowledgeContinuityDrill: async (publicId: string) => {
+    const result = await request<ContinuityAcknowledgement>(
+      `/vault/continuity-drill/requests/${encodeURIComponent(publicId)}/acknowledge`,
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/continuity-drill');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('CONTINUITY_DRILL', 'ACKNOWLEDGED');
+    return result;
+  },
+
   getEmergencyOverview: () =>
     cachedGet<EmergencyOverviewResponse>('/vault/emergency/overview'),
+
+  getGuardianSafetyCheck: () =>
+    request<GuardianSafetyCheckResponse>('/vault/safety-check'),
+
+  updateGuardianSafetyCheck: async (body: UpdateGuardianSafetyCheckBody) => {
+    const result = await request<GuardianSafetyCheckResponse>('/vault/safety-check', {
+      method: 'PUT',
+      body: JSON.stringify({
+        enabled: Boolean(body.enabled),
+        contactId: body.contactId ?? null,
+        intervalDays: body.intervalDays ?? null,
+        gracePeriodHours: body.gracePeriodHours ?? null,
+      }),
+    });
+    clearCache('GET:/vault/safety-check');
+    clearCache('GET:/vault/emergency/overview');
+    clearCache('GET:/vault/emergency/audit');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('SAFETY_CHECK', body.enabled ? 'CONFIGURED' : 'DISABLED', {
+      interval_days: body.intervalDays ?? 0,
+      grace_period_hours: body.gracePeriodHours ?? 0,
+    });
+    return result;
+  },
+
+  completeGuardianSafetyCheck: async () => {
+    const result = await request<GuardianSafetyCheckResponse>(
+      '/vault/safety-check/check-in',
+      { method: 'POST' }
+    );
+    clearCache('GET:/vault/safety-check');
+    clearCache('GET:/vault/emergency/overview');
+    clearCache('GET:/vault/emergency/audit');
+    clearCache('GET:/vault/notifications');
+    clearCache('GET:/vault/notifications/unread-count');
+    trackFeatureAction('SAFETY_CHECK', 'CHECKED_IN');
+    return result;
+  },
 
   getEmergencyContacts: () =>
     cachedGet<EmergencyContactResponse[]>('/vault/emergency/contacts'),
@@ -3168,10 +4589,31 @@ const apiImplementation = {
       method: 'DELETE',
     });
     clearCache('GET:/vault/notifications');
-  clearCache('GET:/vault/sessions');
+    clearCache('GET:/vault/sessions');
     clearCache('GET:/vault/notifications/unread-count');
     return result;
   },
+
+  registerPushToken: (body: RegisterPushTokenRequest) =>
+    request<PushTokenResponse>('/vault/notifications/push-token', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  unregisterPushToken: (installationId: string) =>
+    request<void>(
+      `/vault/notifications/push-token/${encodeURIComponent(installationId)}`,
+      { method: 'DELETE' }
+    ),
+
+  getNotificationPreferences: () =>
+    request<NotificationPreferences>('/vault/notifications/preferences'),
+
+  updateNotificationPreferences: (body: UpdateNotificationPreferences) =>
+    request<NotificationPreferences>('/vault/notifications/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 
 
   submitBugReport: async (body: BugReportRequestBody) => {
@@ -3199,6 +4641,9 @@ const apiImplementation = {
   getMyBugReports: () =>
     cachedGet<BugReportResponse[]>('/vault/support/bug-reports/my'),
 
+
+  validateCurrentSession: () =>
+    request<{ active: boolean; message: string }>('/vault/sessions/heartbeat'),
 
   getDeviceSessions: () =>
     cachedGet<DeviceSession[]>('/vault/sessions'),
@@ -3273,22 +4718,40 @@ export const api = new Proxy(apiImplementation, {
   },
 }) as typeof apiImplementation;
 
+export async function isDuressSession() {
+  try {
+    return (await AsyncStorage.getItem('guardianSessionMode')) === 'DURESS';
+  } catch (error: unknown) {
+    safeLogError('SESSION_MODE_READ', error);
+    throw new GuardianApiError(
+      'Your secure session could not be verified. Please try again.',
+      {
+        code: 'STORAGE_UNAVAILABLE',
+      }
+    );
+  }
+}
+
 export async function saveLoginSession(data: LoginResponse) {
   if (data.requiresTwoFactor) {
-    throw new Error('2FA verification is required before saving the login session.');
+    throw new AppOperationError(
+      'Complete two-factor verification before continuing.'
+    );
   }
 
   const token = data.token || data.jwt || data.accessToken;
 
   if (!token) {
-    throw new Error('Login worked, but no token was returned by the servers.');
+    throw new AppOperationError(
+      'Login succeeded, but the secure session could not be created.'
+    );
   }
 
   const rawUserId = data.userId ?? data.id ?? data.user?.userId ?? data.user?.id;
-  const userId = rawUserId === undefined || rawUserId === null ? '' : String(rawUserId);
-
+  const userId = rawUserId === undefined || rawUserId === null
+    ? ''
+    : String(rawUserId);
   const email = data.email || data.user?.email || '';
-
   const name =
     data.fullname ||
     data.fullName ||
@@ -3297,108 +4760,189 @@ export async function saveLoginSession(data: LoginResponse) {
     data.user?.name ||
     email ||
     '';
-
   const cleanEmail = email.trim().toLowerCase();
+  const sessionMode =
+    String(data.sessionMode || 'NORMAL').toUpperCase() === 'DURESS'
+      ? 'DURESS'
+      : 'NORMAL';
 
-  tokenCache = token;
+  const sessionEntries: Array<[string, string]> = [
+    ['userEmail', cleanEmail],
+    ['userName', name],
+    ['guardianSessionMode', sessionMode],
+    ['homeNeedsInitialSync', 'true'],
+    ['securityScoreNeedsInitialSync', 'true'],
+  ];
 
-  await SecureStore.setItemAsync(AUTH_TOKEN_SECURE_STORE_KEY, token, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
-  await AsyncStorage.removeItem(LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY);
-  await AsyncStorage.setItem('userEmail', cleanEmail);
-  await AsyncStorage.setItem('userName', name);
-
-  if (userId) {
-    await AsyncStorage.setItem('userId', userId);
-  }
-
-  /**
-   * This key is intentionally not removed during logout.
-   * It lets the login page keep reflecting the last/current user's selected theme.
-   */
-  if (cleanEmail) {
-    await AsyncStorage.setItem('lastThemeUserEmail', cleanEmail);
-  }
-
-  if (data.plan) {
-    await AsyncStorage.setItem('subscriptionPlan', String(data.plan));
-  }
-
+  if (userId) sessionEntries.push(['userId', userId]);
+  if (cleanEmail) sessionEntries.push(['lastThemeUserEmail', cleanEmail]);
+  if (data.plan) sessionEntries.push(['subscriptionPlan', String(data.plan)]);
   if (typeof data.emailVerified === 'boolean') {
-    await AsyncStorage.setItem('emailVerified', String(data.emailVerified));
+    sessionEntries.push(['emailVerified', String(data.emailVerified)]);
   }
-
   if (typeof data.twoFactorEnabled === 'boolean') {
-    await AsyncStorage.setItem('twoFactorEnabled', String(data.twoFactorEnabled));
+    sessionEntries.push(['twoFactorEnabled', String(data.twoFactorEnabled)]);
+  }
+  if (sessionMode === 'DURESS') {
+    sessionEntries.push([
+      'guardianDuressAutofillStartedAt',
+      String(Date.now()),
+    ]);
   }
 
-  await AsyncStorage.removeItem('vaultLocked');
-
-  /*
-   * After a fresh login, the Home dashboard and Security Score should ask
-   * the server once, then reuse their stored snapshots on normal page visits.
-   */
-  await AsyncStorage.setItem('homeNeedsInitialSync', 'true');
-  await AsyncStorage.setItem('securityScoreNeedsInitialSync', 'true');
-
-  clearCache();
-
-  await identifyAnalyticsUser({
-    userId,
-    plan: data.plan || 'UNKNOWN',
-  });
-
-  await trackLoginSuccess();
-
-  // Keep Android Autofill data isolated before a different Guardian account
-  // can finish signing in and use the native provider.
-  try {
-    const { prepareGuardianAutofillForSignedInUser } = await import('./autofillSync');
-    await prepareGuardianAutofillForSignedInUser(cleanEmail);
-  } catch {
-    // Autofill is optional; authentication must still succeed if the native
-    // module is unavailable in a development or iOS build.
-  }
-
-  // A locally accepted legal record is synchronized after authentication so
-  // registration and returning-user flows gain a server-side audit record.
-  void import('./legalConsent')
-    .then(({ syncLegalConsentToBackend }) => syncLegalConsentToBackend(cleanEmail))
-    .catch(() => undefined);
-}
-export async function logout() {
-  await trackLogout();
-  tokenCache = null;
-  // Remove decrypted offline values from JavaScript memory while preserving the
-  // encrypted SecureStore snapshot for the next authenticated unlock.
-  clearOfflineVaultMemoryCache();
-
-  try {
-    await SecureStore.deleteItemAsync(AUTH_TOKEN_SECURE_STORE_KEY);
-  } catch {
-    // Continue clearing local profile state even if SecureStore is unavailable.
-  }
-
-  /**
-   * Do not remove:
-   * - themeMode
-   * - lastThemeUserEmail
-   * - themeMode:user:<email>
-   *
-   * That allows the login page to keep using the last/current user's chosen theme.
-   */
-  await AsyncStorage.multiRemove([
-    'token',
+  const rollbackKeys = [
+    LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY,
     'userName',
     'userEmail',
     'userId',
     'subscriptionPlan',
     'emailVerified',
     'twoFactorEnabled',
+    'guardianSessionMode',
+    'guardianIncidentLockdown',
+    'guardianDuressAutofillStartedAt',
+    'homeNeedsInitialSync',
+    'securityScoreNeedsInitialSync',
+  ];
+
+  try {
+    await SecureStore.setItemAsync(AUTH_TOKEN_SECURE_STORE_KEY, token, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+
+    await AsyncStorage.multiSet(sessionEntries);
+    await AsyncStorage.multiRemove([
+      LEGACY_AUTH_TOKEN_ASYNC_STORAGE_KEY,
+      'vaultLocked',
+      SESSION_END_MESSAGE_KEY,
+    ]);
+  } catch (error: unknown) {
+    tokenCache = null;
+    setDuressAnalyticsSuppressed(false);
+    safeLogError('LOGIN_SESSION_SAVE', error);
+
+    await Promise.allSettled([
+      SecureStore.deleteItemAsync(AUTH_TOKEN_SECURE_STORE_KEY),
+      AsyncStorage.multiRemove(rollbackKeys),
+    ]);
+
+    throw new AppOperationError(
+      'Your secure session could not be saved. Please try again.',
+      { code: 'STORAGE_UNAVAILABLE' }
+    );
+  }
+
+  tokenCache = token;
+  setDuressAnalyticsSuppressed(sessionMode === 'DURESS');
+  clearCache();
+
+  if (sessionMode === 'DURESS') {
+    clearOfflineVaultMemoryCache();
+    try {
+      const { suspendGuardianAutofillForDuressSession } = await import('./autofillSync');
+      await suspendGuardianAutofillForDuressSession();
+    } catch (error: unknown) {
+      safeLogError('DURESS_AUTOFILL_SUSPEND', error);
+    }
+    return;
+  }
+
+  try {
+    await identifyAnalyticsUser({
+      userId,
+      plan: data.plan || 'UNKNOWN',
+    });
+    await trackLoginSuccess();
+  } catch (error: unknown) {
+    safeLogError('LOGIN_ANALYTICS', error);
+  }
+
+  try {
+    const {
+      clearDuressAutofillResidueAfterNormalLogin,
+      prepareGuardianAutofillForSignedInUser,
+    } = await import('./autofillSync');
+    await clearDuressAutofillResidueAfterNormalLogin();
+    await prepareGuardianAutofillForSignedInUser(cleanEmail);
+  } catch (error: unknown) {
+    safeLogError('LOGIN_AUTOFILL_PREPARE', error);
+  }
+
+  void import('./legalConsent')
+    .then(({ syncLegalConsentToBackend }) =>
+      syncLegalConsentToBackend(cleanEmail)
+    )
+    .catch((error: unknown) => {
+      safeLogError('LOGIN_LEGAL_CONSENT_SYNC', error);
+    });
+
+  void import('../services/pushNotifications')
+    .then(({
+      syncPushNotificationsAfterLogin,
+      consumePendingPushRoute,
+    }) => {
+      /*
+       * Notification routing must never wait for token registration. Token
+       * registration can wake a sleeping service or contact Expo, so defer it
+       * until the first authenticated screen has had time to load. The backend
+       * catches up recent eligible notifications after the token is attached.
+       */
+      void consumePendingPushRoute().catch((error: unknown) => {
+        safeLogError('LOGIN_PUSH_ROUTE', error);
+      });
+
+      setTimeout(() => {
+        void syncPushNotificationsAfterLogin({ reason: 'login' }).catch(
+          (error: unknown) => {
+            safeLogError('LOGIN_PUSH_SYNC', error);
+          }
+        );
+      }, 7000);
+    })
+    .catch((error: unknown) => {
+      safeLogError('LOGIN_PUSH_MODULE', error);
+    });
+}
+
+export async function logout() {
+  try {
+    await trackLogout();
+  } catch (error: unknown) {
+    safeLogError('LOGOUT_ANALYTICS', error);
+  }
+
+  try {
+    const { detachPushTokenForLogout } = await import('../services/pushNotifications');
+    await detachPushTokenForLogout();
+  } catch (error: unknown) {
+    safeLogError('LOGOUT_PUSH_CLEANUP', error);
+  }
+
+  tokenCache = null;
+  clearOfflineVaultMemoryCache();
+  setDuressAnalyticsSuppressed(false);
+
+  const cleanupResults = await Promise.allSettled([
+    SecureStore.deleteItemAsync(AUTH_TOKEN_SECURE_STORE_KEY),
+    AsyncStorage.multiRemove([
+      'token',
+      'userName',
+      'userEmail',
+      'userId',
+      'subscriptionPlan',
+      'emailVerified',
+      'twoFactorEnabled',
+      'guardianSessionMode',
+      'guardianIncidentLockdown',
+    ]),
+    clearAnalyticsUser(),
   ]);
 
-  await clearAnalyticsUser();
+  cleanupResults.forEach((result) => {
+    if (result.status === 'rejected') {
+      safeLogError('LOGOUT_LOCAL_CLEANUP', result.reason);
+    }
+  });
 
   clearCache();
 }

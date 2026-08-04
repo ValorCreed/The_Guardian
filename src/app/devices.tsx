@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -19,6 +18,7 @@ import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, DeviceSession, logout } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import { clearBiometricCredentials, setBiometricEnabled } from '../utils/secureAuth';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -64,6 +64,8 @@ const resetToSignedOut = () => {
 };
 
 export default function DevicesScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const runCancelable = useCancelableRequest();
   const { isDark, colors: C } = useAppTheme();
@@ -104,7 +106,7 @@ export default function DevicesScreen() {
       setSessions((data || []).filter((session) => session.active));
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not load devices', error.message || 'Please try again.');
+      screenAlert('Could not load devices', error.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -128,7 +130,7 @@ export default function DevicesScreen() {
   const revokeSession = (session: DeviceSession) => {
     const isCurrent = session.current;
 
-    Alert.alert(
+    screenAlert(
       isCurrent ? 'Log out this device?' : 'Remove this device?',
       isCurrent
         ? 'This will end the current session and return you to sign in.'
@@ -159,7 +161,7 @@ export default function DevicesScreen() {
               await loadSessions(false);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not remove device', error.message || 'Please try again.');
+              screenAlert('Could not remove device', error.message || 'Please try again.');
             } finally {
               setWorkingId(null);
             }
@@ -171,11 +173,11 @@ export default function DevicesScreen() {
 
   const logoutOtherDevices = () => {
     if (otherActiveCount === 0) {
-      Alert.alert('No other devices', 'Only this device is currently active.');
+      screenAlert('No other devices', 'Only this device is currently active.');
       return;
     }
 
-    Alert.alert(
+    screenAlert(
       'Log out other devices?',
       `This will end ${otherActiveCount} other active session(s), but keep this device signed in.`,
       [
@@ -191,7 +193,7 @@ export default function DevicesScreen() {
               await loadSessions(false);
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not log out devices', error.message || 'Please try again.');
+              screenAlert('Could not log out devices', error.message || 'Please try again.');
             } finally {
               setLoggingOutOthers(false);
             }
@@ -202,7 +204,7 @@ export default function DevicesScreen() {
   };
 
   const logoutAllDevices = () => {
-    Alert.alert(
+    screenAlert(
       'Log out everywhere?',
       'This will end all active sessions, including this device. You will need to sign in again.',
       [
@@ -220,7 +222,7 @@ export default function DevicesScreen() {
               resetToSignedOut();
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not log out everywhere', error.message || 'Please try again.');
+              screenAlert('Could not log out everywhere', error.message || 'Please try again.');
             } finally {
               setLoggingOutAll(false);
             }
@@ -427,6 +429,12 @@ const makeStyles = (C: any) =>
     },
 
     skeletonDeviceIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 45,
       height: 45,
       borderRadius: 16,
@@ -444,17 +452,35 @@ const makeStyles = (C: any) =>
     },
 
     skeletonRemoveButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       width: 38,
       height: 38,
       borderRadius: 14,
     },
 
     skeletonMetaPill: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 118,
       height: 26,
     },
 
     skeletonMetaPillSmall: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 96,
       height: 26,
     },
@@ -495,12 +521,18 @@ const makeStyles = (C: any) =>
       marginBottom: 14,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,},
 
     heroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 54,
       height: 54,
       borderRadius: 27,
@@ -538,20 +570,20 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     dangerActionCard: {
       borderColor: C.alertDangerBg,
       backgroundColor: C.alertDangerBg,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     actionTitle: {
       color: C.text,
@@ -585,10 +617,10 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     deviceTopRow: {
       flexDirection: 'row',
@@ -597,6 +629,12 @@ const makeStyles = (C: any) =>
     },
 
     deviceIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 45,
       height: 45,
       borderRadius: 23,
@@ -623,6 +661,12 @@ const makeStyles = (C: any) =>
     },
 
     currentBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       backgroundColor: C.actionCard,
       paddingHorizontal: 8,
       paddingVertical: 3,
@@ -651,10 +695,10 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     metaRow: {
       flexDirection: 'row',
@@ -673,10 +717,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 6,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
+      shadowOpacity: 0.16,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      elevation: 6,},
 
     metaText: {
       color: C.textSecondary,
@@ -694,10 +738,10 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     emptyTitle: {
       color: C.text,

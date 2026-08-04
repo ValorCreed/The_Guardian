@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -17,8 +16,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { api } from "../services/api";
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from "../context/ThemeContext";
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const RegisterScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const router = useRouter();
 
@@ -39,7 +41,7 @@ const RegisterScreen = () => {
     if (loading) return;
 
     if (!fullName.trim() || !email.trim() || !password.trim()) {
-      Alert.alert(
+      screenAlert(
         "Missing details",
         "Enter your full name, email and master password.",
       );
@@ -47,17 +49,17 @@ const RegisterScreen = () => {
     }
 
     if (!confirmPassword.trim()) {
-      Alert.alert("Missing details", "Please confirm your master password.");
+      screenAlert("Missing details", "Please confirm your master password.");
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert("Password mismatch", "Your passwords do not match.");
+      screenAlert("Password mismatch", "Your passwords do not match.");
       return;
     }
 
     if (password.length < 8) {
-      Alert.alert("Weak password", "Password must be at least 8 characters.");
+      screenAlert("Weak password", "Password must be at least 8 characters.");
       return;
     }
 
@@ -72,7 +74,7 @@ const RegisterScreen = () => {
         password,
       });
 
-      Alert.alert(
+      screenAlert(
         "Check your email",
         pending.message ||
           "We sent a 6-digit verification code. Your account will only be created after you confirm the code.",
@@ -93,7 +95,7 @@ const RegisterScreen = () => {
       );
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         "Could not start registration",
         error.message ||
           "We could not send your verification code. No account has been created. Please try again.",

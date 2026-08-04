@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
+import { useFocusEffect, usePathname } from 'expo-router';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -58,6 +59,21 @@ let nativeAlert: typeof Alert.alert | null = null;
 
 const friendlyMessage = (title?: string, message?: string) => {
   const raw = `${title || ''} ${message || ''}`.toLowerCase();
+
+  const isLoginAlert =
+    raw.includes('login failed') ||
+    raw.includes('sign in failed') ||
+    raw.includes('could not sign you in');
+  const looksLikeCredentialPermissionFailure =
+    raw.includes('not allowed to do this') ||
+    raw.includes('access denied') ||
+    raw.includes('forbidden') ||
+    raw.includes('bad credentials') ||
+    raw.includes('invalid credentials');
+
+  if (isLoginAlert && looksLikeCredentialPermissionFailure) {
+    return 'The email or password is incorrect. Please check your details and try again.';
+  }
 
   if (
     raw.includes('request timed out') ||
@@ -184,6 +200,7 @@ const convertButtons = (buttons?: AlertButton[]): AppAlertButton[] => {
 
 export function AppAlertProvider({ children }: { children: React.ReactNode }) {
   const { isDark, isOled, colors: C } = useAppTheme();
+  const pathname = usePathname();
   const blurTarget = useBlurTarget();
 
   const [visible, setVisible] = useState(false);
@@ -191,6 +208,7 @@ export function AppAlertProvider({ children }: { children: React.ReactNode }) {
 
   const mountedRef = useRef(false);
   const closingRef = useRef(false);
+  const pathnameRef = useRef(pathname);
 
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.96)).current;
@@ -354,6 +372,21 @@ useEffect(() => {
     };
   }, [fadeAnim, scaleAnim, translateYAnim, showAlert]);
 
+
+  useEffect(() => {
+    if (pathnameRef.current === pathname) return;
+
+    pathnameRef.current = pathname;
+    closingRef.current = false;
+
+    fadeAnim.stopAnimation();
+    scaleAnim.stopAnimation();
+    translateYAnim.stopAnimation();
+
+    setVisible(false);
+    setCurrentAlert(null);
+  }, [fadeAnim, pathname, scaleAnim, translateYAnim]);
+
   const handleButtonPress = (button: AppAlertButton) => {
     hapticLight();
     hideAlert();
@@ -508,12 +541,48 @@ useEffect(() => {
 
 export function useAppAlert() {
   const context = useContext(AppAlertContext);
+  const activeRef = useRef(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      activeRef.current = true;
+
+      return () => {
+        activeRef.current = false;
+        context?.hideAlert();
+      };
+    }, [context?.hideAlert])
+  );
+
+  const showAlert = useCallback(
+    (options: ShowAlertOptions) => {
+      if (!activeRef.current || !context) return;
+
+      context.showAlert({
+        ...options,
+        buttons: options.buttons?.map((button) => ({
+          ...button,
+          onPress: button.onPress
+            ? () => {
+                if (activeRef.current) {
+                  button.onPress?.();
+                }
+              }
+            : undefined,
+        })),
+      });
+    },
+    [context?.showAlert]
+  );
 
   if (!context) {
     throw new Error('useAppAlert must be used inside AppAlertProvider');
   }
 
-  return context;
+  return {
+    showAlert,
+    hideAlert: context.hideAlert,
+  };
 }
 
 const color = (C: any, key: string, fallback: string) => C?.[key] || fallback;

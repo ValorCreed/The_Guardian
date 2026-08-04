@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -22,7 +21,8 @@ import { useAppTheme } from '../context/ThemeContext';
 import AddScreenEntrance from '../components/AddScreenEntrance';
 import { hapticLight, hapticMedium, hapticWarning, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
-import { api } from '../services/api';
+import { api, isDuressSession } from '../services/api';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type SelectedFile = {
   name: string;
@@ -35,6 +35,8 @@ type SelectedFile = {
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
 const UploadDocumentScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const router = useRouter();
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -55,6 +57,14 @@ const UploadDocumentScreen = () => {
     const checkPlan = async () => {
       try {
         setCheckingPlan(true);
+
+        const duress = await isDuressSession();
+        if (duress) {
+          // Auth Service permits duress sessions only while Premium/Family is
+          // active. Avoid exposing Subscription Service from the decoy session.
+          setPlan('PREMIUM');
+          return;
+        }
 
         const subscription = await api.getSubscription();
         const currentPlan = (subscription.plan || 'FREE') as Plan;
@@ -89,7 +99,7 @@ const UploadDocumentScreen = () => {
   };
 
   const showUpgradeAlert = () => {
-    Alert.alert(
+    screenAlert(
       'Premium feature',
       'Document upload is only available on the Premium and Family plans.',
       [
@@ -108,7 +118,7 @@ const UploadDocumentScreen = () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Camera access is needed to scan documents.');
+      screenAlert('Permission required', 'Camera access is needed to scan documents.');
       return;
     }
 
@@ -142,7 +152,7 @@ const UploadDocumentScreen = () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert('Permission required', 'Gallery access is needed to choose photos.');
+      screenAlert('Permission required', 'Gallery access is needed to choose photos.');
       return;
     }
 
@@ -278,7 +288,7 @@ const UploadDocumentScreen = () => {
       const fileSize = asset.size || 0;
 
       if (!asset.uri) {
-        Alert.alert('File error', 'Could not read this file. Please choose another file.');
+        screenAlert('File error', 'Could not read this file. Please choose another file.');
         return;
       }
 
@@ -293,7 +303,7 @@ const UploadDocumentScreen = () => {
 
       setDocumentTitle(fileName.replace(/\.[^/.]+$/, ''));
     } catch (error: any) {
-      Alert.alert('File error', error?.message || 'Could not pick this file.');
+      screenAlert('File error', error?.message || 'Could not pick this file.');
     }
   };
 
@@ -359,7 +369,7 @@ const UploadDocumentScreen = () => {
 
     if (!documentTitle.trim()) {
       hapticWarning();
-      Alert.alert('Missing title', 'Please enter a document title.');
+      screenAlert('Missing title', 'Please enter a document title.');
       return;
     }
 
@@ -390,7 +400,7 @@ const UploadDocumentScreen = () => {
       await AsyncStorage.setItem('homeNeedsInitialSync', 'true');
       hapticSuccess();
 
-      Alert.alert('Saved', 'Document saved to your vault.', [
+      screenAlert('Saved', 'Document saved to your vault.', [
         { text: 'OK', onPress: () => router.replace('/vault?tab=Documents') },
       ]);
     } catch (error: any) {
@@ -399,7 +409,7 @@ const UploadDocumentScreen = () => {
       }
 
       hapticWarning();
-      Alert.alert('Upload failed', getUploadErrorMessage(error));
+      screenAlert('Upload failed', getUploadErrorMessage(error));
     } finally {
       activeUploadCancelRef.current = null;
       if (mountedRef.current) {
@@ -695,23 +705,41 @@ const makeStyles = (C: ThemeColors) =>
     skeletonScroll: { paddingBottom: 150 },
     skeletonTitle: { width: 190, height: 28, marginHorizontal: 20, marginTop: 96, marginBottom: 8 },
     skeletonPlanText: { width: 118, height: 12, marginHorizontal: 20, marginBottom: 20 },
-    skeletonOptionIcon: { width: 54, height: 54, borderRadius: 20 },
+    skeletonOptionIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 54, height: 54, borderRadius: 20 },
     skeletonOptionTitle: { width: '58%', height: 15, marginBottom: 8 },
     skeletonOptionSub: { width: '42%', height: 11 },
     skeletonChevron: { width: 22, height: 22, borderRadius: 8 },
-    skeletonNoticeIcon: { width: 22, height: 22, borderRadius: 8 },
+    skeletonNoticeIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ width: 22, height: 22, borderRadius: 8 },
     skeletonNoticeLine: { width: '92%', height: 12, marginBottom: 8 },
-    skeletonNoticeShort: { width: '55%', height: 12 },
+    skeletonNoticeShort: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ width: '55%', height: 12 },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 },
     loadingText: { marginTop: 10, color: C.textSecondary, fontSize: 14 },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 92, paddingBottom: 20, gap: 12 },
     lockedHeader: { paddingHorizontal: 20, paddingTop: 94 },
     backBtn: { width: 38, height: 38, backgroundColor: C.backgroundSelected, borderRadius: 16, justifyContent: 'center', alignItems: 'center' ,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     title: { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.4 },
     planText: { marginTop: 4, fontSize: 12, color: C.primary, fontWeight: '900' },
     options: { paddingHorizontal: 20, gap: 14 },
@@ -725,12 +753,18 @@ const makeStyles = (C: ThemeColors) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.025,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
-    iconCircle: { width: 54, height: 54, borderRadius: 20, backgroundColor: C.actionCard || C.backgroundSelected, justifyContent: 'center', alignItems: 'center' },
+    iconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 54, height: 54, borderRadius: 20, backgroundColor: C.actionCard || C.backgroundSelected, justifyContent: 'center', alignItems: 'center' },
     optionText: { flex: 1 },
     optionTitle: { fontSize: 16, fontWeight: '900', color: C.text, marginBottom: 4 },
     optionSub: { fontSize: 13, color: C.textSecondary, fontWeight: '600' },
@@ -742,10 +776,10 @@ const makeStyles = (C: ThemeColors) =>
       borderColor: C.primary,
       gap: 12,
       shadowColor: C.primary,
-      shadowOpacity: 0.05,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     previewHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
     previewName: { fontSize: 14, fontWeight: '900', color: C.text },
@@ -758,6 +792,12 @@ const makeStyles = (C: ThemeColors) =>
     },
     previewSize: { fontSize: 12, color: C.textSecondary, fontWeight: '700' },
     fileTypePill: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       borderRadius: 999,
       backgroundColor: C.actionCard || C.backgroundSelected,
       borderWidth: 1,
@@ -776,12 +816,12 @@ const makeStyles = (C: ThemeColors) =>
     statusText: { color: C.primary, fontSize: 12, fontWeight: '800', flex: 1, lineHeight: 18 },
     noticeBox: { backgroundColor: C.actionCard || C.backgroundSelected, borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, borderWidth: 1, borderColor: C.border ,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     noticeText: { flex: 1, fontSize: 13, color: C.primary, lineHeight: 20, fontWeight: '700' },
-    saveBtn: { position: 'absolute', left: 20, right: 20, bottom: 20, backgroundColor: C.backgroundbutton, paddingVertical: 18, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, shadowColor: C.primary, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 3 },
+    saveBtn: { position: 'absolute', left: 20, right: 20, bottom: 20, backgroundColor: C.backgroundbutton, paddingVertical: 18, borderRadius: 50, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10, shadowColor: C.primary, shadowOpacity: 0.25, shadowRadius: 18, shadowOffset: { width: 0, height: 11 }, elevation: 10},
     saveBtnDisabled: { backgroundColor: C.tabInactive ,
       shadowColor: '#000',
       shadowOpacity: 0.035,
@@ -808,26 +848,44 @@ const makeStyles = (C: ThemeColors) =>
     },
     cancelUploadText: { color: C.danger, fontSize: 14, fontWeight: '900' },
     label: { fontSize: 13, color: C.text, fontWeight: '900', marginBottom: 7 },
-    input: { backgroundColor: C.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
+    input: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.13,
+      shadowRadius: 14,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 7 },
+ backgroundColor: C.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
     lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingTop: 86, paddingBottom: 40 },
-    premiumIcon: { width: 88, height: 88, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+    premiumIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 88, height: 88, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
     lockedTitle: { fontSize: 31, fontWeight: '900', color: C.text, marginBottom: 10, letterSpacing: -0.5 },
     lockedSubtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 20, fontWeight: '600' },
     featureBox: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 17, borderWidth: 1, borderColor: C.border, marginBottom: 24, gap: 13 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     featureRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     featureText: { flex: 1, color: C.text, fontSize: 14, fontWeight: '800' },
     upgradeBtn: { backgroundColor: C.backgroundbutton, borderRadius: 50, paddingVertical: 17, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 10 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     upgradeBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
-    notNowBtn: { marginTop: 14, alignItems: 'center', paddingVertical: 12 },
+    notNowBtn: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ marginTop: 14, alignItems: 'center', paddingVertical: 12 },
     notNowText: { color: C.textSecondary, fontSize: 15, fontWeight: '800' },
   });

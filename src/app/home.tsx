@@ -6,7 +6,6 @@ import React, {
   useState,
 } from "react";
 import {
-  Alert,
   Animated,
   BackHandler,
   Easing,
@@ -43,6 +42,9 @@ import {
 import { WHATS_NEW_VERSION } from "../constants/whatsNew";
 import { hapticLight, hapticMedium, hapticScoreSettled, hapticSelection, hapticWarning } from '../utils/haptics';
 import { syncGuardianAutofillCache, syncPendingGuardianAutofillSaves } from '../services/autofillSync';
+import { safeLogError } from '../utils/asyncResilience';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const RECOVERY_ALERT_THROTTLE_MS = 10 * 60 * 1000;
 const HOME_NEEDS_SYNC_KEY = "homeNeedsInitialSync";
@@ -180,13 +182,20 @@ const getBestTimestamp = (item: any) =>
   item.dateCreated ||
   null;
 
-const getItemTitle = (item: VaultItem) =>
-  safelyDecodeText(item.title || item.website || item.fileName) || "Vault item";
+const getItemTitle = (item: VaultItem) => {
+  if (item.itemType === "PASSWORD") {
+    return getFriendlyVaultTitle(item.title, item.website, "Saved login");
+  }
+
+  return safelyDecodeText(item.title || item.website || item.fileName) || "Vault item";
+};
 
 const getItemSubtitle = (item: VaultItem) => {
   if (item.itemType === "PASSWORD") {
-    return (
-      safelyDecodeText(item.usernameValue || item.website) || "Password login"
+    return getFriendlyVaultSubtitle(
+      item.usernameValue,
+      item.website,
+      "Password login"
     );
   }
 
@@ -438,6 +447,8 @@ const ScoreRing = React.memo(
 );
 
 const HomeScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const router = useRouter();
 
   const [userName, setUserName] = useState("");
@@ -456,6 +467,9 @@ const HomeScreen = () => {
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
+  const [sessionMode, setSessionMode] = useState<
+    "UNKNOWN" | "NORMAL" | "DURESS"
+  >("UNKNOWN");
 
   const homeRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const lastSuccessfulHomeRefreshAtRef = useRef(0);
@@ -476,6 +490,7 @@ const HomeScreen = () => {
   } = useSecurityScore();
   const styles = useMemo(() => makeStyles(C), [C]);
   const securityScoreUpdating = securityScoreLoading || securityScoreSyncing;
+  const duressMode = sessionMode === "DURESS";
 
   /*
    * useSecurityScore exposes convenience wrappers. Keep the latest silent
@@ -491,11 +506,29 @@ const HomeScreen = () => {
       let active = true;
 
       const loadName = async () => {
-        const name = await AsyncStorage.getItem("userName");
-        if (active) setUserName(name || "User");
+        try {
+          const [name, storedSessionMode] = await Promise.all([
+            AsyncStorage.getItem("userName"),
+            AsyncStorage.getItem("guardianSessionMode"),
+          ]);
+
+          if (!active) return;
+          setUserName(name || "User");
+          setSessionMode(
+            storedSessionMode === "DURESS" ? "DURESS" : "NORMAL"
+          );
+        } catch (error: unknown) {
+          safeLogError("HOME_SESSION_STORAGE", error);
+          if (!active) return;
+          setUserName("User");
+          // Fail closed so a storage outage cannot reveal normal-vault data.
+          setSessionMode("DURESS");
+        }
       };
 
-      void loadName();
+      void loadName().catch((error: unknown) => {
+        safeLogError("HOME_SESSION_LOAD", error);
+      });
 
       return () => {
         active = false;
@@ -504,8 +537,12 @@ const HomeScreen = () => {
   );
 
   const getHomeCacheKey = async () => {
-    const email = await AsyncStorage.getItem("userEmail");
-    return `theguardian.home.snapshot.v4:${(email || "anonymous").trim().toLowerCase()}`;
+    const [email, storedSessionMode] = await Promise.all([
+      AsyncStorage.getItem("userEmail"),
+      AsyncStorage.getItem("guardianSessionMode"),
+    ]);
+    const modeSuffix = storedSessionMode === "DURESS" ? ":decoy" : "";
+    return `theguardian.home.snapshot.v4${modeSuffix}:${(email || "anonymous").trim().toLowerCase()}`;
   };
 
   const applyHomeSnapshot = useCallback((snapshot: any) => {
@@ -792,7 +829,7 @@ const HomeScreen = () => {
           await AsyncStorage.setItem(cacheKey, JSON.stringify(snapshot));
           await AsyncStorage.removeItem(HOME_NEEDS_SYNC_KEY);
         } catch (error: any) {
-          console.log("HOME DATA ERROR:", error);
+          safeLogError("HOME_DATA_REFRESH", error);
 
           if (isOfflineReadableError(error)) {
             const hydrated =
@@ -832,87 +869,112 @@ const HomeScreen = () => {
      * HOME_NEEDS_SYNC_KEY, while the normal focus refresh also catches changes
      * created elsewhere, including new notification counts.
      */
-    const hydrated = await hydrateHomeData();
+    try {
+      const hydrated = await hydrateHomeData();
+      const [needsHomeSync, needsSecuritySync] = await Promise.all([
+        AsyncStorage.getItem(HOME_NEEDS_SYNC_KEY).catch(() => null),
+        AsyncStorage.getItem(SECURITY_SCORE_NEEDS_SYNC_KEY).catch(() => null),
+      ]);
 
-    const [needsHomeSync, needsSecuritySync] = await Promise.all([
-      AsyncStorage.getItem(HOME_NEEDS_SYNC_KEY),
-      AsyncStorage.getItem(SECURITY_SCORE_NEEDS_SYNC_KEY),
-    ]);
+      if (!hydrated) {
+        await fetchHomeDataFromServer({ force: true, silent: false });
+      } else {
+        const recentlyRefreshed =
+          Date.now() - lastSuccessfulHomeRefreshAtRef.current <
+          HOME_FOCUS_REFRESH_DEDUP_MS;
 
-    if (!hydrated) {
-      await fetchHomeDataFromServer({ force: true, silent: false });
-    } else {
-      const recentlyRefreshed =
-        Date.now() - lastSuccessfulHomeRefreshAtRef.current <
-        HOME_FOCUS_REFRESH_DEDUP_MS;
+        if (needsHomeSync === "true" || !recentlyRefreshed) {
+          void fetchHomeDataFromServer({ force: true, silent: true }).catch(
+            (error: unknown) => safeLogError("HOME_SILENT_REFRESH", error)
+          );
+        }
+      }
 
-      if (needsHomeSync === "true" || !recentlyRefreshed) {
-        void fetchHomeDataFromServer({ force: true, silent: true });
+      if (needsSecuritySync === "true" && !duressMode) {
+        /*
+         * Preserve the focus-time safety refresh, but keep it behind the Home
+         * entrance and ring animation so password analysis cannot steal frames.
+         */
+        deferredSecurityRefreshRef.current?.cancel();
+        deferredSecurityRefreshRef.current = scheduleIdleTask(
+          () => {
+            deferredSecurityRefreshRef.current = null;
+            void reloadSecurityScoreSilentlyRef.current().catch(
+              (error: unknown) => safeLogError("HOME_SECURITY_REFRESH", error)
+            );
+          },
+          {
+            delayMs: 1020,
+            timeoutMs: 1500,
+          }
+        );
+      }
+    } catch (error: unknown) {
+      safeLogError("HOME_LOAD", error);
+      const hydrated =
+        (await hydrateHomeData()) ||
+        (await hydrateHomeFromOfflineVault());
+
+      if (!hydrated) {
+        setVaultCountsReady(true);
+        setLoadingVault(false);
       }
     }
-
-    if (needsSecuritySync === "true") {
-      /*
-       * Preserve the focus-time safety refresh, but keep it behind the Home
-       * entrance and ring animation so password analysis cannot steal frames.
-       */
-      deferredSecurityRefreshRef.current?.cancel();
-      deferredSecurityRefreshRef.current = scheduleIdleTask(
-        () => {
-          deferredSecurityRefreshRef.current = null;
-          void reloadSecurityScoreSilentlyRef.current();
-        },
-        {
-          delayMs: 1020,
-          timeoutMs: 1500,
-        }
-      );
-    }
-  }, [fetchHomeDataFromServer, hydrateHomeData]);
+  }, [
+    duressMode,
+    fetchHomeDataFromServer,
+    hydrateHomeData,
+    hydrateHomeFromOfflineVault,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
-      /*
-       * Replay the score-ring entrance every time Home becomes active while
-       * keeping cached dashboard data visible immediately.
-       */
-      setScoreFocusAnimationKey((current) => current + 1);
+      if (sessionMode === "UNKNOWN") {
+        return () => undefined;
+      }
+
+      if (!duressMode) {
+        /* Replay the security-ring entrance only in a normal vault session. */
+        setScoreFocusAnimationKey((current) => current + 1);
+      }
 
       const homeLoadPromise = loadHomeData();
       void homeLoadPromise.catch(() => undefined);
 
-      /*
-       * Autofill reconciliation can decrypt and serialize several records.
-       * Keep the same synchronization behavior, but move it behind the ring's
-       * entrance so that work cannot interrupt the score animation.
-       */
-      deferredAutofillSyncRef.current?.cancel();
-      deferredAutofillSyncRef.current = scheduleIdleTask(
-        () => {
-          deferredAutofillSyncRef.current = null;
+      if (!duressMode) {
+        /*
+         * Autofill reconciliation must never run in a decoy session. Apart
+         * from avoiding data leakage, this prevents decoy credentials from
+         * replacing the normal Android autofill cache.
+         */
+        deferredAutofillSyncRef.current?.cancel();
+        deferredAutofillSyncRef.current = scheduleIdleTask(
+          () => {
+            deferredAutofillSyncRef.current = null;
 
-          void homeLoadPromise
-            .then(async () => {
-              try {
-                const pendingResult = await syncPendingGuardianAutofillSaves();
+            void homeLoadPromise
+              .then(async () => {
+                try {
+                  const pendingResult = await syncPendingGuardianAutofillSaves();
 
-                if (pendingResult.saved > 0 || pendingResult.updated > 0) {
-                  await fetchHomeDataFromServer({
-                    force: true,
-                    silent: true,
-                  });
+                  if (pendingResult.saved > 0 || pendingResult.updated > 0) {
+                    await fetchHomeDataFromServer({
+                      force: true,
+                      silent: true,
+                    });
+                  }
+                } catch {
+                  // Pending saves remain encrypted for the next normal session.
                 }
-              } catch {
-                // Pending saves remain encrypted for the next app focus.
-              }
-            })
-            .catch(() => undefined);
-        },
-        {
-          delayMs: 980,
-          timeoutMs: 1800,
-        }
-      );
+              })
+              .catch(() => undefined);
+          },
+          {
+            delayMs: 980,
+            timeoutMs: 1800,
+          }
+        );
+      }
 
       return () => {
         deferredSecurityRefreshRef.current?.cancel();
@@ -920,7 +982,7 @@ const HomeScreen = () => {
         deferredAutofillSyncRef.current?.cancel();
         deferredAutofillSyncRef.current = null;
       };
-    }, [fetchHomeDataFromServer, loadHomeData]),
+    }, [duressMode, fetchHomeDataFromServer, loadHomeData, sessionMode]),
   );
 
   /*
@@ -943,10 +1005,14 @@ const HomeScreen = () => {
   const onRefresh = async () => {
     try {
       setRefreshing(true);
-      await Promise.all([
-        fetchHomeDataFromServer({ force: true, silent: true }),
-        reloadSecurityScore(),
-      ]);
+      if (duressMode) {
+        await fetchHomeDataFromServer({ force: true, silent: true });
+      } else {
+        await Promise.all([
+          fetchHomeDataFromServer({ force: true, silent: true }),
+          reloadSecurityScore(),
+        ]);
+      }
     } finally {
       setRefreshing(false);
     }
@@ -999,7 +1065,9 @@ const HomeScreen = () => {
         `${item.title || ""} ${item.website || ""} ${item.usernameValue || ""} ${item.fileName || ""} ${item.mimeType || ""} ${
           item.itemType === "DOCUMENT"
             ? getFriendlyDocumentType(item.mimeType, item.fileName || item.title)
-            : ""
+            : item.itemType === "PASSWORD"
+              ? `${getItemTitle(item)} ${getItemSubtitle(item)}`
+              : ""
         }`
           .toLowerCase()
           .includes(q),
@@ -1074,8 +1142,21 @@ const HomeScreen = () => {
     { label: "Note", icon: "reader-outline", route: "/addnote" },
   ];
 
+  const lockCurrentVault = async () => {
+    hapticLight();
+    await AsyncStorage.setItem("vaultLocked", "true");
+    router.replace("/signin");
+  };
+
   const openQuickAction = async (route: string) => {
     hapticMedium();
+    if (offlineMode) {
+      screenAlert(
+        "Creation unavailable offline",
+        "Reconnect to Guardian before adding a password, card, document, or secure note."
+      );
+      return;
+    }
     /*
      * When users add a vault item and return Home, Home should do one fresh
      * sync so the new/updated item appears in Recent items.
@@ -1121,6 +1202,8 @@ const HomeScreen = () => {
 
   //Whats new modal addition in the homescreen after updates
   useEffect(() => {
+    if (sessionMode !== "NORMAL") return;
+
     const checkWhatsNewModal = async () => {
       try {
         /*
@@ -1143,16 +1226,16 @@ const HomeScreen = () => {
           setShowWhatsNew(true);
         }
       } catch (error) {
-        console.log("Could not check what is new modal:", error);
+        safeLogError("WHATS_NEW_CHECK", error);
       }
     };
 
     checkWhatsNewModal();
-  }, []);
+  }, [sessionMode]);
 
   useEffect(() => {
     const showRecoveryWarning = async () => {
-      if (!recoveryKitMissing) return;
+      if (sessionMode !== "NORMAL" || !recoveryKitMissing) return;
 
       try {
         const raw = await AsyncStorage.getItem('guardian:lastRecoveryKitWarningAt');
@@ -1165,7 +1248,7 @@ const HomeScreen = () => {
         await AsyncStorage.setItem('guardian:lastRecoveryKitWarningAt', String(Date.now()));
 
         setTimeout(() => {
-          Alert.alert(
+          screenAlert(
             'Recovery kit missing',
             'This is a serious safety risk. If you forget your password or lose access, you may permanently lose your vault. Generate your recovery kit now.',
             [
@@ -1180,7 +1263,7 @@ const HomeScreen = () => {
     };
 
     showRecoveryWarning();
-  }, [recoveryKitMissing, router]);
+  }, [recoveryKitMissing, router, sessionMode]);
   /**Closing the Whats New modal */
   const closeWhatsNewModal = async () => {
     try {
@@ -1189,11 +1272,287 @@ const HomeScreen = () => {
         WHATS_NEW_VERSION,
       );
     } catch (error) {
-      console.log("Could not save what is new version:", error);
+      safeLogError("WHATS_NEW_SAVE", error);
     } finally {
       setShowWhatsNew(false);
     }
   };
+
+  /*
+   * Do not render the normal dashboard until the local session mode has been
+   * resolved. This prevents a one-frame flash of cached security, family, or
+   * notification information after a duress login.
+   */
+  if (sessionMode === "UNKNOWN") {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
+          <View style={styles.header}>
+            <PulsingSkeleton styles={styles} style={styles.skeletonHeaderLogo} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonHeaderLine} />
+              <PulsingSkeleton styles={styles} style={styles.skeletonHeaderName} />
+            </View>
+          </View>
+          <View style={styles.heroCardShell}>
+            <View style={styles.modeLoadingCard}>
+              <PulsingSkeleton styles={styles} style={styles.skeletonModeIcon} />
+              <View style={{ flex: 1 }}>
+                <PulsingSkeleton styles={styles} style={styles.skeletonLineWide} />
+                <PulsingSkeleton styles={styles} style={styles.skeletonLineMedium} />
+              </View>
+            </View>
+          </View>
+          {renderStatsSkeleton()}
+          {renderRecentSkeleton()}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
+  /*
+   * A duress session deliberately looks like an ordinary small vault. It must
+   * not render security scores, plan details, notification counts, recovery
+   * warnings, family links, or any cached normal-vault metadata.
+   */
+  if (duressMode) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={C.primary}
+              colors={[C.primary]}
+            />
+          }
+        >
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <GuardianLogoTile
+                size={44}
+                logoSize={32}
+                radius={14}
+                style={styles.headerIcon}
+              />
+              <View>
+                <Text style={styles.greeting}>{getGreeting()}</Text>
+                <Text style={styles.userName} numberOfLines={1}>
+                  {userName || "User"}
+                </Text>
+              </View>
+            </View>
+            <TouchableOpacity
+              style={styles.headerBtn}
+              activeOpacity={0.75}
+              accessibilityLabel="Lock vault"
+              onPress={() => void lockCurrentVault()}
+            >
+              <Ionicons name="lock-closed-outline" size={19} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
+          {offlineMode && (
+            <OfflineBanner
+              colors={C}
+              savedAt={offlineSavedAt}
+              message="The dashboard is showing the latest saved vault summary. Reconnect before adding or changing items."
+              onRetry={() =>
+                fetchHomeDataFromServer({ force: true, silent: true })
+              }
+            />
+          )}
+
+          <View style={styles.heroCardShell}>
+            <View style={styles.privateVaultHero}>
+              <View style={styles.privateVaultIcon}>
+                <Ionicons name="shield-checkmark-outline" size={30} color="#fff" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.heroKicker}>PROTECTED VAULT</Text>
+                <Text style={styles.heroTitle}>Vault overview</Text>
+                <Text style={styles.heroSubtitle}>
+                  {totalItems} protected item{totalItems === 1 ? "" : "s"}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.searchBar}>
+            <Ionicons name="search-outline" size={18} color={C.tabInactive} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search vault"
+              placeholderTextColor={C.tabInactive}
+              value={search}
+              onChangeText={setSearch}
+              returnKeyType="search"
+            />
+            {search.length > 0 && (
+              <TouchableOpacity onPress={() => setSearch("")}>
+                <Ionicons name="close-circle" size={18} color={C.tabInactive} />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {search.trim().length > 0 && (
+            <View style={styles.searchResultsCard}>
+              <View style={styles.sectionHeaderCompact}>
+                <Text style={styles.sectionTitleNoPadding}>Search results</Text>
+                <Text style={styles.resultCount}>{searchResults.length}</Text>
+              </View>
+              {searchResults.length === 0 ? (
+                <Text style={styles.emptyText}>No vault item found</Text>
+              ) : (
+                searchResults.map((item) => (
+                  <TouchableOpacity
+                    key={`duress-search-${item.itemType}-${item.id}`}
+                    style={styles.compactItem}
+                    onPress={() => openItem(item)}
+                    activeOpacity={0.75}
+                  >
+                    <View
+                      style={[
+                        styles.compactIcon,
+                        { backgroundColor: getAvatarColor(getItemTitle(item)) },
+                      ]}
+                    >
+                      <Ionicons
+                        name={getItemIcon(item) as any}
+                        size={18}
+                        color="#fff"
+                      />
+                    </View>
+                    <View style={styles.compactText}>
+                      <Text style={styles.compactTitle} numberOfLines={1}>
+                        {getItemTitle(item)}
+                      </Text>
+                      <Text style={styles.compactSub} numberOfLines={1}>
+                        {getItemSubtitle(item)}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
+                  </TouchableOpacity>
+                ))
+              )}
+            </View>
+          )}
+
+          <View style={styles.sectionHeader}>
+            <View style={styles.sectionHeadingCopy}>
+              <Text style={styles.sectionTitleNoPadding}>Vault at a glance</Text>
+              {/* <Text style={styles.sectionCaption}>
+                {totalItems} protected item{totalItems === 1 ? "" : "s"}
+              </Text> */}
+            </View>
+          </View>
+
+          {loadingVault || !vaultCountsReady ? (
+            renderStatsSkeleton()
+          ) : (
+            <View style={styles.statsGrid}>
+              {statCards.map((item) => (
+                <TouchableOpacity
+                  key={`duress-stat-${item.label}`}
+                  style={styles.statCard}
+                  activeOpacity={0.82}
+                  onPress={() => openVaultTab(item.tab)}
+                >
+                  <View style={styles.statCardTop}>
+                    <View style={styles.statIconCircle}>
+                      <Ionicons name={item.icon as any} size={21} color={C.primary} />
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+                  </View>
+                  <Text style={styles.statNumber}>{item.count}</Text>
+                  <Text style={styles.statLabel}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitleNoPadding}>Quick actions</Text>
+          </View>
+          <View style={styles.quickActions}>
+            {quickActions.map((action) => (
+              <TouchableOpacity
+                key={`duress-action-${action.label}`}
+                style={[styles.actionItem, offlineMode && styles.actionItemDisabled]}
+                activeOpacity={0.85}
+                accessibilityState={{ disabled: offlineMode }}
+                disabled={offlineMode}
+                onPress={() => openQuickAction(action.route)}
+              >
+                <View style={[styles.actionBtn, offlineMode && styles.actionBtnDisabled]}>
+                  <Ionicons
+                    name={(offlineMode ? "lock-closed-outline" : action.icon) as any}
+                    size={offlineMode ? 22 : 27}
+                    color="#fff"
+                  />
+                </View>
+                <Text style={styles.actionLabel} numberOfLines={1}>
+                  {action.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitleNoPadding}>Recent items</Text>
+            <TouchableOpacity onPress={() => router.push("/vault")}>
+              <Text style={styles.viewAll}>View all</Text>
+            </TouchableOpacity>
+          </View>
+          {loadingVault ? (
+            renderRecentSkeleton()
+          ) : recentItems.length === 0 ? (
+            <View style={styles.loadingBox}>
+              <Ionicons name="lock-closed-outline" size={28} color={C.primary} />
+              <Text style={styles.emptyText}>No vault items saved yet</Text>
+            </View>
+          ) : (
+            <View style={styles.recentList}>
+              {recentItems.map((item, index) => (
+                <TouchableOpacity
+                  key={`duress-recent-${item.itemType}-${item.id}`}
+                  style={[
+                    styles.recentCard,
+                    index !== recentItems.length - 1 && styles.recentDivider,
+                  ]}
+                  onPress={() => openItem(item)}
+                  activeOpacity={0.75}
+                >
+                  <View
+                    style={[
+                      styles.recentAvatar,
+                      { backgroundColor: getAvatarColor(getItemTitle(item)) },
+                    ]}
+                  >
+                    <Ionicons name={getItemIcon(item) as any} size={18} color="#fff" />
+                  </View>
+                  <View style={styles.recentText}>
+                    <Text style={styles.recentName} numberOfLines={1}>
+                      {getItemTitle(item)}
+                    </Text>
+                    <Text style={styles.recentSub} numberOfLines={1}>
+                      {getItemSubtitle(item)}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          <View style={{ height: 120 }} />
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1294,7 +1653,7 @@ const HomeScreen = () => {
                 <Text style={styles.heroTitle}>Vault overview</Text>
                 <Text style={styles.heroSubtitle}>
                   {totalItems} encrypted item{totalItems === 1 ? "" : "s"}
-                  {securityScoreUpdating ? " · Updating score" : ""}
+                  {/* {securityScoreUpdating ? "   Updating score" : ""} */}
                 </Text>
               </View>
 
@@ -1430,9 +1789,9 @@ const HomeScreen = () => {
         <View style={styles.sectionHeader}>
           <View style={styles.sectionHeadingCopy}>
             <Text style={styles.sectionTitleNoPadding}>Vault at a glance</Text>
-            <Text style={styles.sectionCaption}>
+            {/* <Text style={styles.sectionCaption}>
               {totalItems} protected item{totalItems === 1 ? "" : "s"}
-            </Text>
+            </Text> */}
           </View>
 
           <TouchableOpacity onPress={() => router.push("/vault")}>
@@ -1485,12 +1844,18 @@ const HomeScreen = () => {
           {quickActions.map((action) => (
             <TouchableOpacity
               key={action.label}
-              style={styles.actionItem}
+              style={[styles.actionItem, offlineMode && styles.actionItemDisabled]}
               activeOpacity={0.85}
+              accessibilityState={{ disabled: offlineMode }}
+                disabled={offlineMode}
               onPress={() => openQuickAction(action.route)}
             >
-              <View style={styles.actionBtn}>
-                <Ionicons name={action.icon as any} size={27} color="#fff" />
+              <View style={[styles.actionBtn, offlineMode && styles.actionBtnDisabled]}>
+                <Ionicons
+                  name={(offlineMode ? "lock-closed-outline" : action.icon) as any}
+                  size={offlineMode ? 22 : 27}
+                  color="#fff"
+                />
               </View>
 
               <Text style={styles.actionLabel} numberOfLines={1}>
@@ -1698,6 +2063,47 @@ const makeStyles = (C: any) =>
       borderColor: "rgba(255,255,255,0.12)",
     },
 
+    privateVaultHero: {
+      minHeight: 142,
+      borderRadius: 30,
+      padding: 20,
+      backgroundColor: C.primary,
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.12)",
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 16,
+      overflow: "hidden",
+    },
+
+    privateVaultIcon: {
+      width: 66,
+      height: 66,
+      borderRadius: 23,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(255,255,255,0.16)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.22)",
+      shadowColor: "#000",
+      shadowOpacity: 0.12,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 7 },
+      elevation: 4,
+    },
+
+    modeLoadingCard: {
+      minHeight: 142,
+      borderRadius: 30,
+      padding: 20,
+      backgroundColor: C.backgroundElement,
+      borderWidth: 1,
+      borderColor: C.border,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 16,
+    },
+
     heroGlowLarge: {
       position: "absolute",
       width: 190,
@@ -1903,7 +2309,7 @@ const makeStyles = (C: any) =>
       flexDirection: "row",
       alignItems: "center",
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 40,
       marginHorizontal: 20,
       marginBottom: 16,
       paddingHorizontal: 16,
@@ -2102,6 +2508,13 @@ const makeStyles = (C: any) =>
       elevation: 3,
     },
 
+    actionItemDisabled: {
+      opacity: 0.55,
+    },
+    actionBtnDisabled: {
+      shadowOpacity: 0,
+      elevation: 0,
+    },
     actionBtn: {
       width: 48,
       height: 48,
@@ -2190,6 +2603,40 @@ const makeStyles = (C: any) =>
       shadowRadius: 10,
       shadowOffset: { width: 0, height: 5 },
       elevation: 2,
+    },
+
+    skeletonHeaderLogo: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+    },
+
+    skeletonHeaderLine: {
+      width: 82,
+      height: 10,
+      marginBottom: 7,
+    },
+
+    skeletonHeaderName: {
+      width: 132,
+      height: 18,
+    },
+
+    skeletonModeIcon: {
+      width: 66,
+      height: 66,
+      borderRadius: 23,
+    },
+
+    skeletonLineWide: {
+      width: "78%",
+      height: 20,
+      marginBottom: 12,
+    },
+
+    skeletonLineMedium: {
+      width: "56%",
+      height: 13,
     },
 
     skeletonIcon: {

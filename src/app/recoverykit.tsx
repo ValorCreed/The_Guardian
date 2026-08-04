@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -25,6 +24,7 @@ import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtect
 import { hapticLight, hapticMedium, hapticWarning, hapticDelete } from '../utils/haptics';
 import { api, RecoveryKitResponse, RecoveryKitStatusResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not created yet';
@@ -34,6 +34,8 @@ const formatDate = (value?: string | null) => {
 };
 
 export default function RecoveryKitScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -55,7 +57,7 @@ export default function RecoveryKitScreen() {
       setStatus(data);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not load recovery kit', error.message || 'Please try again.');
+      screenAlert('Could not load recovery kit', error.message || 'Please try again.');
     } finally {
       setLoading(false);
     }
@@ -95,7 +97,7 @@ export default function RecoveryKitScreen() {
     if (!generatedKit) return;
     const text = await buildRecoveryText(generatedKit);
     await Clipboard.setStringAsync(text);
-    Alert.alert('Copied', 'Recovery kit copied to clipboard. Store it somewhere safe and remove it from clipboard when done.');
+    screenAlert('Copied', 'Recovery kit copied to clipboard. Store it somewhere safe and remove it from clipboard when done.');
   };
 
   const saveRecoveryKit = async () => {
@@ -113,21 +115,21 @@ export default function RecoveryKitScreen() {
           dialogTitle: 'Save The Guardian Recovery Kit',
         });
       } else {
-        Alert.alert('Recovery kit saved', `Saved inside app documents as ${fileName}`);
+        screenAlert('Recovery kit saved', `Saved inside app documents as ${fileName}`);
       }
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not save', error.message || 'Please copy the recovery kit instead.');
+      screenAlert('Could not save', error.message || 'Please copy the recovery kit instead.');
     }
   };
 
   const generateKit = async () => {
     if (!password) {
-      Alert.alert('Password required', 'Enter your account password to generate a recovery kit.');
+      screenAlert('Password required', 'Enter your account password to generate a recovery kit.');
       return;
     }
 
-    Alert.alert(
+    screenAlert(
       status?.created ? 'Replace recovery kit?' : 'Generate recovery kit?',
       status?.created
         ? 'Your old recovery kit will stop working. The new recovery key will be shown once.'
@@ -145,7 +147,7 @@ export default function RecoveryKitScreen() {
               await loadStatus();
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not generate recovery kit', error.message || 'Please check your password and try again.');
+              screenAlert('Could not generate recovery kit', error.message || 'Please check your password and try again.');
             } finally {
               setGenerating(false);
             }
@@ -158,7 +160,7 @@ export default function RecoveryKitScreen() {
   const revokeKit = () => {
     if (!status?.created || revoking) return;
 
-    Alert.alert(
+    screenAlert(
       'Revoke recovery kit?',
       'Your current recovery kit will stop working. You can generate a new one later.',
       [
@@ -172,10 +174,10 @@ export default function RecoveryKitScreen() {
               await requestApi.revokeRecoveryKit();
               setGeneratedKit(null);
               await loadStatus();
-              Alert.alert('Recovery kit revoked', 'Your recovery kit is no longer active.');
+              screenAlert('Recovery kit revoked', 'Your recovery kit is no longer active.');
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not revoke', error.message || 'Please try again.');
+              screenAlert('Could not revoke', error.message || 'Please try again.');
             } finally {
               setRevoking(false);
             }
@@ -290,6 +292,23 @@ export default function RecoveryKitScreen() {
             )}
           </View>
 
+          <TouchableOpacity
+            style={styles.circleCard}
+            activeOpacity={0.84}
+            onPress={() => router.push('/recoverycircle')}
+          >
+            <View style={styles.circleIcon}>
+              <Ionicons name="people-circle-outline" size={24} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.circleTitle}>Recovery Circle</Text>
+              <Text style={styles.circleText}>
+                Add multi-person approval as a second recovery path without sharing your recovery key.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
+          </TouchableOpacity>
+
           <View style={styles.infoBox}>
             <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} />
             <Text style={styles.infoText}>
@@ -358,6 +377,25 @@ const makeStyles = (C: any) =>
     buttonRow: { flexDirection: 'row', gap: 12 },
     secondaryAction: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, borderRadius: 999, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, minHeight: 50 },
     secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
+    circleCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: `${C.primary}42`,
+      padding: 16,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 15,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 3,
+    },
+    circleIcon: { width: 48, height: 48, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    circleTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
+    circleText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
     infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16
       ,shadowColor: '#000',
       shadowOpacity: 0.035,

@@ -15,7 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as Device from 'expo-device';
-import { AlertTriangle, Bug, CheckCircle2, Send, ShieldAlert } from 'lucide-react-native';
+import { Send } from 'lucide-react-native';
 
 import { useAppTheme } from '../context/ThemeContext';
 import { useAppAlert } from '../context/AppAlertContext';
@@ -134,18 +134,10 @@ export default function BugReportScreen() {
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
-          <Text style={styles.kicker}></Text>
           <Text style={styles.title}>Report a Bug</Text>
           <Text style={styles.subtitle}>
-            Tell us what broke. Please do not include passwords, card numbers, recovery codes, SecureNotes, or document contents.
+            Describe the issue without including passwords, card numbers, recovery codes, notes, or document contents.
           </Text>
-
-          {/* <View style={styles.warningCard}>
-            <ShieldAlert size={20} color={C.warning} />
-            <Text style={styles.warningText}>
-              Describe the problem without including vault secrets.
-            </Text>
-          </View> */}
 
           <View style={styles.card}>
             <Text style={styles.label}>Bug title</Text>
@@ -216,11 +208,11 @@ export default function BugReportScreen() {
               maxLength={4000}
             />
 
-            <View style={styles.diagnosticsRow}>
-              <View style={{ flex: 1 }}>
+            <View style={styles.diagnosticsCard}>
+              <View style={styles.diagnosticsText}>
                 <Text style={styles.rowTitle}>Include diagnostics</Text>
                 <Text style={styles.rowSub}>
-                  Adds device model, OS, and app context. No vault secrets are included.
+                  Adds device and app details only.
                 </Text>
               </View>
               <Switch
@@ -257,11 +249,6 @@ export default function BugReportScreen() {
           >
             <Text style={styles.secondaryText}>Cancel</Text>
           </TouchableOpacity>
-
-          <View style={styles.statusRow}>
-            {/* <CheckCircle2 size={16} color={C.success} />
-            <Text style={styles.statusText}>Reports are attached to your account for follow-up.</Text> */}
-          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -269,30 +256,189 @@ export default function BugReportScreen() {
 }
 
 const makeStyles = (C: any) => StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: C.background },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 112, paddingBottom: 150 },
-  kicker: { color: C.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, marginBottom: 8 },
-  title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.7 },
-  subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, fontWeight: '600', marginTop: 8, marginBottom: 16 },
-  warningCard: { flexDirection: 'row', gap: 10, backgroundColor: C.alertWarningBg, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 15, marginBottom: 16 },
-  warningText: { flex: 1, color: C.text, fontSize: 13, lineHeight: 19, fontWeight: '700' },
-  card: { backgroundColor: C.backgroundElement, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 16 },
-  label: { color: C.text, fontSize: 13, fontWeight: '900', marginTop: 14, marginBottom: 8 },
-  input: { minHeight: 52, borderRadius: 18, borderWidth: 1, borderColor: C.inputBorder || C.border, backgroundColor: C.inputBackground || C.surface, color: C.text, paddingHorizontal: 14, fontSize: 14, fontWeight: '700' },
-  textArea: { minHeight: 118, paddingTop: 13, paddingBottom: 13 },
-  chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
-  chip: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: 14, borderWidth: 1, borderColor: C.border, backgroundColor: C.background },
-  chipSelected: { backgroundColor: C.primary, borderColor: C.primary },
-  chipText: { color: C.textSecondary, fontSize: 12, fontWeight: '900' },
-  chipTextSelected: { color: '#FFFFFF' },
-  diagnosticsRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 18, marginTop: 4 },
-  rowTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
-  rowSub: { color: C.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 3, lineHeight: 17 },
-  submitButton: { height: 56, borderRadius: 20, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 9, marginTop: 18 },
-  submitButtonDisabled: { opacity: 0.65 },
-  submitText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
-  secondaryButton: { height: 52, borderRadius: 18, alignItems: 'center', justifyContent: 'center', marginTop: 10, backgroundColor: C.backgroundSelected },
-  secondaryText: { color: C.text, fontSize: 14, fontWeight: '900' },
-  statusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18 },
-  statusText: { color: C.textSecondary, fontSize: 12, fontWeight: '700' },
+  safeArea: {
+    flex: 1,
+    backgroundColor: C.background,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 112,
+    paddingBottom: 150,
+  },
+  title: {
+    color: C.text,
+    fontSize: 34,
+    fontWeight: '900',
+    letterSpacing: -0.7,
+  },
+  subtitle: {
+    color: C.textSecondary,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 18,
+  },
+  card: {
+    backgroundColor: C.backgroundElement,
+    borderRadius: 28,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 17,
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  label: {
+    color: C.text,
+    fontSize: 13,
+    fontWeight: '900',
+    marginTop: 14,
+    marginBottom: 8,
+  },
+  input: {
+    minHeight: 52,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.inputBorder || C.border,
+    backgroundColor: C.inputBackground || C.surface,
+    color: C.text,
+    paddingHorizontal: 14,
+    fontSize: 14,
+    fontWeight: '700',
+    shadowColor: '#000000',
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
+    elevation: 6,
+  },
+  textArea: {
+    minHeight: 118,
+    paddingTop: 13,
+    paddingBottom: 13,
+  },
+  chipWrap: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 9,
+    marginBottom: 4,
+  },
+  chip: {
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.background,
+    shadowColor: '#000000',
+    shadowOpacity: 0.16,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  chipSelected: {
+    shadowColor: '#000000',
+
+    backgroundColor: C.primary,
+    borderColor: C.primary,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  chipText: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  chipTextSelected: {
+    color: '#FFFFFF',
+  },
+  diagnosticsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.background,
+    shadowColor: '#000000',
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
+  },
+  diagnosticsText: {
+    flex: 1,
+  },
+  rowTitle: {
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  rowSub: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 3,
+    lineHeight: 17,
+  },
+  submitButton: {
+    height: 58,
+    borderRadius: 21,
+    backgroundColor: C.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 9,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: `${C.primary}CC`,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
+  },
+  submitButtonDisabled: {
+    opacity: 0.65,
+    shadowOpacity: 0.08,
+    elevation: 3,
+  },
+  submitText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  secondaryButton: {
+    height: 54,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+    backgroundColor: C.backgroundSelected,
+    borderWidth: 1,
+    borderColor: C.border,
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
+  },
+  secondaryText: {
+    color: C.text,
+    fontSize: 14,
+    fontWeight: '900',
+  },
 });

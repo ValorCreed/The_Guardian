@@ -1,3 +1,9 @@
+import {
+  AppOperationError,
+  isTransientError,
+  retryAsync,
+} from './asyncResilience';
+
 export type PwnedPasswordResult = {
   breached: boolean;
   count: number;
@@ -7,6 +13,8 @@ export type PwnedPasswordResult = {
 
 const PWNED_PASSWORDS_RANGE_URL = 'https://api.pwnedpasswords.com/range';
 const memoryCache = new Map<string, PwnedPasswordResult>();
+const PWNED_REQUEST_TIMEOUT_MS = 8000;
+const MAX_PWNED_RESPONSE_CHARS = 2_000_000;
 
 function rotateLeft(value: number, bits: number) {
   return (value << bits) | (value >>> (32 - bits));
@@ -128,19 +136,76 @@ export async function checkPwnedPassword(password: string): Promise<PwnedPasswor
   const prefix = hash.slice(0, 5);
   const suffix = hash.slice(5);
 
-  const response = await fetch(`${PWNED_PASSWORDS_RANGE_URL}/${prefix}`, {
-    method: 'GET',
-    headers: {
-      'Add-Padding': 'true',
-      'User-Agent': 'TheGuardianPasswordVault',
+  const body = await retryAsync(
+    async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        PWNED_REQUEST_TIMEOUT_MS
+      );
+
+      try {
+        const response = await fetch(
+          `${PWNED_PASSWORDS_RANGE_URL}/${prefix}`,
+          {
+            method: 'GET',
+            headers: {
+              'Add-Padding': 'true',
+              'User-Agent': 'TheGuardianPasswordVault',
+            },
+            signal: controller.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const transient = [408, 425, 429, 500, 502, 503, 504].includes(
+            response.status
+          );
+
+          throw new AppOperationError(
+            transient
+              ? 'Breach check is temporarily unavailable.'
+              : 'Breach check could not be completed.',
+            {
+              status: response.status,
+              code: response.status === 429
+                ? 'RATE_LIMITED'
+                : transient
+                  ? 'SERVICE_UNAVAILABLE'
+                  : 'UNKNOWN_ERROR',
+              transient,
+            }
+          );
+        }
+
+        const responseBody = await response.text();
+        if (responseBody.length > MAX_PWNED_RESPONSE_CHARS) {
+          throw new AppOperationError('Breach check returned an invalid response.', {
+            code: 'INVALID_RESPONSE',
+          });
+        }
+
+        return responseBody;
+      } catch (error: unknown) {
+        if (String((error as any)?.name || '').toLowerCase() === 'aborterror') {
+          throw new AppOperationError('Breach check timed out.', {
+            code: 'REQUEST_TIMEOUT',
+            transient: true,
+          });
+        }
+
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
     },
-  });
-
-  if (!response.ok) {
-    throw new Error(`Pwned Passwords check failed with status ${response.status}`);
-  }
-
-  const body = await response.text();
+    {
+      maxAttempts: 3,
+      baseDelayMs: 700,
+      maxDelayMs: 3200,
+      shouldRetry: (error) => isTransientError(error),
+    }
+  );
   let breachCount = 0;
 
   body.split(/\r?\n/).forEach((line) => {

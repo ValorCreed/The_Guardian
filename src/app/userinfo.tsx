@@ -1,7 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -31,6 +30,7 @@ import {
   saveBiometricCredentials,
   setBiometricEnabled,
 } from '../utils/secureAuth';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const getInitials = (name: string, email: string) => {
   const source = name || email || 'User';
@@ -41,6 +41,8 @@ const getInitials = (name: string, email: string) => {
 };
 
 export default function UserInfoScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const blurTarget = useBlurTarget();
   const { mode, isDark, colors: C } = useAppTheme();
@@ -178,7 +180,7 @@ export default function UserInfoScreen() {
     }
 
     if (!biometricAvailable) {
-      Alert.alert('Not available', 'Your device does not support biometric authentication or no fingerprint/face is enrolled.');
+      screenAlert('Not available', 'Your device does not support biometric authentication or no fingerprint/face is enrolled.');
       return;
     }
 
@@ -189,7 +191,7 @@ export default function UserInfoScreen() {
     });
 
     if (!result.success) {
-      Alert.alert('Failed', 'Could not verify your identity.');
+      screenAlert('Failed', 'Could not verify your identity.');
       return;
     }
 
@@ -198,7 +200,7 @@ export default function UserInfoScreen() {
       setBiometricUnlock(true);
       await setBiometricEnabled(true);
     } catch (error: any) {
-      Alert.alert(
+      screenAlert(
         'Could not enable biometrics',
         error?.message || 'Please try again while this device is online.'
       );
@@ -207,7 +209,7 @@ export default function UserInfoScreen() {
 
   const handleEmailVerificationPress = async () => {
     if (!email) {
-      Alert.alert('Email not found', 'Please sign in again so we can load your email address.');
+      screenAlert('Email not found', 'Please sign in again so we can load your email address.');
       return;
     }
 
@@ -215,7 +217,7 @@ export default function UserInfoScreen() {
       setSendingVerification(true);
       await requestApi.resendVerification({ email });
 
-      Alert.alert(
+      screenAlert(
         'Verification code sent',
         'We sent a verification code to your email. Enter the code to mark your account as verified.',
         [
@@ -232,7 +234,7 @@ export default function UserInfoScreen() {
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         'Could not send code',
         'We could not send a verification code right now. You can still use the app, but your account is safer after email verification. Please try again later from this page.',
         [
@@ -258,7 +260,7 @@ export default function UserInfoScreen() {
 
       if (value) {
         if (!emailVerified) {
-          Alert.alert(
+          screenAlert(
             'Verify your email first',
             'For your safety, two-factor authentication needs a verified email first. You can still use the app without 2FA, but verification makes account recovery and login codes safer.',
             [
@@ -276,7 +278,7 @@ export default function UserInfoScreen() {
           return;
         }
 
-        Alert.alert(
+        screenAlert(
           'Enable two-factor authentication?',
           'After this is enabled, login will require a one-time code in addition to your password.',
           [
@@ -289,10 +291,10 @@ export default function UserInfoScreen() {
                   await requestApi.setTwoFactorEnabled(true);
                   await AsyncStorage.setItem('twoFactorEnabled', 'true');
                   setTwoFactorEnabled(true);
-                  Alert.alert('2FA enabled', 'Your account now requires a verification code during login.');
+                  screenAlert('2FA enabled', 'Your account now requires a verification code during login.');
                 } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-                  Alert.alert('Could not enable 2FA', error.message || 'Please try again.');
+                  screenAlert('Could not enable 2FA', error.message || 'Please try again.');
                 } finally {
                   setSaving2FA(false);
                 }
@@ -303,7 +305,7 @@ export default function UserInfoScreen() {
         return;
       }
 
-      Alert.alert(
+      screenAlert(
         'Disable two-factor authentication?',
         'Your account will only require email and password to sign in.',
         [
@@ -317,10 +319,10 @@ export default function UserInfoScreen() {
                 await requestApi.setTwoFactorEnabled(false);
                 await AsyncStorage.setItem('twoFactorEnabled', 'false');
                 setTwoFactorEnabled(false);
-                Alert.alert('2FA disabled', 'Two-factor authentication has been turned off.');
+                screenAlert('2FA disabled', 'Two-factor authentication has been turned off.');
               } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-                Alert.alert('Could not disable 2FA', error.message || 'Please try again.');
+                screenAlert('Could not disable 2FA', error.message || 'Please try again.');
               } finally {
                 setSaving2FA(false);
               }
@@ -350,12 +352,12 @@ export default function UserInfoScreen() {
     const cleanName = draftName.trim().replace(/\s+/g, ' ');
 
     if (cleanName.length < 2) {
-      Alert.alert('Username too short', 'Enter at least 2 characters.');
+      screenAlert('Username too short', 'Enter at least 2 characters.');
       return;
     }
 
     if (cleanName.length > 60) {
-      Alert.alert('Username too long', 'Use 60 characters or fewer.');
+      screenAlert('Username too long', 'Use 60 characters or fewer.');
       return;
     }
 
@@ -370,10 +372,10 @@ export default function UserInfoScreen() {
       requestApi.clearCache();
       setEditNameVisible(false);
 
-      Alert.alert('Username updated', 'Your new username now appears across The Guardian.');
+      screenAlert('Username updated', 'Your new username now appears across The Guardian.');
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not update username', error?.message || 'Please try again.');
+      screenAlert('Could not update username', error?.message || 'Please try again.');
     } finally {
       setSavingName(false);
     }

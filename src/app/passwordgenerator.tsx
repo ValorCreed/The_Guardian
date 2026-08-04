@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -24,6 +23,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import { hapticLight, hapticMedium, hapticSelection, hapticToggleOff, hapticToggleOn, hapticWarning } from '../utils/haptics';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const HISTORY_KEY = 'guardian.passwordGenerator.history.v1';
 
@@ -134,6 +134,8 @@ function strengthLabel(score: number) {
 }
 
 export default function PasswordGeneratorScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -176,13 +178,13 @@ export default function PasswordGeneratorScreen() {
       value = generateRandomPassword(length, includeUppercase, includeNumbers, includeSymbols);
     } else if (mode === 'passphrase') {
       if (!isPaid) {
-        Alert.alert('Premium feature', 'Passphrase generation is available on Premium and Family plans.');
+        screenAlert('Premium feature', 'Passphrase generation is available on Premium and Family plans.');
         return;
       }
       value = generatePassphrase(wordCount, includeNumbers, includeSymbols);
     } else {
       if (!isPaid) {
-        Alert.alert('Premium feature', 'PIN generation is available on Premium and Family plans.');
+        screenAlert('Premium feature', 'PIN generation is available on Premium and Family plans.');
         return;
       }
       value = generatePin(Math.min(length, 12));
@@ -235,7 +237,7 @@ export default function PasswordGeneratorScreen() {
   const copyPassword = async () => {
     if (!generated) return;
     await setSecureClipboard(generated);
-    Alert.alert('Copied', getSecureClipboardMessage('Generated password'));
+    screenAlert('Copied', getSecureClipboardMessage('Generated password'));
   };
 
   const useInAddPassword = () => {
@@ -251,7 +253,7 @@ export default function PasswordGeneratorScreen() {
 
   const lockPremiumMode = (target: GeneratorMode) => {
     if (!isPaid && target !== 'random') {
-      Alert.alert(
+      screenAlert(
         'Premium feature',
         'Passphrases and PIN generation are available on Premium and Family plans.',
         [
@@ -292,8 +294,8 @@ export default function PasswordGeneratorScreen() {
         keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
       >
-        <Text style={styles.title}>Password generator</Text>
-        <Text style={styles.subtitle}>Generate passwords, passphrases and PINs.</Text>
+        <Text style={styles.title}>Advanced Password Generator</Text>
+        <Text style={styles.subtitle}></Text>
 
         <View style={styles.outputCard}>
           <Text style={styles.outputLabel}>Generated password</Text>
@@ -436,6 +438,12 @@ function ToggleRow({ label, value, onValueChange, C, disabled = false }: { label
 
 const stepStyles = StyleSheet.create({
   btn: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    elevation: 10,
+    shadowOffset: { width: 0, height: 11 },
+
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -455,10 +463,10 @@ const makeStyles = (C: any) =>
     subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 20 },
     outputCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 16 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     outputLabel: { color: C.textSecondary, fontSize: 12, fontWeight: '800', marginBottom: 8 },
     outputText: { color: C.text, fontSize: 18, fontWeight: '800', minHeight: 62, textAlignVertical: 'top' },
     scoreRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 12 },
@@ -468,54 +476,54 @@ const makeStyles = (C: any) =>
     modeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
     modePill: { flex: 1, minHeight: 42, borderRadius: 99, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 6 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
+      shadowOpacity: 0.16,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      elevation: 6,},
     modePillActive: { backgroundColor: C.primary, borderColor: C.primary 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
+      shadowOpacity: 0.16,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      elevation: 6,},
     modeText: { color: C.textSecondary, fontSize: 12, fontWeight: '900', textTransform: 'capitalize' },
     modeTextActive: { color: '#fff' },
     card: { backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, borderWidth: 1, borderColor: C.border, marginBottom: 16 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     controlRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12 },
     controlLabel: { color: C.text, fontSize: 15, fontWeight: '800' },
     upgradeCard: { backgroundColor: C.securityScoreBg, borderRadius: 18, borderWidth: 1, borderColor: C.warning, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     upgradeTitle: { color: C.warning, fontSize: 14, fontWeight: '900' },
     upgradeText: { color: C.warning, fontSize: 12, lineHeight: 17, marginTop: 2 },
     primaryButton: { backgroundColor: C.backgroundbutton, borderRadius: 999, minHeight: 56, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, marginBottom: 12 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     primaryButtonText: { color: '#fff', fontSize: 15, fontWeight: '900' },
     secondaryButton: { backgroundColor: C.backgroundElement, borderRadius: 999, minHeight: 54, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 10, borderWidth: 1, borderColor: C.border, marginBottom: 12 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     secondaryButtonText: { color: C.primary, fontSize: 14, fontWeight: '900' },
     historyCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, marginTop: 8 
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     sectionTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginBottom: 10 },
     historyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, borderTopColor: C.border, paddingVertical: 12 },
     historyText: { flex: 1, color: C.text, fontSize: 13, fontWeight: '700' },

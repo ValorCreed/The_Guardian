@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -21,6 +20,7 @@ import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import { useAppTheme } from '../context/ThemeContext';
 import type { ThemePalette } from '../constants/theme';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type SecuritySettings = {
   emailVerified: boolean;
@@ -28,6 +28,8 @@ type SecuritySettings = {
 };
 
 export default function TwoFactorSetupScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
@@ -53,7 +55,7 @@ export default function TwoFactorSetupScreen() {
       });
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         'Could not load security settings',
         error.message || 'Please check your connection and try again.'
       );
@@ -78,7 +80,7 @@ export default function TwoFactorSetupScreen() {
     if (saving) return;
 
     if (enabled && !settings.emailVerified) {
-      Alert.alert(
+      screenAlert(
         'Verify your email first',
         'You need to verify your email before turning on two-factor authentication.',
         [
@@ -91,7 +93,7 @@ export default function TwoFactorSetupScreen() {
 
     const actionText = enabled ? 'turn on' : 'turn off';
 
-    Alert.alert(
+    screenAlert(
       enabled ? 'Turn on 2FA?' : 'Turn off 2FA?',
       enabled
         ? 'Two-factor authentication will add an extra verification step when signing in.'
@@ -113,13 +115,13 @@ export default function TwoFactorSetupScreen() {
 
               requestApi.clearCache?.();
 
-              Alert.alert(
+              screenAlert(
                 'Security updated',
                 `Two-factor authentication has been ${enabled ? 'enabled' : 'disabled'}.`
               );
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert(
+              screenAlert(
                 `Could not ${actionText} 2FA`,
                 error.message || 'Please try again.'
               );
@@ -353,12 +355,18 @@ const makeStyles = (C: ThemePalette) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,},
 
     heroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 56,
       height: 56,
       borderRadius: 28,
@@ -389,10 +397,10 @@ const makeStyles = (C: ThemePalette) =>
       marginBottom: 18,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     row: {
       flexDirection: 'row',
@@ -426,10 +434,10 @@ const makeStyles = (C: ThemePalette) =>
       marginBottom: 20,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     warningTitle: {
       color: C.warning,
@@ -460,6 +468,12 @@ const makeStyles = (C: ThemePalette) =>
     },
 
     infoIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 38,
       height: 38,
       borderRadius: 19,

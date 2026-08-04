@@ -2,6 +2,8 @@ import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as ScreenCapture from 'expo-screen-capture';
 
+import { safeLogError } from '../utils/asyncResilience';
+
 let activeProtectionCount = 0;
 let protectionGeneration = 0;
 let protectionQueue: Promise<void> = Promise.resolve();
@@ -27,10 +29,8 @@ function scheduleProtectionStateUpdate() {
         await ScreenCapture.allowScreenCaptureAsync();
       }
     })
-    .catch((error) => {
-      if (__DEV__) {
-        console.log('SCREEN CAPTURE PROTECTION ERROR:', error);
-      }
+    .catch((error: unknown) => {
+      safeLogError('SCREEN_CAPTURE_PROTECTION', error);
     });
 }
 

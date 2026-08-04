@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -39,6 +38,7 @@ import {
   hapticSuccess,
   hapticWarning,
 } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type SelectableItem = {
   id: number;
@@ -80,6 +80,8 @@ const normalizeIds = (values?: number[]) =>
   Array.from(new Set((values || []).map(Number).filter((id) => Number.isFinite(id))));
 
 export default function EditFamilyAccessScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const params = useLocalSearchParams<{
     membershipId?: string;
@@ -109,7 +111,7 @@ export default function EditFamilyAccessScreen() {
   const loadAccess = useCallback(async () => {
     if (!membershipId) {
       setLoading(false);
-      Alert.alert('Family member not found', 'Return to Family and choose a member again.', [
+      screenAlert('Family member not found', 'Return to Family and choose a member again.', [
         { text: 'Back', onPress: () => router.back() },
       ]);
       return;
@@ -144,7 +146,7 @@ export default function EditFamilyAccessScreen() {
       setSelectedNoteIds(normalizeIds(access.noteItemIds).filter((id) => availableNoteIds.has(id)));
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         'Could not load member access',
         error?.message || 'Please return to Family and try again.'
       );
@@ -211,7 +213,7 @@ export default function EditFamilyAccessScreen() {
 
     if (nextSelectedCount === 0) {
       hapticWarning();
-      Alert.alert(
+      screenAlert(
         'Choose at least one item',
         'A family member must have at least one specific vault item selected.'
       );
@@ -235,7 +237,7 @@ export default function EditFamilyAccessScreen() {
 
       requestApi.clearCache();
       hapticSuccess();
-      Alert.alert(
+      screenAlert(
         'Family access updated',
         `${nextSelectedCount} vault item${nextSelectedCount === 1 ? '' : 's'} can now be viewed by this member.`,
         [{ text: 'Done', onPress: () => router.back() }]
@@ -243,7 +245,7 @@ export default function EditFamilyAccessScreen() {
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
       hapticWarning();
-      Alert.alert('Could not update access', error?.message || 'Please try again.');
+      screenAlert('Could not update access', error?.message || 'Please try again.');
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -459,10 +461,10 @@ const makeStyles = (C: any) =>
       justifyContent: 'center',
       marginBottom: 18,
       shadowColor: C.primary,
-      shadowOpacity: 0.14,
+      shadowOpacity: 0.16,
       shadowRadius: 15,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      elevation: 6,
     },
     title: { color: C.text, fontSize: 31, fontWeight: '900', letterSpacing: -0.5 },
     subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, fontWeight: '600', marginTop: 8, marginBottom: 20 },
@@ -476,12 +478,18 @@ const makeStyles = (C: any) =>
       padding: 15,
       marginBottom: 20,
       shadowColor: '#000',
-      shadowOpacity: 0.04,
-      shadowRadius: 15,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     memberAvatar: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 48,
       height: 48,
       borderRadius: 19,
@@ -492,7 +500,13 @@ const makeStyles = (C: any) =>
     },
     memberName: { color: C.text, fontSize: 16, fontWeight: '900' },
     memberEmail: { color: C.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 4 },
-    countBadge: { backgroundColor: C.backgroundSelected, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, marginLeft: 8 },
+    countBadge: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ backgroundColor: C.backgroundSelected, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, marginLeft: 8 },
     countBadgeText: { color: C.primary, fontSize: 11, fontWeight: '900' },
     sectionCard: {
       backgroundColor: C.backgroundElement,
@@ -502,20 +516,38 @@ const makeStyles = (C: any) =>
       overflow: 'hidden',
       marginBottom: 16,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     sectionHeader: { flexDirection: 'row', alignItems: 'center', padding: 15, borderBottomWidth: 1, borderBottomColor: C.border },
-    sectionIcon: { width: 42, height: 42, borderRadius: 17, backgroundColor: C.actionCard || C.backgroundSelected, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
+    sectionIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 42, height: 42, borderRadius: 17, backgroundColor: C.actionCard || C.backgroundSelected, alignItems: 'center', justifyContent: 'center', marginRight: 11 },
     sectionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     sectionSubtitle: { color: C.textSecondary, fontSize: 11, lineHeight: 16, fontWeight: '600', marginTop: 3 },
-    selectAllButton: { paddingHorizontal: 10, paddingVertical: 8, borderRadius: 13, backgroundColor: C.backgroundSelected, marginLeft: 8 },
+    selectAllButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ paddingHorizontal: 10, paddingVertical: 8, borderRadius: 13, backgroundColor: C.backgroundSelected, marginLeft: 8 },
     selectAllText: { color: C.primary, fontSize: 11, fontWeight: '900' },
     itemRow: { minHeight: 65, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 15, paddingVertical: 11 },
     itemDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
-    checkbox: { width: 26, height: 26, borderRadius: 10, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.background, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+    checkbox: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ width: 26, height: 26, borderRadius: 10, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.background, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
     checkboxSelected: { backgroundColor: C.primary, borderColor: C.primary },
     itemTitle: { color: C.text, fontSize: 14, fontWeight: '800' },
     itemSubtitle: { color: C.textSecondary, fontSize: 12, fontWeight: '600', marginTop: 3 },
@@ -530,13 +562,19 @@ const makeStyles = (C: any) =>
       gap: 9,
       marginTop: 8,
       shadowColor: C.primary,
-      shadowOpacity: 0.14,
-      shadowRadius: 15,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 3,
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
     },
     disabledButton: { opacity: 0.65 },
     saveButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
-    cancelButton: { alignItems: 'center', paddingVertical: 15, marginTop: 5 },
+    cancelButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+ alignItems: 'center', paddingVertical: 15, marginTop: 5 },
     cancelButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '800' },
   });

@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   RefreshControl,
   ScrollView,
@@ -31,6 +30,7 @@ import {
   syncPendingGuardianAutofillSaves,
   type GuardianAutofillCounts,
 } from '../services/autofillSync';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const EMPTY_COUNTS: GuardianAutofillCounts = {
   credentials: 0,
@@ -39,6 +39,8 @@ const EMPTY_COUNTS: GuardianAutofillCounts = {
 };
 
 export default function AutofillScreen() {
+  const screenAlert = useScreenAlert();
+
   const { colors: C, isDark } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -99,7 +101,7 @@ export default function AutofillScreen() {
 
   const openDeviceSettings = useCallback(async () => {
     if (Platform.OS !== 'android') {
-      Alert.alert(
+      screenAlert(
         'Android only for now',
         'System-wide autofill setup is currently available on Android only.'
       );
@@ -122,7 +124,7 @@ export default function AutofillScreen() {
         await IntentLauncher.startActivityAsync('android.settings.AUTOFILL_SETTINGS');
       } catch (settingsError) {
         if (isScreenRequestCancelled(settingsError)) return;
-        Alert.alert(
+        screenAlert(
           'Open Autofill settings manually',
           'Open Settings and search for “Autofill”, “Passwords”, “Password manager”, or “Preferred service”, then choose The Guardian.'
         );
@@ -132,12 +134,12 @@ export default function AutofillScreen() {
 
   const syncAutofillVault = useCallback(async () => {
     if (Platform.OS !== 'android') {
-      Alert.alert('Android only for now', 'System-wide autofill is currently available on Android only.');
+      screenAlert('Android only for now', 'System-wide autofill is currently available on Android only.');
       return;
     }
 
     if (!nativeAutofillAvailable) {
-      Alert.alert(
+      screenAlert(
         'Rebuild required',
         'The native Autofill module is not available in this build. Add the updated Android files and rebuild the APK.'
       );
@@ -162,13 +164,13 @@ export default function AutofillScreen() {
       setCounts(nextCounts);
       setLastSyncedAt(now);
 
-      Alert.alert(
+      screenAlert(
         'Autofill synced',
         `${nextCounts.credentials} login${nextCounts.credentials === 1 ? '' : 's'} and ${nextCounts.cards} card${nextCounts.cards === 1 ? '' : 's'} are ready for Android Autofill.`
       );
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
-      Alert.alert(
+      screenAlert(
         'Sync failed',
         error?.message || 'Could not sync passwords and cards for autofill.'
       );
@@ -181,7 +183,7 @@ export default function AutofillScreen() {
   const clearAutofill = useCallback(async () => {
     if (!nativeAutofillAvailable) return;
 
-    Alert.alert(
+    screenAlert(
       'Clear autofill cache?',
       'This removes the encrypted password and card autofill cache from this device, including any newly saved logins still waiting to sync. Your online vault is not deleted.',
       [
@@ -196,10 +198,10 @@ export default function AutofillScreen() {
               setEnabled(false);
               setCounts(EMPTY_COUNTS);
               setLastSyncedAt(null);
-              Alert.alert('Cleared', 'The encrypted autofill cache was removed from this device.');
+              screenAlert('Cleared', 'The encrypted autofill cache was removed from this device.');
             } catch (error: any) {
               if (isScreenRequestCancelled(error)) return;
-              Alert.alert('Could not clear cache', error?.message || 'Please try again.');
+              screenAlert('Could not clear cache', error?.message || 'Please try again.');
             } finally {
               setSyncing(false);
             }
@@ -453,12 +455,18 @@ const makeStyles = (C: any) =>
       borderColor: C.border,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,},
 
     iconCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 58,
       height: 58,
       borderRadius: 24,
@@ -493,10 +501,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 8,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
+      shadowOpacity: 0.16,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      elevation: 6,},
 
     statusPillText: {
       color: C.text,
@@ -513,10 +521,10 @@ const makeStyles = (C: any) =>
       overflow: 'hidden',
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     row: {
       flexDirection: 'row',
@@ -549,10 +557,10 @@ const makeStyles = (C: any) =>
       marginBottom: 12,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     primaryButtonText: {
       color: '#FFFFFF',
@@ -573,10 +581,10 @@ const makeStyles = (C: any) =>
       marginBottom: 22,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     secondaryButtonText: {
       color: C.primary,
@@ -647,10 +655,10 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     warningTitle: {
       fontSize: 14,
@@ -677,10 +685,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 14,
 
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
 
     clearButtonText: {
       color: C.danger,

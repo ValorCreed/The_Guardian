@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   RefreshControl,
   ScrollView,
@@ -39,6 +38,8 @@ import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelab
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { hapticDelete, hapticLight, hapticSuccess, hapticWarning } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 
 const getFileExtension = (fileName?: string | null) => {
@@ -110,6 +111,8 @@ const getFriendlyFamilyError = (
 };
 
 export default function FamilyScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -213,7 +216,7 @@ export default function FamilyScreen() {
     if (deletingMemberId !== null) return;
 
     hapticDelete();
-    Alert.alert('Remove member', `Remove ${name} from your family group?`, [
+    screenAlert('Remove member', `Remove ${name} from your family group?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
@@ -230,7 +233,7 @@ export default function FamilyScreen() {
           } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
             hapticWarning();
-            Alert.alert('Could not remove member', error.message || 'Please try again.');
+            screenAlert('Could not remove member', error.message || 'Please try again.');
           } finally {
             setDeletingMemberId(null);
           }
@@ -611,9 +614,9 @@ function SharedPasswordSection({ items, styles, C }: { items: SharedPasswordItem
         renderItem={({ item, index }) => (
           <SharedRow
             icon={<KeyRound size={18} color={C.primary} />}
-            title={item.title}
+            title={getFriendlyVaultTitle(item.title, item.website, 'Shared password')}
             subtitle={`Shared by ${item.ownerName || item.ownerEmail}`}
-            extra={item.website}
+            extra={getFriendlyVaultSubtitle(undefined, item.website, 'Login details')}
             isLast={index === items.length - 1}
             styles={styles}
             onPress={() => router.push({ pathname: '/sharedvaultdetails', params: { id: String(item.id), type: 'PASSWORD' } })}
@@ -789,10 +792,10 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.10,
-      shadowRadius: 20,
-      shadowOffset: { width: 0, height: 11 },
-      elevation: 6,
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,
     },
     skeletonHeroIcon: {
       width: 62,
@@ -803,7 +806,7 @@ const makeStyles = (C: any) =>
       shadowOpacity: 0.18,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 8 },
-      elevation: 5,
+      elevation: 6,
     },
     skeletonHeroCopy: {
       flex: 1,
@@ -855,13 +858,19 @@ const makeStyles = (C: any) =>
       borderRadius: 24,
       marginBottom: 24,
       shadowColor: '#000',
-      shadowOpacity: 0.10,
-      shadowRadius: 19,
-      shadowOffset: { width: 0, height: 10 },
-      elevation: 6,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
       backgroundColor: C.backgroundElement,
     },
     skeletonCardSurface: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+
       width: '100%',
       backgroundColor: C.backgroundElement,
       borderRadius: 24,
@@ -875,6 +884,12 @@ const makeStyles = (C: any) =>
       padding: 16,
     },
     skeletonMemberAvatar: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 46,
       height: 46,
       borderRadius: 18,
@@ -917,6 +932,12 @@ const makeStyles = (C: any) =>
       padding: 16,
     },
     skeletonOwnerIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 17,
@@ -952,6 +973,12 @@ const makeStyles = (C: any) =>
       padding: 16,
     },
     skeletonSharedIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 17,
@@ -999,14 +1026,20 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     noticeTitle: { color: C.text, fontSize: 14, fontWeight: '900', marginBottom: 5 },
     noticeText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, fontWeight: '600' },
     retrySmallButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       alignSelf: 'flex-start',
       backgroundColor: C.primary,
       borderRadius: 999,
@@ -1025,12 +1058,18 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       marginTop: 18,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     serviceUnavailableIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 68,
       height: 68,
       borderRadius: 24,
@@ -1054,6 +1093,12 @@ const makeStyles = (C: any) =>
       marginTop: 8,
     },
     serviceRetryButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       minWidth: 132,
       minHeight: 44,
       borderRadius: 999,
@@ -1078,12 +1123,18 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.24,
+      shadowRadius: 26,
+      shadowOffset: { width: 0, height: 14 },
+      elevation: 12,
     },
     heroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 62,
       height: 62,
       borderRadius: 22,
@@ -1104,10 +1155,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 16,
       marginBottom: 24,
       shadowColor: C.primary,
-      shadowOpacity: 0.10,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
     },
     upgradeText: { color: '#fff', fontWeight: '900', fontSize: 15 },
     addButton: {
@@ -1120,10 +1171,10 @@ const makeStyles = (C: any) =>
       paddingVertical: 16,
       marginBottom: 24,
       shadowColor: C.primary,
-      shadowOpacity: 0.10,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
     },
     addButtonText: { color: '#fff', fontWeight: '900', fontSize: 15 },
     sectionLabel: {
@@ -1151,16 +1202,22 @@ const makeStyles = (C: any) =>
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
-      shadowOpacity: 0.045,
-      shadowRadius: 16,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
     },
     memberRow: { flexDirection: 'row', alignItems: 'flex-start', padding: 16 },
     memberDetails: { flex: 1, minWidth: 0 },
     vaultRow: { flexDirection: 'row', alignItems: 'center', padding: 16 },
     rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
     avatar: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 46,
       height: 46,
       borderRadius: 18,
@@ -1171,6 +1228,12 @@ const makeStyles = (C: any) =>
     },
     avatarText: { color: '#fff', fontWeight: '900', fontSize: 14 },
     sharedIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 17,
@@ -1191,6 +1254,12 @@ const makeStyles = (C: any) =>
       alignSelf: 'stretch',
     },
     editButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       flex: 1,
       minHeight: 42,
       borderRadius: 15,
@@ -1209,6 +1278,12 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
     },
     deleteButton: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 11 },
+
       flex: 1,
       minHeight: 42,
       borderRadius: 15,
@@ -1226,7 +1301,13 @@ const makeStyles = (C: any) =>
       fontSize: 12,
       fontWeight: '900',
     },
-    emptyBox: { padding: 24, alignItems: 'center' },
+    emptyBox: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      elevation: 10,
+      shadowOffset: { width: 0, height: 12 },
+ padding: 24, alignItems: 'center' },
     emptyTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     emptyText: { color: C.textSecondary, fontSize: 13, textAlign: 'center', marginTop: 7, lineHeight: 20, fontWeight: '600' },
     chevronColor: { color: C.tabInactive },

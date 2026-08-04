@@ -2,7 +2,6 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Dimensions,
   Easing,
@@ -30,7 +29,7 @@ import VaultItemActionMenu, {
   type VaultActionMenuPreview,
 } from '../components/VaultItemActionMenu';
 import ExpandingAddButton from '../components/ExpandingAddButton';
-import { API_BASE_URL, api, SecureNoteResponse, VaultItem } from '../services/api';
+import { api, isDuressSession, SecureNoteResponse, VaultItem } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
 import {
@@ -47,6 +46,9 @@ import { hapticLight, hapticMedium, hapticSelection, hapticWarning } from '../ut
 import CardBrandLogo from '../components/CardBrandLogo';
 import { detectCardBrand } from '../utils/cardBrand';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
+import { safeLogError } from '../utils/asyncResilience';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
@@ -57,35 +59,21 @@ const DOC_CARD_HEIGHT = 190;
 const VAULT_AUTO_REFRESH_INTERVAL_MS = 60 * 1000;
 
 const fastServerProbe = async (timeoutMs = 1800, externalSignal?: AbortSignal) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  const abortFromScreen = () => controller.abort();
-  externalSignal?.addEventListener('abort', abortFromScreen, { once: true });
+  if (externalSignal?.aborted) return false;
 
   try {
-    /*
-     * This checks whether the backend process is reachable before starting the
-     * heavier vault sync. Any HTTP response means the server is alive, even if
-     * the root path returns 401/403/404.
-     */
-    await fetch(API_BASE_URL, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-
-    return true;
-  } catch (error) {
-    if (isScreenRequestCancelled(error)) return;
+    const reachable = await api.checkServerReachability(timeoutMs);
+    return externalSignal?.aborted ? false : reachable;
+  } catch (error: unknown) {
+    if (isScreenRequestCancelled(error) || externalSignal?.aborted) return false;
     return false;
-  } finally {
-    clearTimeout(timeoutId);
-    externalSignal?.removeEventListener('abort', abortFromScreen);
   }
 };
 
 
 type PreparedVaultScreenData = {
   email: string;
+  scopeKey: string;
   vaultItems: VaultItem[];
   notes: SecureNoteResponse[];
   offlineMode: boolean;
@@ -299,6 +287,8 @@ const getFulfilledValue = <T,>(
 };
 
 const VaultScreen = () => {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const runCancelable = useCancelableRequest();
   const router = useRouter();
@@ -325,6 +315,7 @@ const VaultScreen = () => {
   const lastLoadAttemptRef = useRef(0);
   const activeLoadSequenceRef = useRef(0);
   const currentEmailRef = useRef<string | null>(null);
+  const currentScopeRef = useRef<string | null>(null);
   const suppressNextItemPressRef = useRef(false);
   const suppressResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const actionMenuCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -348,6 +339,14 @@ const VaultScreen = () => {
   const loadSubscriptionPlan = async () => {
     try {
       setCheckingPlan(true);
+
+      const duress = await isDuressSession();
+      if (duress) {
+        // A decoy session is admitted only while Premium/Family remains active.
+        // Do not reveal or query subscription state from inside that session.
+        setPlan('PREMIUM');
+        return;
+      }
 
       const serverReachable = await api
         .checkServerReachability(1800)
@@ -384,7 +383,8 @@ const VaultScreen = () => {
     fromOffline = false,
     savedAt?: string | null,
     ownerEmail?: string | null,
-    secureSecretsAvailable = false
+    secureSecretsAvailable = false,
+    scopeKey?: string | null
   ): PreparedVaultScreenData => {
     const fixedPasswords = passwords.map((item: any) => ({
       ...item,
@@ -430,6 +430,7 @@ const VaultScreen = () => {
 
     return {
       email: String(ownerEmail || '').trim().toLowerCase(),
+      scopeKey: String(scopeKey || `${String(ownerEmail || '').trim().toLowerCase()}:NORMAL`),
       vaultItems: [...fixedPasswords, ...fixedCards, ...fixedDocuments],
       notes: noteData || [],
       offlineMode: fromOffline,
@@ -456,11 +457,12 @@ const VaultScreen = () => {
     fromOffline = false,
     savedAt?: string | null,
     ownerEmail?: string | null,
-    secureSecretsAvailable = false
+    secureSecretsAvailable = false,
+    scopeKey?: string | null
   ) => {
     applyPreparedVaultData(
       buildVaultScreenData(
-        passwords, cards, documents, noteData, fromOffline, savedAt, ownerEmail, secureSecretsAvailable
+        passwords, cards, documents, noteData, fromOffline, savedAt, ownerEmail, secureSecretsAvailable, scopeKey
       )
     );
   };
@@ -479,7 +481,8 @@ const VaultScreen = () => {
       markAsOffline,
       snapshot.savedAt,
       snapshot.email,
-      snapshot.secureSecretsAvailable
+      snapshot.secureSecretsAvailable,
+      `${String(snapshot.email || '').trim().toLowerCase()}:NORMAL`
     );
 
     return true;
@@ -495,8 +498,10 @@ const VaultScreen = () => {
     const background = Boolean(options?.background);
     const now = Date.now();
     const currentEmail = await getCurrentUserEmail();
+    const currentDuressMode = await isDuressSession();
+    const currentScopeKey = `${currentEmail}:${currentDuressMode ? 'DURESS' : 'NORMAL'}`;
 
-    if (currentEmailRef.current && currentEmailRef.current !== currentEmail) {
+    if (currentScopeRef.current && currentScopeRef.current !== currentScopeKey) {
       vaultScreenMemoryCache = null;
       lastOnlineVaultSyncAt = 0;
       setVaultItems([]);
@@ -507,8 +512,9 @@ const VaultScreen = () => {
     }
 
     currentEmailRef.current = currentEmail;
+    currentScopeRef.current = currentScopeKey;
 
-    const hasMatchingMemoryCache = vaultScreenMemoryCache?.email === currentEmail;
+    const hasMatchingMemoryCache = vaultScreenMemoryCache?.scopeKey === currentScopeKey;
     const hasVisibleData = vaultItems.length > 0 || notes.length > 0 || hasMatchingMemoryCache;
 
     if (!force && vaultScreenMemoryCache && hasMatchingMemoryCache) {
@@ -584,7 +590,7 @@ const VaultScreen = () => {
       }
 
       if (failedReason) {
-        console.log('VAULT SERVER SYNC FAILED', failedReason);
+        safeLogError('VAULT_SERVER_SYNC', failedReason);
 
         /**
          * Important UX rule:
@@ -595,7 +601,7 @@ const VaultScreen = () => {
          */
         if (hasVisibleData) {
           if (force) {
-            Alert.alert(
+            screenAlert(
               'Could not refresh vault',
               'The Guardian could not refresh your vault right now. Your latest loaded vault data is still shown.'
             );
@@ -608,7 +614,7 @@ const VaultScreen = () => {
           if (loaded) return;
         }
 
-        Alert.alert(
+        screenAlert(
           'Could not load vault',
           failedReason?.message || 'The Guardian could not load your vault right now.'
         );
@@ -620,7 +626,17 @@ const VaultScreen = () => {
       const documents = getFulfilledValue(results[2], []);
       const noteData = getFulfilledValue(results[3], []);
 
-      applyVaultData(passwords || [], cards || [], documents || [], noteData || [], false, null, currentEmail);
+      applyVaultData(
+        passwords || [],
+        cards || [],
+        documents || [],
+        noteData || [],
+        false,
+        null,
+        currentEmail,
+        false,
+        currentScopeKey
+      );
       lastOnlineVaultSyncAt = Date.now();
 
       const snapshot = await createOfflineVaultSnapshot({
@@ -633,7 +649,7 @@ const VaultScreen = () => {
       await saveOfflineVaultSnapshot(snapshot);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      console.log('VAULT LOAD FAILED', error);
+      safeLogError('VAULT_LOAD', error);
 
       if (!hasVisibleData && isOfflineReadableError(error)) {
         const loaded = await applyOfflineSnapshotInstantly(true);
@@ -641,9 +657,9 @@ const VaultScreen = () => {
       }
 
       if (!hasVisibleData) {
-        Alert.alert('Error', error.message || 'Could not load vault.');
+        screenAlert('Error', error.message || 'Could not load vault.');
       } else if (force) {
-        Alert.alert(
+        screenAlert(
           'Could not refresh vault',
           'The Guardian could not refresh your vault right now. Your latest loaded vault data is still shown.'
         );
@@ -888,9 +904,11 @@ const VaultScreen = () => {
       setNotes(nextNotes);
 
       const email = currentEmailRef.current || vaultScreenMemoryCache?.email || '';
+      const scopeKey = currentScopeRef.current || vaultScreenMemoryCache?.scopeKey || `${email}:NORMAL`;
 
       vaultScreenMemoryCache = {
         email,
+        scopeKey,
         vaultItems: nextVaultItems,
         notes: nextNotes,
         offlineMode: false,
@@ -1009,11 +1027,19 @@ const VaultScreen = () => {
   const searchText = search.trim().toLowerCase();
 
   const passwords = useMemo(() => {
-    return vaultItems.filter(
-      (item) =>
-        item.itemType === 'PASSWORD' &&
-        `${item.title || ''} ${item.website || ''} ${item.usernameValue || ''}`.toLowerCase().includes(searchText)
-    );
+    return vaultItems.filter((item) => {
+      if (item.itemType !== 'PASSWORD') return false;
+
+      const presentationTitle = getFriendlyVaultTitle(item.title, item.website);
+      const presentationSubtitle = getFriendlyVaultSubtitle(
+        item.usernameValue,
+        item.website
+      );
+
+      return `${item.title || ''} ${item.website || ''} ${item.usernameValue || ''} ${presentationTitle} ${presentationSubtitle}`
+        .toLowerCase()
+        .includes(searchText);
+    });
   }, [vaultItems, searchText]);
 
   const documents = useMemo(() => {
@@ -1056,7 +1082,7 @@ const VaultScreen = () => {
   const activeTabIcon = tabs.find((item) => item.label === activeTab)?.icon || 'lock-closed-outline';
 
   const showOfflineWriteWarning = () => {
-    Alert.alert(
+    screenAlert(
       'Offline mode',
       offlineSecretsAvailable
         ? 'Your encrypted offline copy lets you view passwords, card details, and SecureNote contents. Adding, editing, deleting, and document downloads require The Guardian to reconnect.'
@@ -1067,7 +1093,7 @@ const VaultScreen = () => {
 
   const showDocumentUpgradePrompt = () => {
     hapticWarning();
-    Alert.alert(
+    screenAlert(
       'Document uploads are premium',
       'Free accounts can view existing documents, but uploading new encrypted documents requires Premium or Family.',
       [
@@ -1185,7 +1211,12 @@ const VaultScreen = () => {
       {passwords.length === 0
         ? renderEmpty('password')
         : passwords.map((item) => {
-            const title = item.title || item.website || 'Untitled login';
+            const title = getFriendlyVaultTitle(item.title, item.website, 'Untitled login');
+            const subtitle = getFriendlyVaultSubtitle(
+              item.usernameValue,
+              item.website,
+              'Login details'
+            );
             const itemKey = `password-${item.id}`;
             const selected = actionTarget?.itemKey === itemKey;
 
@@ -1213,7 +1244,7 @@ const VaultScreen = () => {
                       preview: {
                         kind: 'password',
                         title,
-                        subtitle: item.usernameValue || item.website || 'Login details',
+                        subtitle,
                         leadingText: title.charAt(0).toUpperCase(),
                         leadingColor: getAvatarColor(title),
                         meta: normalizeDate(item.updatedAt || item.createdAt),
@@ -1231,7 +1262,7 @@ const VaultScreen = () => {
                 <View style={styles.cardText}>
                   <Text style={styles.cardName}>{title}</Text>
                   <Text style={styles.cardSub}>
-                    {item.usernameValue || item.website || 'Login details'}
+                    {subtitle}
                   </Text>
                 </View>
 

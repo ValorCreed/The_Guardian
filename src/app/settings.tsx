@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   KeyboardAvoidingView,
   Modal,
@@ -66,6 +65,7 @@ import {
   hapticWarning,
   setHapticsEnabledPreference,
 } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 const AUTO_LOCK_ON_APP_CLOSE = -1;
 
@@ -285,6 +285,8 @@ function PlanBadge({
 }
 
 export default function SettingsScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const runCancelable = useCancelableRequest();
   const blurTarget = useBlurTarget();
@@ -297,6 +299,7 @@ export default function SettingsScreen() {
   const [planLoading, setPlanLoading] = useState(true);
   const [biometricUnlock, setBiometricUnlock] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
   const [selectedTimeout, setSelectedTimeout] = useState(TIMEOUT_OPTIONS[1]);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [lockingVault, setLockingVault] = useState(false);
@@ -383,7 +386,7 @@ export default function SettingsScreen() {
     } catch (error: any) {
       if (isScreenRequestCancelled(error)) return;
 
-      Alert.alert(
+      screenAlert(
         'Could not lock vault',
         error?.message || 'Please try again.'
       );
@@ -393,50 +396,60 @@ export default function SettingsScreen() {
   }, [lockingVault, runCancelable]);
 
   const handleBiometricToggle = async (value: boolean) => {
-    if (!value) {
-      hapticToggleOff();
-      setBiometricUnlock(false);
-      await setBiometricEnabled(false);
-      await clearBiometricCredentials();
-      return;
-    }
+    if (biometricLoading) return;
 
-    if (!biometricAvailable) {
-      Alert.alert(
+    if (value && !biometricAvailable) {
+      screenAlert(
         'Not available',
         'Your device does not support biometric authentication or no fingerprint/face is enrolled.'
       );
       return;
     }
 
-    const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Confirm your identity',
-      cancelLabel: 'Cancel',
-      disableDeviceFallback: false,
-    });
-
-    if (!result.success) {
-      Alert.alert('Failed', 'Could not verify your identity.');
-      return;
-    }
+    setBiometricLoading(true);
 
     try {
+      if (!value) {
+        hapticToggleOff();
+        await setBiometricEnabled(false);
+        await clearBiometricCredentials();
+        setBiometricUnlock(false);
+        return;
+      }
+
+      /*
+       * SecureStore owns the biometric prompt for the device-bound credential.
+       * Calling a separate LocalAuthentication prompt here caused two
+       * back-to-back biometric prompts on Android.
+       */
       await saveBiometricCredentials(email);
-      hapticToggleOn();
-      setBiometricUnlock(true);
       await setBiometricEnabled(true);
+      setBiometricUnlock(true);
+      hapticToggleOn();
     } catch (error: any) {
-      Alert.alert(
-        'Could not enable biometrics',
-        error?.message || 'Please try again while this device is online.'
+      if (value) {
+        setBiometricUnlock(false);
+        await setBiometricEnabled(false).catch(() => undefined);
+      } else {
+        setBiometricUnlock(true);
+      }
+
+      screenAlert(
+        value ? 'Could not enable biometrics' : 'Could not disable biometrics',
+        error?.message ||
+          (value
+            ? 'Biometric confirmation was cancelled or could not be completed.'
+            : 'Biometric unlock could not be disabled. Please try again.')
       );
+    } finally {
+      setBiometricLoading(false);
     }
   };
 
   const handleLockNow = () => {
     if (lockingVault) return;
 
-    Alert.alert(
+    screenAlert(
       'Lock Vault',
       'This will log you out and require sign in again. Continue?',
       [
@@ -485,16 +498,16 @@ export default function SettingsScreen() {
     const cleanConfirm = deleteConfirmText.trim().toUpperCase();
 
     if (!cleanPassword) {
-      Alert.alert('Password required', 'Enter your account password to continue.');
+      screenAlert('Password required', 'Enter your account password to continue.');
       return;
     }
 
     if (cleanConfirm !== 'DELETE') {
-      Alert.alert('Confirmation required', 'Type DELETE to confirm account deletion.');
+      screenAlert('Confirmation required', 'Type DELETE to confirm account deletion.');
       return;
     }
 
-    Alert.alert(
+    screenAlert(
       'Delete account permanently?',
       'This will permanently remove your account and vault data. This action cannot be undone.',
       [
@@ -528,7 +541,7 @@ export default function SettingsScreen() {
               setDeletePassword('');
               setDeleteConfirmText('');
 
-              Alert.alert(
+              screenAlert(
                 'Account deleted',
                 'Your account and vault data have been deleted.',
                 [
@@ -540,7 +553,7 @@ export default function SettingsScreen() {
               );
             } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-              Alert.alert(
+              screenAlert(
                 'Could not delete account',
                 error.message || 'Something went wrong. Please try again.'
               );
@@ -555,11 +568,11 @@ export default function SettingsScreen() {
 
   const handleClearOfflineVault = () => {
     if (!offlineStatus?.hasSnapshot) {
-      Alert.alert('Offline vault', 'There is no offline vault snapshot saved on this device yet.');
+      screenAlert('Offline vault', 'There is no offline vault snapshot saved on this device yet.');
       return;
     }
 
-    Alert.alert(
+    screenAlert(
       'Clear offline vault?',
       'This removes the encrypted offline copy of passwords, card details, SecureNote contents, and document metadata from this device only. Your online vault will not be deleted.',
       [
@@ -570,7 +583,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             await clearOfflineVaultSnapshot();
             setOfflineStatus(await getOfflineVaultStatus());
-            Alert.alert('Offline vault cleared', 'The encrypted offline vault copy was removed from this device.');
+            screenAlert('Offline vault cleared', 'The encrypted offline vault copy was removed from this device.');
           },
         },
       ]
@@ -580,7 +593,7 @@ export default function SettingsScreen() {
   const handleDeleteAccount = () => {
     if (deleteAccountLoading) return;
 
-    Alert.alert(
+    screenAlert(
       'Delete Account',
       'For your safety, you will need to enter your account password and type DELETE before this account can be removed.',
       [
@@ -655,13 +668,32 @@ export default function SettingsScreen() {
                 <Text style={styles.rowLabel}>Biometric unlock</Text>
               </View>
 
-              <Switch
-                value={biometricUnlock}
-                onValueChange={handleBiometricToggle}
-                trackColor={{ false: C.border, true: C.primary }}
-                thumbColor="#fff"
-                ios_backgroundColor={C.border}
-              />
+              <View
+                style={styles.biometricControl}
+                accessibilityLiveRegion="polite"
+                accessibilityState={{ busy: biometricLoading }}
+              >
+                {biometricLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color={C.primary}
+                    accessibilityLabel={
+                      biometricUnlock
+                        ? 'Disabling biometric unlock'
+                        : 'Enabling biometric unlock'
+                    }
+                  />
+                ) : (
+                  <Switch
+                    value={biometricUnlock}
+                    onValueChange={handleBiometricToggle}
+                    trackColor={{ false: C.border, true: C.primary }}
+                    thumbColor="#fff"
+                    ios_backgroundColor={C.border}
+                    disabled={biometricLoading}
+                  />
+                )}
+              </View>
             </View>
 
             <TouchableOpacity
@@ -811,7 +843,7 @@ export default function SettingsScreen() {
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
-              onPress={() => { hapticLight(); router.push('/notifications'); }}
+              onPress={() => { hapticLight(); router.push('/notificationpreferences'); }}
             >
               <View style={styles.iconCircle}>
                 <Bell size={20} color={iconColor} />
@@ -819,6 +851,9 @@ export default function SettingsScreen() {
 
               <View style={{ flex: 1 }}>
                 <Text style={styles.rowLabel}>Notifications</Text>
+                {/* <Text style={styles.rowValue}>
+                  Push delivery and alert categories
+                </Text> */}
               </View>
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
@@ -934,9 +969,9 @@ export default function SettingsScreen() {
           {/* TEMP ONBOARDING PREVIEW BUTTON
               Keep this block enabled while reviewing the onboarding experience.
               Comment out or delete this entire block before release. */}
-          <Text style={styles.sectionLabel}>ONBOARDING PREVIEW</Text>
+          {/* <Text style={styles.sectionLabel}>ONBOARDING PREVIEW</Text> */}
 
-          <View style={styles.card}>
+          {/* <View style={styles.card}>
             <TouchableOpacity
               style={styles.row}
               activeOpacity={0.6}
@@ -944,8 +979,8 @@ export default function SettingsScreen() {
                 hapticLight();
                 router.push('/verification?from=settings&preview=1');
               }}
-            >
-              <View style={styles.iconCircle}>
+            > */}
+              {/* <View style={styles.iconCircle}>
                 <Ionicons name="shield-checkmark-outline" size={20} color={iconColor} />
               </View>
 
@@ -955,7 +990,7 @@ export default function SettingsScreen() {
 
               <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 4 }} />
             </TouchableOpacity>
-          </View>
+          </View> */}
           {/* END TEMP ONBOARDING PREVIEW BUTTON */}
 
           <Text style={styles.sectionLabel}>SUPPORT</Text>
@@ -1254,6 +1289,12 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
       paddingHorizontal: 16,
     },
     rowDivider: { borderBottomWidth: 1, borderBottomColor: C.border },
+    biometricControl: {
+      width: 52,
+      minHeight: 34,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     iconCircle: {
       width: 42,
       height: 42,
@@ -1264,7 +1305,14 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
       marginRight: 14,
     },
     rowHelper: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
-        rowLabel: {
+    rowValue: {
+      color: C.textSecondary,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 3,
+      flexShrink: 1,
+    },
+    rowLabel: {
       flex: 1,
       fontSize: 15,
       lineHeight: 20,

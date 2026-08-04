@@ -1,6 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const SECURITY_SCORE_NEEDS_SYNC_KEY = 'securityScoreNeedsInitialSync';
+export const SECURITY_BACKUP_SNAPSHOT_PREFIX =
+  'theguardian.security.backup.snapshot.v1';
+export const SECURITY_LAST_BACKUP_INVALIDATING_CHANGE_KEY =
+  'theguardian.security.last-backup-invalidating-change.v1';
+
+const BACKUP_INVALIDATING_REASONS = new Set([
+  'vault-password',
+  'vault-item',
+  'family-sharing',
+]);
 
 export type SecurityScoreChangeReason =
   | 'vault-password'
@@ -142,14 +152,33 @@ export function scheduleIdleTask(
 export function markSecurityScoreDirty(
   reason: SecurityScoreChangeReason = 'account-security'
 ) {
-  void AsyncStorage.setItem(SECURITY_SCORE_NEEDS_SYNC_KEY, 'true').catch(
-    () => undefined
-  );
+  const changedAt = Date.now();
+  void (async () => {
+    const writes: Array<[string, string]> = [
+      [SECURITY_SCORE_NEEDS_SYNC_KEY, 'true'],
+    ];
+
+    if (BACKUP_INVALIDATING_REASONS.has(String(reason))) {
+      const email = String(
+        (await AsyncStorage.getItem('userEmail').catch(() => null)) ||
+          'anonymous'
+      )
+        .trim()
+        .toLowerCase();
+
+      writes.push([
+        `${SECURITY_LAST_BACKUP_INVALIDATING_CHANGE_KEY}:${email}`,
+        String(changedAt),
+      ]);
+    }
+
+    await AsyncStorage.multiSet(writes);
+  })().catch(() => undefined);
 
   eventVersion += 1;
   pendingEvent = {
     reason,
-    changedAt: Date.now(),
+    changedAt,
     version: eventVersion,
   };
 

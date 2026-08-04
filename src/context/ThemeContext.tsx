@@ -11,6 +11,10 @@ import { useColorScheme } from 'react-native';
 
 import { Colors, type ThemePalette } from '../constants/theme';
 import { setAnalyticsEnabledPreference } from '../services/analytics';
+import {
+  AppOperationError,
+  safeLogError,
+} from '../utils/asyncResilience';
 
 export type ThemeMode = 'system' | 'light' | 'dark' | 'oled';
 type ResolvedThemeMode = 'light' | 'dark' | 'oled';
@@ -38,7 +42,12 @@ const getUserThemeKey = (email: string) =>
   `themeMode:user:${email.trim().toLowerCase()}`;
 
 function isThemeMode(value: string | null): value is ThemeMode {
-  return value === 'system' || value === 'light' || value === 'dark' || value === 'oled';
+  return (
+    value === 'system' ||
+    value === 'light' ||
+    value === 'dark' ||
+    value === 'oled'
+  );
 }
 
 export function AppThemeProvider({ children }: { children: React.ReactNode }) {
@@ -46,69 +55,101 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
   const [mode, setMode] = useState<ThemeMode>('system');
 
   useEffect(() => {
-    // Analytics is a required, privacy-safe reliability feature for this build.
-    // Reset legacy opt-out values once when the app provider starts.
-    void setAnalyticsEnabledPreference(true);
+    // Analytics remains optional to rendering and must never block startup.
+    void setAnalyticsEnabledPreference(true).catch((error: unknown) => {
+      safeLogError('THEME_ANALYTICS_PREFERENCE', error);
+    });
   }, []);
 
   const reloadTheme = useCallback(async () => {
-    const activeUserEmail = await AsyncStorage.getItem('userEmail');
-    const lastThemeUserEmail = await AsyncStorage.getItem(
-      LAST_THEME_USER_EMAIL_KEY
-    );
+    try {
+      const [activeUserEmail, lastThemeUserEmail] = await Promise.all([
+        AsyncStorage.getItem('userEmail'),
+        AsyncStorage.getItem(LAST_THEME_USER_EMAIL_KEY),
+      ]);
+      const emailToUse = activeUserEmail || lastThemeUserEmail || '';
 
-    const emailToUse = activeUserEmail || lastThemeUserEmail || '';
+      if (emailToUse) {
+        const userTheme = await AsyncStorage.getItem(
+          getUserThemeKey(emailToUse)
+        );
 
-    if (emailToUse) {
-      const userTheme = await AsyncStorage.getItem(
-        getUserThemeKey(emailToUse)
-      );
-
-      if (isThemeMode(userTheme)) {
-        setMode(userTheme);
-        await AsyncStorage.setItem(GLOBAL_THEME_KEY, userTheme);
-        return;
+        if (isThemeMode(userTheme)) {
+          setMode(userTheme);
+          await AsyncStorage.setItem(GLOBAL_THEME_KEY, userTheme).catch(
+            (error: unknown) => safeLogError('THEME_GLOBAL_REPAIR', error)
+          );
+          return;
+        }
       }
+
+      const globalTheme = await AsyncStorage.getItem(GLOBAL_THEME_KEY);
+      setMode(isThemeMode(globalTheme) ? globalTheme : 'system');
+    } catch (error: unknown) {
+      safeLogError('THEME_LOAD', error);
+      // A storage outage should still leave the app usable with system colors.
+      setMode('system');
     }
-
-    const globalTheme = await AsyncStorage.getItem(GLOBAL_THEME_KEY);
-
-    if (isThemeMode(globalTheme)) {
-      setMode(globalTheme);
-      return;
-    }
-
-    setMode('system');
   }, []);
 
   useEffect(() => {
-    void reloadTheme();
+    void reloadTheme().catch((error: unknown) => {
+      safeLogError('THEME_INITIAL_LOAD', error);
+      setMode('system');
+    });
   }, [reloadTheme]);
 
   const setThemeMode = useCallback(async (newMode: ThemeMode) => {
+    const previousMode = mode;
     setMode(newMode);
 
-    await AsyncStorage.setItem(GLOBAL_THEME_KEY, newMode);
+    try {
+      const activeUserEmail = await AsyncStorage.getItem('userEmail');
+      const writes: Array<[string, string]> = [
+        [GLOBAL_THEME_KEY, newMode],
+      ];
 
-    const activeUserEmail = await AsyncStorage.getItem('userEmail');
+      if (activeUserEmail) {
+        const cleanEmail = activeUserEmail.trim().toLowerCase();
+        writes.push(
+          [LAST_THEME_USER_EMAIL_KEY, cleanEmail],
+          [getUserThemeKey(cleanEmail), newMode]
+        );
+      }
 
-    if (activeUserEmail) {
-      const cleanEmail = activeUserEmail.trim().toLowerCase();
-
-      await AsyncStorage.setItem(LAST_THEME_USER_EMAIL_KEY, cleanEmail);
-      await AsyncStorage.setItem(getUserThemeKey(cleanEmail), newMode);
+      await AsyncStorage.multiSet(writes);
+    } catch (error: unknown) {
+      // Roll the visible preference back when persistence fails.
+      setMode(previousMode);
+      safeLogError('THEME_SAVE', error);
+      throw new AppOperationError('Theme settings could not be saved.', {
+        code: 'STORAGE_UNAVAILABLE',
+      });
     }
-  }, []);
+  }, [mode]);
 
   const resetThemeForNewAccount = useCallback(async (email?: string) => {
     const cleanEmail = String(email || '').trim().toLowerCase();
-
     setMode('system');
-    await AsyncStorage.setItem(GLOBAL_THEME_KEY, 'system');
 
-    if (cleanEmail) {
-      await AsyncStorage.setItem(LAST_THEME_USER_EMAIL_KEY, cleanEmail);
-      await AsyncStorage.setItem(getUserThemeKey(cleanEmail), 'system');
+    try {
+      const writes: Array<[string, string]> = [
+        [GLOBAL_THEME_KEY, 'system'],
+      ];
+
+      if (cleanEmail) {
+        writes.push(
+          [LAST_THEME_USER_EMAIL_KEY, cleanEmail],
+          [getUserThemeKey(cleanEmail), 'system']
+        );
+      }
+
+      await AsyncStorage.multiSet(writes);
+    } catch (error: unknown) {
+      safeLogError('THEME_RESET', error);
+      throw new AppOperationError('Theme settings could not be reset.', {
+        code: 'STORAGE_UNAVAILABLE',
+      });
     }
   }, []);
 
@@ -118,7 +159,9 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
       mode === 'oled' ||
       (mode === 'system' && systemColorScheme === 'dark');
 
-    void setThemeMode(currentlyDark ? 'light' : 'dark');
+    void setThemeMode(currentlyDark ? 'light' : 'dark').catch(
+      (error: unknown) => safeLogError('THEME_TOGGLE', error)
+    );
   }, [mode, setThemeMode, systemColorScheme]);
 
   const resolvedMode: ResolvedThemeMode =

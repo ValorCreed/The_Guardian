@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -18,8 +17,11 @@ import { router } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 export default function EmergencyRequestScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const { colors: C } = useAppTheme();
   const styles = makeStyles(C);
@@ -32,21 +34,21 @@ export default function EmergencyRequestScreen() {
     if (sending) return;
 
     if (!ownerEmail.trim()) {
-      Alert.alert('Missing owner email', 'Enter the email of the vault owner who added you as an emergency contact.');
+      screenAlert('Missing owner email', 'Enter the email of the vault owner who added you as an emergency contact.');
       return;
     }
 
     try {
       setSending(true);
       await requestApi.requestEmergencyAccess({ ownerEmail, message });
-      Alert.alert(
+      screenAlert(
         'Request sent',
-        'The vault owner has been notified. Access will only be released if they approve or if the waiting period expires.',
+        'The vault owner has been notified. This request requires their approval. Automatic release can occur only through Guardian Safety Check.',
         [{ text: 'OK', onPress: () => router.back() }]
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Request failed', error.message || 'Could not send emergency request.');
+      screenAlert('Request failed', error.message || 'Could not send emergency request.');
     } finally {
       setSending(false);
     }
@@ -103,7 +105,7 @@ export default function EmergencyRequestScreen() {
           <View style={styles.noticeBox}>
             <Ionicons name="shield-checkmark-outline" size={20} color={C.primary} />
             <Text style={styles.noticeText}>
-              The owner can approve or deny this request. If they do not respond, the configured waiting period controls when access becomes available.
+              The owner can approve or deny this request. It will not release automatically; Guardian Safety Check is the separate owner-inactivity path.
             </Text>
           </View>
 
@@ -131,10 +133,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     shadowColor: '#000',
-    shadowOpacity: 0.045,
+    shadowOpacity: 0.16,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 7 },
-    elevation: 2,
+    elevation: 6,
   },
   eyebrow: { color: C.textSecondary, fontSize: 13, fontWeight: '800' },
   title: { color: C.text, fontSize: 29, fontWeight: '900', marginTop: 2 },
@@ -147,14 +149,26 @@ const makeStyles = (C: any) => StyleSheet.create({
     padding: 16,
     marginBottom: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.045,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   label: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 8 },
-  input: { backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 },
-  messageInput: { backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, minHeight: 130, textAlignVertical: 'top' },
+  input: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 7 },
+ backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 },
+  messageInput: {
+    shadowColor: '#000000',
+    shadowOpacity: 0.13,
+    shadowRadius: 14,
+    elevation: 6,
+    shadowOffset: { width: 0, height: 7 },
+ backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, minHeight: 130, textAlignVertical: 'top' },
   noticeBox: {
     backgroundColor: C.actionCard,
     borderRadius: 16,
@@ -165,10 +179,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
     shadowColor: '#000',
-    shadowOpacity: 0.07,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 2,
+    shadowOpacity: 0.2,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 10,
   },
   noticeText: { color: C.primary, flex: 1, fontSize: 13, lineHeight: 19, fontWeight: '700' },
   sendButton: {
@@ -180,10 +194,10 @@ const makeStyles = (C: any) => StyleSheet.create({
     justifyContent: 'center',
     gap: 10,
     shadowColor: C.primary,
-    shadowOpacity: 0.11,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: 0.25,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 11 },
+    elevation: 10,
   },
   disabledButton: { opacity: 0.65 },
   sendButtonText: { color: '#fff', fontSize: 15, fontWeight: '900' },

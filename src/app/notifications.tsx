@@ -1,7 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -18,8 +17,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, AppNotification } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import { setGuardianAppBadgeCount } from '../services/pushNotifications';
+import { useScreenAlert } from '../hooks/useScreenAlert';
+import { humanizeVaultPresentationText } from '../utils/vaultPresentation';
 
 const HOME_NEEDS_SYNC_KEY = 'homeNeedsInitialSync';
+
+const updateAppBadge = async (count: number) => {
+  await setGuardianAppBadgeCount(Math.max(0, count));
+};
 
 const formatNotificationDate = (value?: string | null) => {
   if (!value) return 'Just now';
@@ -49,12 +55,45 @@ const formatNotificationDate = (value?: string | null) => {
 const getNotificationVisual = (type?: string, C?: any) => {
   const value = String(type || '').toUpperCase();
 
-  if (value.includes('BREACHED') || value.includes('SECURITY') || value.includes('RESET')) {
+  if (
+    value.includes('BREACHED')
+    || value.includes('SECURITY')
+    || value.includes('RESET')
+    || value.includes('TWO_FACTOR_DISABLED')
+  ) {
     return { icon: 'warning-outline', iconColor: C.danger, iconBg: C.alertDangerBg };
+  }
+
+  if (value.includes('TWO_FACTOR_ENABLED')) {
+    return { icon: 'keypad-outline', iconColor: C.success, iconBg: C.actionCard };
+  }
+
+  if (value.includes('DURESS_ALERT')) {
+    return { icon: 'shield-half-outline', iconColor: C.danger, iconBg: C.alertDangerBg };
+  }
+
+  if (value.includes('INCIDENT_LOCKDOWN') || value.includes('INCIDENT_PASSWORD')) {
+    return { icon: 'lock-closed-outline', iconColor: C.danger, iconBg: C.alertDangerBg };
+  }
+
+  if (value.includes('CONTINUITY_DRILL')) {
+    return { icon: 'analytics-outline', iconColor: C.primary, iconBg: C.actionCard };
+  }
+
+  if (value.includes('ESTATE_PLAYBOOK')) {
+    return { icon: 'book-outline', iconColor: C.primary, iconBg: C.actionCard };
+  }
+
+  if (value.includes('SAFETY_CHECK')) {
+    return { icon: 'pulse-outline', iconColor: C.primary, iconBg: C.actionCard };
   }
 
   if (value.includes('EMERGENCY')) {
     return { icon: 'medkit-outline', iconColor: C.warning, iconBg: C.alertWarningBg };
+  }
+
+  if (value.includes('RECOVERY_CIRCLE')) {
+    return { icon: 'people-circle-outline', iconColor: C.primary, iconBg: C.actionCard };
   }
 
   if (value.includes('BACKUP') || value.includes('RECOVERY')) {
@@ -81,12 +120,18 @@ const ALLOWED_NOTIFICATION_ROUTES = new Set([
   '/subscription',
   '/family',
   '/emergencyaccess',
+  '/safetycheck',
   '/securityhealth',
   '/backup',
   '/recoverykit',
+  '/recoverycircle',
+  '/estateplaybooks',
+  '/continuitydrill',
+  '/incidentlockdown',
   '/security',
   '/devices',
   '/twofasetup',
+  '/notifications',
 ]);
 
 const ALLOWED_VAULT_TABS = new Set(['Passwords', 'Documents', 'Cards', 'Notes']);
@@ -102,14 +147,27 @@ const normalizeActionRoute = (route?: string | null) => {
     return '';
   }
 
-  if (path !== '/vault' || !query) {
-    return path;
-  }
+  if (!query) return path;
 
   const params = new URLSearchParams(query);
   const tab = params.get('tab');
+  const hasUnexpectedParams = Array.from(params.keys()).some((key) => key !== 'tab');
 
-  if (!tab || !ALLOWED_VAULT_TABS.has(tab) || Array.from(params.keys()).some((key) => key !== 'tab')) {
+  if (path === '/estateplaybooks') {
+    return tab === 'received' && !hasUnexpectedParams
+      ? '/estateplaybooks?tab=received'
+      : '/estateplaybooks';
+  }
+
+  if (path === '/continuitydrill') {
+    return tab === 'requests' && !hasUnexpectedParams
+      ? '/continuitydrill?tab=requests'
+      : '/continuitydrill';
+  }
+
+  if (path !== '/vault') return path;
+
+  if (!tab || !ALLOWED_VAULT_TABS.has(tab) || hasUnexpectedParams) {
     return '/vault';
   }
 
@@ -117,6 +175,8 @@ const normalizeActionRoute = (route?: string | null) => {
 };
 
 export default function NotificationsScreen() {
+  const screenAlert = useScreenAlert();
+
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -125,6 +185,7 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [workingId, setWorkingId] = useState<number | string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
@@ -183,10 +244,18 @@ export default function NotificationsScreen() {
   const loadNotifications = useCallback(async (showLoader = false) => {
     try {
       if (showLoader) setLoading(true);
+      setLoadError(null);
+
       const data = await api.getNotifications();
-      setNotifications(Array.isArray(data) ? data : []);
+      const items = Array.isArray(data) ? data : [];
+
+      setNotifications(items);
+      await updateAppBadge(items.filter((item) => !item.read).length);
     } catch (error: any) {
-      Alert.alert('Could not load notifications', error.message || 'Please try again.');
+      setLoadError(
+        error?.message ||
+          'Guardian could not load your notifications. Check your connection and try again.'
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -217,9 +286,13 @@ export default function NotificationsScreen() {
             : item
         )
       );
-      await syncHomeNotificationSnapshot((currentUnreadCount) =>
-        Math.max(0, currentUnreadCount - 1),
-      );
+      const nextUnreadCount = Math.max(0, unreadCount - 1);
+      await Promise.all([
+        syncHomeNotificationSnapshot((currentUnreadCount) =>
+          Math.max(0, currentUnreadCount - 1),
+        ),
+        updateAppBadge(nextUnreadCount),
+      ]);
       return { ...notification, ...updated, read: true };
     } catch (error) {
       return notification;
@@ -246,16 +319,19 @@ export default function NotificationsScreen() {
       setNotifications((items) =>
         items.map((item) => ({ ...item, read: true }))
       );
-      await syncHomeNotificationSnapshot(0);
+      await Promise.all([
+        syncHomeNotificationSnapshot(0),
+        updateAppBadge(0),
+      ]);
     } catch (error: any) {
-      Alert.alert('Could not update notifications', error.message || 'Please try again.');
+      screenAlert('Could not update notifications', error.message || 'Please try again.');
     } finally {
       setMarkingAll(false);
     }
   };
 
   const deleteNotification = (notification: AppNotification) => {
-    Alert.alert(
+    screenAlert(
       'Delete notification?',
       'This removes the notification from your notification center.',
       [
@@ -270,13 +346,18 @@ export default function NotificationsScreen() {
               setNotifications((items) =>
                 items.filter((item) => item.id !== notification.id)
               );
-              await syncHomeNotificationSnapshot((currentUnreadCount) =>
-                notification.read
-                  ? currentUnreadCount
-                  : Math.max(0, currentUnreadCount - 1),
-              );
+              await Promise.all([
+                syncHomeNotificationSnapshot((currentUnreadCount) =>
+                  notification.read
+                    ? currentUnreadCount
+                    : Math.max(0, currentUnreadCount - 1),
+                ),
+                updateAppBadge(
+                  notification.read ? unreadCount : Math.max(0, unreadCount - 1),
+                ),
+              ]);
             } catch (error: any) {
-              Alert.alert('Delete failed', error.message || 'Please try again.');
+              screenAlert('Delete failed', error.message || 'Please try again.');
             } finally {
               setWorkingId(null);
             }
@@ -320,29 +401,51 @@ export default function NotificationsScreen() {
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>Notifications</Text>
             <Text style={styles.subtitle}>
-              {unreadCount > 0
-                ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`
-                : 'You are all caught up'}
+              {loadError
+                ? 'Notifications are temporarily unavailable'
+                : unreadCount > 0
+                  ? `${unreadCount} unread notification${unreadCount === 1 ? '' : 's'}`
+                  : 'You are all caught up'}
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={[styles.markAllButton, (unreadCount === 0 || markingAll) && styles.disabledButton]}
-            activeOpacity={0.82}
-            onPress={markAllAsRead}
-            disabled={unreadCount === 0 || markingAll}
-          >
-            {markingAll ? (
-              <ActivityIndicator size="small" color={C.primary} />
-            ) : (
-              <Ionicons name="checkmark-done-outline" size={17} color={C.primary} />
-            )}
-            <Text style={styles.markAllText}>Mark all</Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              style={[styles.markAllButton, (unreadCount === 0 || markingAll) && styles.disabledButton]}
+              activeOpacity={0.82}
+              onPress={markAllAsRead}
+              disabled={unreadCount === 0 || markingAll}
+            >
+              {markingAll ? (
+                <ActivityIndicator size="small" color={C.primary} />
+              ) : (
+                <Ionicons name="checkmark-done-outline" size={17} color={C.primary} />
+              )}
+              <Text style={styles.markAllText}>Mark all</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {loading ? (
           renderSkeleton()
+        ) : loadError ? (
+          <View style={styles.errorCard} accessibilityRole="alert">
+            <View style={styles.errorIcon}>
+              <Ionicons name="cloud-offline-outline" size={31} color={C.warning} />
+            </View>
+            <Text style={styles.errorTitle}>Notifications could not load</Text>
+            <Text style={styles.errorText}>{loadError}</Text>
+            <TouchableOpacity
+              style={styles.retryButton}
+              activeOpacity={0.84}
+              onPress={() => void loadNotifications(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Try loading notifications again"
+            >
+              <Ionicons name="refresh-outline" size={18} color="#FFFFFF" />
+              <Text style={styles.retryButtonText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
         ) : notifications.length === 0 ? (
           <View style={styles.emptyCard}>
             <View style={styles.emptyIcon}>
@@ -358,6 +461,9 @@ export default function NotificationsScreen() {
             {notifications.map((item) => {
               const visual = getNotificationVisual(item.type, C);
               const isWorking = workingId === item.id;
+              const presentationTitle =
+                humanizeVaultPresentationText(item.title) || 'Guardian notification';
+              const presentationMessage = humanizeVaultPresentationText(item.message);
 
               const actionRoute = normalizeActionRoute(item.actionRoute);
 
@@ -366,7 +472,7 @@ export default function NotificationsScreen() {
                   key={String(item.id)}
                   style={[styles.notificationCard, !item.read && styles.unreadCard]}
                   accessibilityRole="summary"
-                  accessibilityLabel={`${item.read ? '' : 'Unread notification. '}${item.title}. ${item.message}`}
+                  accessibilityLabel={`${item.read ? '' : 'Unread notification. '}${presentationTitle}. ${presentationMessage}`}
                 >
                   <TouchableOpacity
                     style={styles.notificationOpenArea}
@@ -386,10 +492,10 @@ export default function NotificationsScreen() {
 
                     <View style={styles.notificationContent}>
                       <View style={styles.notificationTitleRow}>
-                        <Text style={styles.notificationTitle}>{item.title}</Text>
+                        <Text style={styles.notificationTitle}>{presentationTitle}</Text>
                         {!item.read && <View style={styles.unreadDot} />}
                       </View>
-                      <Text style={styles.notificationMessage}>{item.message}</Text>
+                      <Text style={styles.notificationMessage}>{presentationMessage}</Text>
                       <Text style={styles.notificationDate}>{formatNotificationDate(item.createdAt)}</Text>
                     </View>
                   </TouchableOpacity>
@@ -400,7 +506,7 @@ export default function NotificationsScreen() {
                     onPress={() => deleteNotification(item)}
                     disabled={isWorking}
                     accessibilityRole="button"
-                    accessibilityLabel={`Delete notification: ${item.title}`}
+                    accessibilityLabel={`Delete notification: ${presentationTitle}`}
                     accessibilityState={{ disabled: isWorking }}
                   >
                     {isWorking ? (
@@ -426,32 +532,39 @@ const makeStyles = (C: any) =>
     safeArea: { flex: 1, backgroundColor: C.background },
     scrollContent: { paddingTop: 88, paddingBottom: 24 },
     header: { paddingHorizontal: 20, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     eyebrow: { color: C.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase' },
     title: { color: C.text, fontSize: 31, fontWeight: '900', marginTop: 4 },
     subtitle: { color: C.textSecondary, fontSize: 14, marginTop: 4, lineHeight: 20 },
     markAllButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
     markAllText: { color: C.primary, fontSize: 12, fontWeight: '900' },
     disabledButton: { opacity: 0.55 },
     content: { paddingHorizontal: 20, gap: 12 },
     notificationCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 10, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 8
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
     notificationOpenArea: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 4 },
     unreadCard: { borderColor: C.primary, backgroundColor: C.actionCard
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    notificationIcon: { width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
+    notificationIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
     notificationContent: { flex: 1, minWidth: 0 },
     notificationTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     notificationTitle: { color: C.text, fontSize: 15, fontWeight: '900', flex: 1, flexShrink: 1, lineHeight: 21 },
@@ -460,17 +573,87 @@ const makeStyles = (C: any) =>
     notificationDate: { color: C.tabInactive, fontSize: 11, fontWeight: '800', marginTop: 8 },
     deleteButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center'
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,},
+    errorCard: {
+      marginHorizontal: 20,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 24,
+      borderWidth: 1,
+      borderColor: C.border,
+      padding: 24,
+      alignItems: 'center',
+      shadowColor: '#000',
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,
+    },
+    errorIcon: {
+      width: 68,
+      height: 68,
+      borderRadius: 24,
+      backgroundColor: C.alertWarningBg || C.backgroundSelected,
+      borderWidth: 1,
+      borderColor: `${C.warning}35`,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 14,
+      shadowColor: '#000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 6,
+    },
+    errorTitle: {
+      color: C.text,
+      fontSize: 19,
+      fontWeight: '900',
+      textAlign: 'center',
+    },
+    errorText: {
+      color: C.textSecondary,
+      fontSize: 13,
+      lineHeight: 20,
+      textAlign: 'center',
+      marginTop: 8,
+    },
+    retryButton: {
+      minHeight: 48,
+      marginTop: 18,
+      paddingHorizontal: 18,
+      borderRadius: 999,
+      backgroundColor: C.backgroundbutton,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      shadowColor: '#000',
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
+    },
+    retryButtonText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '900',
+    },
     emptyCard: { marginHorizontal: 20, backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 24, alignItems: 'center'
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    emptyIcon: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
+    emptyIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 68, height: 68, borderRadius: 24, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
     emptyTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
     emptyText: { color: C.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 20 },
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999
@@ -481,11 +664,17 @@ const makeStyles = (C: any) =>
       elevation: 2,},
     skeletonCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12
       ,shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
-    skeletonIcon: { width: 42, height: 42, borderRadius: 16 },
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
+    skeletonIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+ width: 42, height: 42, borderRadius: 16 },
     skeletonTitle: { width: '50%', height: 14, marginBottom: 10 },
     skeletonMessage: { width: '88%', height: 12 },
   });

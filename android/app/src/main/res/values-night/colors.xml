@@ -1,1 +1,4 @@
-<resources/>
+<resources>
+  <!-- Dark system theme override used by Theme.App.SplashScreen. -->
+  <color name="splashscreen_background">#000000</color>
+</resources>

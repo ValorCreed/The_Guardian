@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  Alert,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -29,6 +28,7 @@ import {
   setAutoLockSettings,
 } from '../hooks/useAutoLock';
 import { hapticLight, hapticSelection, hapticSuccess } from '../utils/haptics';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type AutoLockOption = {
   label: string;
@@ -70,6 +70,8 @@ const TIMEOUT_OPTIONS: AutoLockOption[] = [
 ];
 
 export default function AutoLockScreen() {
+  const screenAlert = useScreenAlert();
+
   const { isDark, colors: C } = useAppTheme();
   const styles = makeStyles(C);
 
@@ -114,7 +116,7 @@ export default function AutoLockScreen() {
 
     hapticSuccess();
 
-    Alert.alert(
+    screenAlert(
       'Auto-lock updated',
       `Your vault will lock ${formatAutoLockSetting(option.mode, nextTimeout)}.`
     );
@@ -253,6 +255,12 @@ const makeStyles = (C: any) =>
     },
 
     heroIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 82,
       height: 82,
       borderRadius: 28,
@@ -285,10 +293,10 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     infoRow: {
       flexDirection: 'row',
@@ -297,6 +305,12 @@ const makeStyles = (C: any) =>
     },
 
     infoIcon: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 44,
       height: 44,
       borderRadius: 22,
@@ -343,10 +357,10 @@ const makeStyles = (C: any) =>
       marginBottom: 26,
     
       shadowColor: '#000',
-      shadowOpacity: 0.035,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 2,},
+      shadowOpacity: 0.2,
+      shadowRadius: 22,
+      shadowOffset: { width: 0, height: 12 },
+      elevation: 10,},
 
     optionRow: {
       minHeight: 74,
@@ -362,6 +376,12 @@ const makeStyles = (C: any) =>
     },
 
     radioCircle: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       width: 26,
       height: 26,
       borderRadius: 13,
@@ -374,6 +394,12 @@ const makeStyles = (C: any) =>
     },
 
     radioCircleActive: {
+      shadowColor: '#000000',
+      shadowOpacity: 0.16,
+      shadowRadius: 12,
+      elevation: 6,
+      shadowOffset: { width: 0, height: 6 },
+
       borderColor: C.primary,
       backgroundColor: C.primary,
     },
@@ -405,10 +431,10 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: C.shadow,
-      shadowOpacity: 0.10,
-      shadowRadius: 14,
-      shadowOffset: { width: 0, height: 8 },
-      elevation: 2,
+      shadowOpacity: 0.25,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 11 },
+      elevation: 10,
     },
 
     doneButtonText: {

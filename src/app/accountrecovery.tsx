@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -21,10 +20,13 @@ import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtect
 import { api } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
+import { useScreenAlert } from '../hooks/useScreenAlert';
 
 type RecoveryMode = 'kit' | 'erase';
 
 export default function AccountRecoveryScreen() {
+  const screenAlert = useScreenAlert();
+
   const requestApi = useCancelableApi(api);
   const params = useLocalSearchParams<{ mode?: string; email?: string }>();
   const initialMode: RecoveryMode = params.mode === 'erase' ? 'erase' : 'kit';
@@ -49,12 +51,12 @@ export default function AccountRecoveryScreen() {
 
   const validatePassword = () => {
     if (newPassword.length < 8) {
-      Alert.alert('Password too short', 'Your new password must be at least 8 characters.');
+      screenAlert('Password too short', 'Your new password must be at least 8 characters.');
       return false;
     }
 
     if (newPassword !== confirmPassword) {
-      Alert.alert('Passwords do not match', 'Please confirm your new password.');
+      screenAlert('Passwords do not match', 'Please confirm your new password.');
       return false;
     }
 
@@ -63,20 +65,20 @@ export default function AccountRecoveryScreen() {
 
   const sendResetCode = async () => {
     if (!cleanEmail) {
-      Alert.alert('Email required', 'Enter your email address first.');
+      screenAlert('Email required', 'Enter your email address first.');
       return;
     }
 
     try {
       setSendingCode(true);
       await requestApi.forgotPassword({ email: cleanEmail });
-      Alert.alert(
+      screenAlert(
         'Account reset code sent',
         'If this email belongs to a verified account, an account reset code has been sent. This code is only for Reset & Erase.'
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Could not send reset code', error.message || 'Please try again.');
+      screenAlert('Could not send reset code', error.message || 'Please try again.');
     } finally {
       setSendingCode(false);
     }
@@ -87,7 +89,7 @@ export default function AccountRecoveryScreen() {
     const cleanRecoveryKey = recoveryKey.trim();
 
     if (!cleanRecoveryId || !cleanRecoveryKey) {
-      Alert.alert('Missing recovery kit', 'Enter your recovery ID and recovery key.');
+      screenAlert('Missing recovery kit', 'Enter your recovery ID and recovery key.');
       return;
     }
 
@@ -102,14 +104,14 @@ export default function AccountRecoveryScreen() {
         newPassword,
       });
 
-      Alert.alert(
+      screenAlert(
         'Password reset successful',
         'Your recovery kit has been used and is now disabled. Sign in and generate a new recovery kit.',
         [{ text: 'Go to sign in', onPress: () => router.replace('/signin') }]
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Recovery failed', error.message || 'The recovery kit details are invalid or expired.');
+      screenAlert('Recovery failed', error.message || 'The recovery kit details are invalid or expired.');
     } finally {
       setLoading(false);
     }
@@ -117,13 +119,13 @@ export default function AccountRecoveryScreen() {
 
   const confirmEraseReset = () => {
     if (!cleanEmail || !resetCode.trim()) {
-      Alert.alert('Missing details', 'Enter your email and account reset code.');
+      screenAlert('Missing details', 'Enter your email and account reset code.');
       return;
     }
 
     if (!validatePassword()) return;
 
-    Alert.alert(
+    screenAlert(
       'Erase vault and reset account?',
       'Without your password or recovery kit, The Guardian cannot decrypt your existing vault. This will permanently delete your saved passwords, cards, documents, and SecureNotes, then reset your account password.',
       [
@@ -147,14 +149,14 @@ export default function AccountRecoveryScreen() {
         newPassword,
       });
 
-      Alert.alert(
+      screenAlert(
         'Account reset successful',
         'Your password has been reset and your old vault data has been erased. Sign in to start with a fresh vault and generate a recovery kit.',
         [{ text: 'Go to sign in', onPress: () => router.replace('/signin') }]
       );
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
-      Alert.alert('Account reset failed', error.message || 'The reset code is invalid or expired.');
+      screenAlert('Account reset failed', error.message || 'The reset code is invalid or expired.');
     } finally {
       setLoading(false);
     }
@@ -225,6 +227,28 @@ export default function AccountRecoveryScreen() {
               ? 'Use your Recovery ID and Recovery Key to reset your password without erasing your vault.'
               : 'No recovery kit? Reset the account by email code, but the old vault must be erased.'}
           </Text>
+
+          <TouchableOpacity
+            style={styles.circleCard}
+            activeOpacity={0.84}
+            onPress={() => router.push({ pathname: '/circlerecovery', params: { email: cleanEmail } })}
+          >
+            <View style={styles.circleIcon}>
+              <Ionicons name="people-circle-outline" size={25} color={C.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={styles.circleTitleRow}>
+                <Text style={styles.circleTitle}>Use Recovery Circle</Text>
+                <View style={styles.recommendedBadge}>
+                  <Text style={styles.recommendedText}>NO VAULT ERASURE</Text>
+                </View>
+              </View>
+              <Text style={styles.circleText}>
+                Ask several trusted contacts to approve recovery, then reset your password with your secret recovery code.
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
+          </TouchableOpacity>
 
           <View style={styles.modeSwitch}>
             <TouchableOpacity
@@ -386,6 +410,28 @@ const makeStyles = (C: any) =>
     logoBox: { marginBottom: 20 },
     title: { fontSize: 32, fontWeight: '900', color: C.text, marginBottom: 8, letterSpacing: -0.4 },
     subtitle: { fontSize: 14, color: C.textSecondary, lineHeight: 21, marginBottom: 20 },
+    circleCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 22,
+      borderWidth: 1,
+      borderColor: `${C.primary}45`,
+      padding: 15,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOpacity: 0.07,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 8 },
+      elevation: 4,
+    },
+    circleIcon: { width: 48, height: 48, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    circleTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
+    circleTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
+    circleText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 5 },
+    recommendedBadge: { borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4, backgroundColor: `${C.success}14`, borderWidth: 1, borderColor: `${C.success}40` },
+    recommendedText: { color: C.success, fontSize: 8, fontWeight: '900' },
     modeSwitch: { flexDirection: 'row', gap: 10, marginBottom: 16 },
     modeButton: {
       flex: 1,

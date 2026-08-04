@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { api } from '../services/api';
+import { AppOperationError, safeLogError, toAppOperationError } from './asyncResilience';
 
 const BIOMETRIC_ENABLED_KEY = 'biometricUnlock';
 const BIOMETRIC_EMAIL_KEY = 'biometricEmail';
@@ -16,11 +17,23 @@ const BIOMETRIC_SECURE_OPTIONS: SecureStore.SecureStoreOptions = {
 };
 
 export const setBiometricEnabled = async (enabled: boolean) => {
-  await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, String(enabled));
+  try {
+    await AsyncStorage.setItem(BIOMETRIC_ENABLED_KEY, String(enabled));
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_SETTING_SAVE', error);
+    throw new AppOperationError('Biometric settings could not be saved.', {
+      code: 'STORAGE_UNAVAILABLE',
+    });
+  }
 };
 
 export const isBiometricEnabled = async () => {
-  return (await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY)) === 'true';
+  try {
+    return (await AsyncStorage.getItem(BIOMETRIC_ENABLED_KEY)) === 'true';
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_SETTING_READ', error);
+    return false;
+  }
 };
 
 /**
@@ -33,26 +46,56 @@ export const saveBiometricCredentials = async (
   _password?: string
 ) => {
   const cleanEmail = email.trim().toLowerCase();
-  const enrollment = await api.enrollBiometricCredential();
+  let enrollment: Awaited<ReturnType<typeof api.enrollBiometricCredential>>;
 
-  if (!enrollment?.credentialToken) {
-    throw new Error('Biometric sign-in could not be prepared on this device.');
+  try {
+    enrollment = await api.enrollBiometricCredential();
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_ENROLLMENT_REQUEST', error);
+    throw toAppOperationError(
+      error,
+      'Biometric setup could not start. Please try again.'
+    );
   }
 
-  await SecureStore.setItemAsync(BIOMETRIC_EMAIL_KEY, cleanEmail, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
-  await SecureStore.setItemAsync(
-    BIOMETRIC_TOKEN_KEY,
-    enrollment.credentialToken,
-    BIOMETRIC_SECURE_OPTIONS
-  );
-  await AsyncStorage.setItem(BIOMETRIC_TOKEN_PRESENT_KEY, 'true');
+  if (!enrollment?.credentialToken) {
+    throw new AppOperationError('Biometric sign-in could not be prepared on this device.');
+  }
 
-  // Remove credentials created by older app versions that stored the password.
-  await SecureStore.deleteItemAsync(LEGACY_BIOMETRIC_PASSWORD_KEY).catch(
-    () => undefined
-  );
+  try {
+    await SecureStore.setItemAsync(BIOMETRIC_EMAIL_KEY, cleanEmail, {
+      keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    });
+    await SecureStore.setItemAsync(
+      BIOMETRIC_TOKEN_KEY,
+      enrollment.credentialToken,
+      BIOMETRIC_SECURE_OPTIONS
+    );
+    await AsyncStorage.setItem(BIOMETRIC_TOKEN_PRESENT_KEY, 'true');
+
+    // Remove credentials created by older app versions that stored the password.
+    await SecureStore.deleteItemAsync(LEGACY_BIOMETRIC_PASSWORD_KEY).catch(
+      () => undefined
+    );
+  } catch (error: unknown) {
+    /*
+     * The server credential is created before SecureStore requests the
+     * biometric-protected write. Roll it back if the protected write fails.
+     */
+    await api.revokeBiometricCredential?.().catch((rollbackError: unknown) => {
+      safeLogError('BIOMETRIC_ENROLLMENT_ROLLBACK', rollbackError);
+    });
+    await Promise.allSettled([
+      SecureStore.deleteItemAsync(BIOMETRIC_EMAIL_KEY),
+      SecureStore.deleteItemAsync(BIOMETRIC_TOKEN_KEY),
+      AsyncStorage.removeItem(BIOMETRIC_TOKEN_PRESENT_KEY),
+    ]);
+    safeLogError('BIOMETRIC_ENROLLMENT_SAVE', error);
+    throw toAppOperationError(
+      error,
+      'Biometric setup could not be completed. Please try again.'
+    );
+  }
 };
 
 const clearLocalBiometricCredential = async () => {
@@ -65,36 +108,67 @@ const clearLocalBiometricCredential = async () => {
 };
 
 export const clearBiometricCredentials = async () => {
-  // Revoke the device-bound credential while the authenticated session exists.
-  await api.revokeBiometricCredential?.().catch(() => undefined);
-  await clearLocalBiometricCredential();
+  try {
+    await api.revokeBiometricCredential?.();
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_SERVER_REVOKE', error);
+  }
+
+  try {
+    await clearLocalBiometricCredential();
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_LOCAL_CLEAR', error);
+  }
 };
 
 export const hasBiometricCredentials = async () => {
-  const [email, present] = await Promise.all([
-    SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY),
-    AsyncStorage.getItem(BIOMETRIC_TOKEN_PRESENT_KEY),
-  ]);
+  try {
+    const [email, present] = await Promise.all([
+      SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY),
+      AsyncStorage.getItem(BIOMETRIC_TOKEN_PRESENT_KEY),
+    ]);
 
-  return Boolean(email && present === 'true');
+    return Boolean(email && present === 'true');
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_CREDENTIAL_CHECK', error);
+    return false;
+  }
 };
 
 export const biometricLogin = async () => {
   const enabled = await isBiometricEnabled();
   if (!enabled) {
-    throw new Error('Biometric unlock is not enabled.');
+    throw new AppOperationError('Biometric unlock is not enabled.');
   }
 
-  const compatible = await LocalAuthentication.hasHardwareAsync();
-  const enrolled = await LocalAuthentication.isEnrolledAsync();
+  let compatible = false;
+  let enrolled = false;
+
+  try {
+    [compatible, enrolled] = await Promise.all([
+      LocalAuthentication.hasHardwareAsync(),
+      LocalAuthentication.isEnrolledAsync(),
+    ]);
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_CAPABILITY_CHECK', error);
+    throw new AppOperationError('Biometric authentication is unavailable right now.');
+  }
 
   if (!compatible || !enrolled) {
-    throw new Error('Biometric authentication is not available on this device.');
+    throw new AppOperationError('Biometric authentication is not available on this device.');
   }
 
-  const email = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
+  let email: string | null = null;
+
+  try {
+    email = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_EMAIL_READ', error);
+    throw new AppOperationError('Biometric sign-in needs to be set up again.');
+  }
+
   if (!email) {
-    throw new Error('Biometric sign-in needs to be set up again. Sign in with your password once.');
+    throw new AppOperationError('Biometric sign-in needs to be set up again. Sign in with your password once.');
   }
 
   let credentialToken: string | null = null;
@@ -105,22 +179,29 @@ export const biometricLogin = async () => {
       BIOMETRIC_TOKEN_KEY,
       BIOMETRIC_SECURE_OPTIONS
     );
-  } catch {
-    throw new Error('Biometric authentication was cancelled or failed.');
+  } catch (error: unknown) {
+    safeLogError('BIOMETRIC_TOKEN_READ', error);
+    throw new AppOperationError('Biometric authentication was cancelled or failed.');
   }
 
   if (!credentialToken) {
-    await AsyncStorage.removeItem(BIOMETRIC_TOKEN_PRESENT_KEY);
-    throw new Error('Biometric sign-in needs to be set up again. Sign in with your password once.');
+    await AsyncStorage.removeItem(BIOMETRIC_TOKEN_PRESENT_KEY).catch(
+      (error: unknown) => safeLogError('BIOMETRIC_PRESENT_MARKER_CLEAR', error)
+    );
+    throw new AppOperationError('Biometric sign-in needs to be set up again. Sign in with your password once.');
   }
 
   try {
     return await api.biometricLogin({ email, credentialToken });
   } catch (error: any) {
     if (Number(error?.status) === 401) {
-      await clearLocalBiometricCredential();
-      await setBiometricEnabled(false);
+      await clearLocalBiometricCredential().catch((cleanupError: unknown) => {
+        safeLogError('BIOMETRIC_INVALID_CREDENTIAL_CLEAR', cleanupError);
+      });
+      await setBiometricEnabled(false).catch((settingError: unknown) => {
+        safeLogError('BIOMETRIC_DISABLE_AFTER_401', settingError);
+      });
     }
-    throw error;
+    throw toAppOperationError(error, 'Biometric sign-in failed. Please try again.');
   }
 };

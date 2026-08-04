@@ -1,4 +1,4 @@
-export const WHATS_NEW_VERSION = 'v3.5(Beta)';
+export const WHATS_NEW_VERSION = 'v4.0.0 (Stable)';
 
 export const WHATS_NEW_TITLE = 'Whats New in The Guardian';
 
@@ -9,32 +9,21 @@ export const WHATS_NEW_ITEMS = [
   {
     title: 'Developers Regards',
     description:
-      'You are now using The Guardian v3.5(Beta), a MAJOR UPDATE. This version includes several new features, improvements, and bug fixes. We appreciate your feedback and support as we continue to enhance the app.',
+      'You are now using The Guardian v4.0.0(Stable), a MAJOR UPDATE. This version includes several new features, improvements, and bug fixes. We appreciate your feedback and support as we continue to enhance the app.',
+  }
+   
+  ,
+   {
+    title: 'Added New features',
+    description:
+      'We have added new features to enhance your experience. Explore the app to discover the latest functionalities and improvements.',
+  }
+  ,
+   {
+    title: 'Better Autofill Experience',
+    description:
+      'We have improved the autofill experience, making it more seamless and efficient. Enjoy a smoother interaction with your saved credentials across different platforms.',
   },
-   {
-    title: 'Press and hold context menu added',
-    description:
-      'For the vault items, you can now press and hold to edit or delete an item',
-  }
-  ,
-   {
-    title: 'Redesigned App Screens',
-    description:
-      'Reduced redundant information and only provided what the user actually needs',
-  }
-  ,
-   {
-    title: 'Username Edit',
-    description:
-      'You can now edit you username to give your vault a more personalized effect',
-  }
-  ,
-   {
-    title: 'Family Sharing Edit',
-    description:
-      'You can edit the vault items you share with your family',
-  }
-  ,
    {
     title: 'Bug Fixes and Improvements',
     description:
