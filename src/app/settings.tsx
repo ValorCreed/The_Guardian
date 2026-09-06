@@ -47,7 +47,6 @@ import { api, logout } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import {
   clearOfflineVaultSnapshot,
-  formatOfflineSavedAt,
   getOfflineVaultStatus,
 } from '../services/offlineVault';
 import type { OfflineVaultStatus } from '../services/offlineVault';
@@ -78,10 +77,10 @@ const TIMEOUT_OPTIONS = [
 ];
 
 
-const THEME_OPTIONS: Array<{
+const THEME_OPTIONS: {
   label: string;
   value: ThemeMode;
-}> = [
+}[] = [
   {
     label: 'System',
     value: 'system',
@@ -300,7 +299,7 @@ export default function SettingsScreen() {
   const [biometricUnlock, setBiometricUnlock] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
-  const [selectedTimeout, setSelectedTimeout] = useState(TIMEOUT_OPTIONS[1]);
+  const [, setSelectedTimeout] = useState(TIMEOUT_OPTIONS[1]);
   const [deleteAccountLoading, setDeleteAccountLoading] = useState(false);
   const [lockingVault, setLockingVault] = useState(false);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -367,7 +366,7 @@ export default function SettingsScreen() {
     } finally {
       setPlanLoading(false);
     }
-  }, []);
+  }, [requestApi]);
 
   useFocusEffect(
     useCallback(() => {
@@ -393,7 +392,7 @@ export default function SettingsScreen() {
     } finally {
       setLockingVault(false);
     }
-  }, [lockingVault, runCancelable]);
+  }, [lockingVault, runCancelable, screenAlert]);
 
   const handleBiometricToggle = async (value: boolean) => {
     if (biometricLoading) return;

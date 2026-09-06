@@ -129,7 +129,7 @@ export default function EmergencyVaultDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [requestId, itemId, itemType]);
+  }, [requestId, itemId, itemType, requestApi, screenAlert]);
 
   useEffect(() => {
     loadItem();

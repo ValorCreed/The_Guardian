@@ -36,8 +36,12 @@ import {
   waitForRetry,
 } from '../utils/asyncResilience';
 
-const API_BASE_URL = 'https://guardian-vault-gateway.onrender.com';
-/**\
+// The gateway URL is configurable via EXPO_PUBLIC_API_BASE_URL so the backend
+// can point at an emulator, a preview deploy, or the pinned real deployment.
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL?.trim().replace(/\/+$/, '') ||
+  'https://guardian-vault-gateway.onrender.com';
+/**
  * REQUEST TIMEOUT SETTINGS
  *
  * AUTH_REQUEST_TIMEOUT_MS:
@@ -53,7 +57,6 @@ const AUTH_REQUEST_TIMEOUT_MS = 60000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 const LONG_REQUEST_TIMEOUT_MS = 180000;
 const VAULT_LIST_TIMEOUT_MS = 60000; // Allows one controlled cold-start retry without leaving the UI blocked for minutes.
-const DOCUMENT_DOWNLOAD_TIMEOUT_MS = 180000; // Large downloads remain cancellable and should expose progress in their screens.
 const DOCUMENT_UPLOAD_TIMEOUT_MS = 180000; // Multipart uploads get a longer deadline than ordinary requests.
 
 /**
@@ -4766,7 +4769,7 @@ export async function saveLoginSession(data: LoginResponse) {
       ? 'DURESS'
       : 'NORMAL';
 
-  const sessionEntries: Array<[string, string]> = [
+  const sessionEntries: [string, string][] = [
     ['userEmail', cleanEmail],
     ['userName', name],
     ['guardianSessionMode', sessionMode],

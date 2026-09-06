@@ -306,6 +306,16 @@ const VaultScreen = () => {
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
   const [offlineSecretsAvailable, setOfflineSecretsAvailable] = useState(false);
+
+  const showOfflineWriteWarning = useCallback(() => {
+    screenAlert(
+      'Offline mode',
+      offlineSecretsAvailable
+        ? 'Your encrypted offline copy lets you view passwords, card details, and SecureNote contents. Adding, editing, deleting, and document downloads require The Guardian to reconnect.'
+        : 'Only vault metadata is available on this device right now. Reconnect and refresh the vault to create the protected offline copy of secret values.'
+    );
+  }, [offlineSecretsAvailable, screenAlert]);
+
   const [plan, setPlan] = useState<Plan>('FREE');
   const [checkingPlan, setCheckingPlan] = useState(true);
   const [actionTarget, setActionTarget] = useState<VaultActionTarget | null>(null);
@@ -334,7 +344,6 @@ const VaultScreen = () => {
 
 
   const isPaidPlan = plan === 'PREMIUM' || plan === 'FAMILY';
-  const shouldBlockDocumentAdd = activeTab === 'Documents' && !checkingPlan && !isPaidPlan;
 
   const loadSubscriptionPlan = async () => {
     try {
@@ -488,6 +497,7 @@ const VaultScreen = () => {
     return true;
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- loadVaultItems is a local plain async function (not memoized); callers intentionally recreate per render.
   const loadVaultItems = async (options?: {
     force?: boolean;
     showFullLoader?: boolean;
@@ -683,6 +693,7 @@ const VaultScreen = () => {
 
       loadSubscriptionPlan();
       loadVaultItems({ showFullLoader: true, background: true });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- loadSubscriptionPlan/loadVaultItems are recreated each render; adding them would refetch on every render. Keyed by tab only.
     }, [tab])
   );
 
@@ -880,7 +891,7 @@ const VaultScreen = () => {
         mode: 'edit',
       },
     });
-  }, [actionTarget, activeTab, offlineMode, router]);
+  }, [actionTarget, activeTab, offlineMode, router, showOfflineWriteWarning]);
 
   const removeDeletedTargetFromVisibleData = useCallback(
     (target: VaultActionTarget) => {
@@ -990,6 +1001,7 @@ const VaultScreen = () => {
       deletingAction,
       loadVaultItems,
       removeDeletedTargetFromVisibleData,
+      requestApi,
       showAlert,
     ]
   );
@@ -1022,7 +1034,7 @@ const VaultScreen = () => {
         },
       ],
     });
-  }, [actionTarget, deleteTarget, offlineMode, showAlert]);
+  }, [actionTarget, deleteTarget, offlineMode, showAlert, showOfflineWriteWarning]);
 
   const searchText = search.trim().toLowerCase();
 
@@ -1078,18 +1090,6 @@ const VaultScreen = () => {
     if (activeTab === 'Cards') return '/addcard';
     return '/addnote';
   };
-
-  const activeTabIcon = tabs.find((item) => item.label === activeTab)?.icon || 'lock-closed-outline';
-
-  const showOfflineWriteWarning = () => {
-    screenAlert(
-      'Offline mode',
-      offlineSecretsAvailable
-        ? 'Your encrypted offline copy lets you view passwords, card details, and SecureNote contents. Adding, editing, deleting, and document downloads require The Guardian to reconnect.'
-        : 'Only vault metadata is available on this device right now. Reconnect and refresh the vault to create the protected offline copy of secret values.'
-    );
-  };
-
 
   const showDocumentUpgradePrompt = () => {
     hapticWarning();

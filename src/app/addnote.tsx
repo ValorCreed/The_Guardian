@@ -70,7 +70,7 @@ export default function AddNoteScreen() {
     };
 
     loadLimits();
-  }, []);
+  }, [requestApi]);
 
   const showUpgradeAlert = () => {
     screenAlert(
@@ -229,7 +229,11 @@ export default function AddNoteScreen() {
               <Switch
                 value={pinned}
                 onValueChange={(nextValue) => {
-                  nextValue ? hapticToggleOn() : hapticToggleOff();
+                  if (nextValue) {
+                    hapticToggleOn();
+                  } else {
+                    hapticToggleOff();
+                  }
                   setPinned(nextValue);
                 }}
                 trackColor={{ false: C.border, true: C.primary }}

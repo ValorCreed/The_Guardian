@@ -153,7 +153,7 @@ export default function EditFamilyAccessScreen() {
     } finally {
       setLoading(false);
     }
-  }, [membershipId]);
+  }, [membershipId, requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

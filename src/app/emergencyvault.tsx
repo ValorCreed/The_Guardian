@@ -107,7 +107,7 @@ export default function EmergencyVaultScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [requestId, ownerName, ownerEmail]);
+  }, [requestId, ownerName, ownerEmail, requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

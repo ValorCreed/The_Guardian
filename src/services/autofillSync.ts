@@ -297,7 +297,7 @@ export const syncGuardianAutofillCache = async (options?: {
     );
 
     const now = new Date().toISOString();
-    const storageWrites: Array<[string, string]> = [
+    const storageWrites: [string, string][] = [
       [GUARDIAN_AUTOFILL_LAST_SYNCED_AT_KEY, now],
     ];
     if (options?.enable || enabled) {

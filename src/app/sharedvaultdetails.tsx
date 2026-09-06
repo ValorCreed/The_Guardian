@@ -286,7 +286,7 @@ export default function SharedVaultDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id, type]);
+  }, [id, type, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

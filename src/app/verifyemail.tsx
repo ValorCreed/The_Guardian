@@ -82,12 +82,71 @@ export default function VerifyEmailScreen() {
   const lastAttemptedCodeRef = useRef('');
   const verifyingRef = useRef(false);
 
+  const handleResendCode = useCallback(
+    async (silent = false) => {
+      if (!email) {
+        if (!silent) {
+          showAlert({ title: 'Email missing', message: 'Go back and try again.', type: 'error' });
+        }
+        return;
+      }
+
+      try {
+        setSending(true);
+        if (silent) {
+          setInitialAutoSending(true);
+        }
+
+        if (registrationMode) {
+          await requestApi.resendRegistrationCode({ email });
+        } else {
+          await requestApi.resendVerification({ email });
+        }
+
+        if (!silent) {
+          setCode('');
+          lastAttemptedCodeRef.current = '';
+          showAlert({
+            title: 'Code sent',
+            message: 'A new verification code has been sent to your email.',
+            type: 'success',
+            buttons: [
+              {
+                text: 'Enter code',
+                onPress: () => codeInputRef.current?.focus(),
+              },
+            ],
+          });
+        }
+      } catch (error: any) {
+        if (isScreenRequestCancelled(error)) return;
+        if (!silent) {
+          showAlert({
+            title: 'Could not send code',
+            message:
+              error.message ||
+              (registrationMode
+                ? 'We could not send a new code. Your account has not been created.'
+                : 'We could not send a verification code right now.'),
+            type: 'error',
+          });
+        }
+      } finally {
+        setSending(false);
+        if (silent) {
+          setInitialAutoSending(false);
+        }
+      }
+    },
+    [email, registrationMode, requestApi, showAlert]
+  );
+
   useEffect(() => {
     if (email && autoSend && !autoSent) {
       setAutoSent(true);
       handleResendCode(true);
     }
-  }, [email, autoSend, autoSent]);
+  }, [email, autoSend, autoSent, handleResendCode]);
 
   const goNext = useCallback(() => {
     if (next === 'userinfo') {
@@ -224,62 +283,6 @@ export default function VerifyEmailScreen() {
     }
 
     setCode(nextCode);
-  };
-
-  const handleResendCode = async (silent = false) => {
-    if (!email) {
-      if (!silent) {
-        showAlert({ title: 'Email missing', message: 'Go back and try again.', type: 'error' });
-      }
-      return;
-    }
-
-    try {
-      setSending(true);
-      if (silent) {
-        setInitialAutoSending(true);
-      }
-
-      if (registrationMode) {
-        await requestApi.resendRegistrationCode({ email });
-      } else {
-        await requestApi.resendVerification({ email });
-      }
-
-      if (!silent) {
-        setCode('');
-        lastAttemptedCodeRef.current = '';
-        showAlert({
-          title: 'Code sent',
-          message: 'A new verification code has been sent to your email.',
-          type: 'success',
-          buttons: [
-            {
-              text: 'Enter code',
-              onPress: () => codeInputRef.current?.focus(),
-            },
-          ],
-        });
-      }
-    } catch (error: any) {
-      if (isScreenRequestCancelled(error)) return;
-      if (!silent) {
-        showAlert({
-          title: 'Could not send code',
-          message:
-            error.message ||
-            (registrationMode
-              ? 'We could not send a new code. Your account has not been created.'
-              : 'We could not send a verification code right now.'),
-          type: 'error',
-        });
-      }
-    } finally {
-      setSending(false);
-      if (silent) {
-        setInitialAutoSending(false);
-      }
-    }
   };
 
   const renderVerifySkeleton = () => (

@@ -160,7 +160,7 @@ export default function NewMemberScreen() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [requestApi]);
 
   const selectedCount = useMemo(
     () =>

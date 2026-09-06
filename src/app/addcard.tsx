@@ -106,7 +106,7 @@ const AddCardScreen = () => {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [requestApi]);
 
   useEffect(() => {
     if (cvv.length > cardDetails.securityCodeLength) {

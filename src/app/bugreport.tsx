@@ -219,7 +219,11 @@ export default function BugReportScreen() {
                 value={includeDiagnostics}
                 onValueChange={(value) => {
                   setIncludeDiagnostics(value);
-                  value ? hapticToggleOn() : hapticToggleOff();
+                  if (value) {
+                    hapticToggleOn();
+                  } else {
+                    hapticToggleOff();
+                  }
                 }}
                 trackColor={{ false: C.border, true: C.primary }}
                 thumbColor="#FFFFFF"

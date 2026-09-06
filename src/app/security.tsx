@@ -363,7 +363,11 @@ export default function SecurityScreen() {
   };
 
   const openIssue = (issue: SecurityIssue) => {
-    issue.severity === 'danger' ? hapticWarning() : hapticLight();
+    if (issue.severity === 'danger') {
+      hapticWarning();
+    } else {
+      hapticLight();
+    }
 
     if (String(issue.type).startsWith('FAMILY_MEMBER_')) {
       router.push('/family');
@@ -776,7 +780,11 @@ export default function SecurityScreen() {
                     tool.danger && styles.dangerToolRow,
                   ]}
                   onPress={() => {
-                    tool.danger ? hapticWarning() : hapticLight();
+                    if (tool.danger) {
+                      hapticWarning();
+                    } else {
+                      hapticLight();
+                    }
                     router.push(tool.route as any);
                   }}
                   activeOpacity={0.84}

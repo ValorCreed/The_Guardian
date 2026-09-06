@@ -1,0 +1,67 @@
+# The Guardian vault gateway - Render blueprint
+# Deploy on Render: https://dashboard.render.com/blueprint?fromRepository=...&ref=main
+#
+# Database: create a managed PostgreSQL instance and reference its URL below.
+# The gateway runs migrations automatically on boot, so no separate job is
+# required. `boot` runs migrate() before the HTTP server starts listening.
+
+services:
+  - type: web
+    name: guardian-vault-gateway
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /actuator/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: DATABASE_URL
+        sync: false # set manually from your managed Postgres Internal Database URL
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: VAULT_ENCRYPTION_KEY
+        generateValue: true
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        sync: false
+      - key: SMTP_SECURE
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+      - key: PAYMENT_PROVIDER
+        value: paystack
+      - key: PAYMENTS_SANDBOX
+        value: "false"
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      - key: PAYSTACK_PUBLIC_KEY
+        sync: false
+      - key: APP_ORIGIN
+        sync: false
+      - key: STORAGE_DIR
+        value: /data/guardian-storage
+      - key: ALLOWED_ORIGINS
+        value: "*"
+      - key: MAX_DOCUMENT_BYTES
+        value: "26214400"
+
+# NOTE: document/backup files live on the instance disk in STORAGE_DIR.
+# For production durability either point STORAGE_DIR at a mounted volume or
+# swap storage.ts for an S3 adapter.
+
+databases:
+  - name: guardian-vault-db
+    plan: basic

@@ -11,11 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router, useFocusEffect } from 'expo-router';
 import {
   Check,
-  Clock3,
-  Info,
   LockKeyhole,
-  ShieldCheck,
-  Smartphone,
 } from 'lucide-react-native';
 
 import { useAppTheme } from '../context/ThemeContext';
@@ -215,29 +211,6 @@ export default function AutoLockScreen() {
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function InfoRow({
-  icon,
-  title,
-  text,
-  styles,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  text: string;
-  styles: any;
-}) {
-  return (
-    <View style={styles.infoRow}>
-      <View style={styles.infoIcon}>{icon}</View>
-
-      <View style={{ flex: 1 }}>
-        <Text style={styles.infoTitle}>{title}</Text>
-        <Text style={styles.infoText}>{text}</Text>
-      </View>
-    </View>
   );
 }
 

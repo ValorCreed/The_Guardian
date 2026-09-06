@@ -31,7 +31,6 @@ import { useSecurityScore } from "../hooks/useSecurityScore";
 import { scheduleIdleTask, type IdleTaskHandle } from "../services/securityScoreSync";
 import { api, VaultItem } from "../services/api";
 import GuardianLogoTile from "../components/GuardianLogoTitle";
-import * as Updates from "expo-updates";
 import WhatsNewModal from "../components/WhatsNewModal";
 import OfflineBanner from "../components/OfflineBanner";
 import {
@@ -40,7 +39,7 @@ import {
   saveOfflineVaultSnapshot,
 } from "../services/offlineVault";
 import { WHATS_NEW_VERSION } from "../constants/whatsNew";
-import { hapticLight, hapticMedium, hapticScoreSettled, hapticSelection, hapticWarning } from '../utils/haptics';
+import { hapticLight, hapticMedium, hapticScoreSettled, hapticWarning } from '../utils/haptics';
 import { syncGuardianAutofillCache, syncPendingGuardianAutofillSaves } from '../services/autofillSync';
 import { safeLogError } from '../utils/asyncResilience';
 import { useScreenAlert } from '../hooks/useScreenAlert';
@@ -445,6 +444,8 @@ const ScoreRing = React.memo(
     );
   },
 );
+
+ScoreRing.displayName = "ScoreRing";
 
 const HomeScreen = () => {
   const screenAlert = useScreenAlert();
@@ -1263,7 +1264,7 @@ const HomeScreen = () => {
     };
 
     showRecoveryWarning();
-  }, [recoveryKitMissing, router, sessionMode]);
+  }, [recoveryKitMissing, router, screenAlert, sessionMode]);
   /**Closing the Whats New modal */
   const closeWhatsNewModal = async () => {
     try {

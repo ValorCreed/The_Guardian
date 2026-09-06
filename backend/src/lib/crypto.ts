@@ -1,0 +1,58 @@
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+  createHash,
+} from 'node:crypto';
+import { env } from '../config/env';
+
+/**
+ * AES-256-GCM encryption at rest.
+ *
+ * The Guardian client sends plaintext in its `encrypted*` fields; the server
+ * encrypts those values before writing them to storage. The key is held by the
+ * server (VAULT_ENCRYPTION_KEY), so this is NOT a zero-knowledge design — the
+ * server can decrypt vault data. See docs/backend-technical-documentation.md.
+ *
+ * Format: `v1.<iv base64url>.<authTag base64url>.<ciphertext base64url>`
+ */
+
+function keyBytes(): Buffer {
+  const key = Buffer.from(env.VAULT_ENCRYPTION_KEY);
+  return createHash('sha256').update(key).digest();
+}
+
+export function encryptAtRest(plaintext: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', keyBytes(), iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return `v1.${iv.toString('base64url')}.${tag.toString('base64url')}.${ciphertext.toString('base64url')}`;
+}
+
+export function decryptAtRest(payload: string): string {
+  const parts = payload.split('.');
+  if (parts[0] !== 'v1' || parts.length !== 4) {
+    throw new Error('Invalid encrypted payload format.');
+  }
+  const iv = Buffer.from(parts[1], 'base64url');
+  const tag = Buffer.from(parts[2], 'base64url');
+  const ciphertext = Buffer.from(parts[3], 'base64url');
+  const decipher = createDecipheriv('aes-256-gcm', keyBytes(), iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+export function decryptAtRestSafe(payload: string | null | undefined): string | null {
+  if (!payload) return null;
+  try {
+    return decryptAtRest(payload);
+  } catch {
+    return null;
+  }
+}
+
+/** SHA-256 hex digest; used for biometric credentials and verification codes. */
+export function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}

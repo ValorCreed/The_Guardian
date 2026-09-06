@@ -61,7 +61,7 @@ export default function RecoveryKitScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

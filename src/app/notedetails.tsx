@@ -114,6 +114,7 @@ export default function NoteDetailsScreen() {
 
   useEffect(() => {
     loadNote();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadNote recreated per render; deps [id, mode] capture the reload trigger.
   }, [id, mode]);
 
   const showOfflineWriteWarning = () => {

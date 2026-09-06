@@ -207,6 +207,7 @@ function AppStack() {
     router.replace(fallbackRoute);
   }, []);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- setLockdownExitVisible is a stable setState; empty deps is correct.
   const showLockdownExitNotice = useCallback(() => {
     setLockdownExitVisible(true);
   }, []);

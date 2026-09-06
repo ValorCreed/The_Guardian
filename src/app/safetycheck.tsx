@@ -49,9 +49,6 @@ const formatDate = (value?: string | null) => {
   });
 };
 
-const formatInterval = (days: number) =>
-  days === 1 ? 'Every day' : `Every ${days} days`;
-
 const formatGrace = (hours: number) =>
   hours === 24
     ? '24 hours'
@@ -110,7 +107,7 @@ export default function SafetyCheckScreen() {
         setRefreshing(false);
       }
     }
-  }, [applyResponse, requestApi]);
+  }, [applyResponse, requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {
@@ -832,17 +829,6 @@ function SafetyCheckSkeleton({ styles }: any) {
         </View>
       </View>
     </ScrollView>
-  );
-}
-
-function FeatureRow({ icon, text, C, styles }: any) {
-  return (
-    <View style={styles.featureRow}>
-      <View style={styles.featureIcon}>
-        <Ionicons name={icon} size={18} color={C.primary} />
-      </View>
-      <Text style={styles.featureText}>{text}</Text>
-    </View>
   );
 }
 

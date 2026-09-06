@@ -44,12 +44,12 @@ import {
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 
-const INCIDENT_TYPES: Array<{
+const INCIDENT_TYPES: {
   value: SecurityIncidentType;
   title: string;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
-}> = [
+}[] = [
   {
     value: 'LOST_OR_STOLEN_DEVICE',
     title: 'Lost or stolen device',

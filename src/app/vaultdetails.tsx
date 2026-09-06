@@ -60,12 +60,6 @@ type CardPayload = {
   offlineMetadataOnly?: boolean;
 };
 
-type DocumentPayload = {
-  fileName: string;
-  mimeType: string;
-  base64Content: string;
-};
-
 type PreviewImageFile = {
   uri: string;
   fileName: string;
@@ -469,6 +463,7 @@ const loadItem = async () => {
 
   useEffect(() => {
     loadItem();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadItem recreated per render; deps [id, type, mode] capture the reload trigger.
   }, [id, type, mode]);
 
   const copyValue = async (label: string, value?: string) => {

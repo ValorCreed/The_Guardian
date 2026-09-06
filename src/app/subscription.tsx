@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Check, ChevronDown, ChevronUp, Clock3, Crown, ShieldCheck, UsersRound, XCircle } from 'lucide-react-native';
+import { Check, ChevronDown, ChevronUp, Clock3, Crown, XCircle } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 
@@ -583,7 +583,6 @@ export default function PlansScreen() {
 
   const [currentPlan, setCurrentPlan] = useState<PlanType>('FREE');
   const [active, setActive] = useState(false);
-  const [startedAt, setStartedAt] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -614,7 +613,6 @@ export default function PlansScreen() {
 
       setCurrentPlan(plan as PlanType);
       setActive(Boolean(response?.active));
-      setStartedAt(response?.startedAt || null);
       setExpiresAt(response?.expiresAt || null);
     } catch (error: any) {
     if (isScreenRequestCancelled(error)) return;
@@ -624,7 +622,7 @@ export default function PlansScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [requestApi]);
 
   useFocusEffect(
     useCallback(() => {

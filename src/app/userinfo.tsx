@@ -19,7 +19,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import { router, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { BlurView } from 'expo-blur';
-import { ChevronRight, Fingerprint, KeyRound, Mail, Pencil, ShieldCheck, Smartphone, UserRound } from 'lucide-react-native';
+import { ChevronRight, Fingerprint, KeyRound, Mail, Pencil, Smartphone, UserRound } from 'lucide-react-native';
 import { useAppTheme } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
 import { api } from '../services/api';
@@ -56,7 +56,6 @@ export default function UserInfoScreen() {
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [emailVerified, setEmailVerified] = useState(false);
-  const [saving2FA, setSaving2FA] = useState(false);
   const [sendingVerification, setSendingVerification] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -158,7 +157,7 @@ export default function UserInfoScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [requestApi]);
 
   useFocusEffect(
     useCallback(() => {
@@ -251,87 +250,6 @@ export default function UserInfoScreen() {
       );
     } finally {
       setSendingVerification(false);
-    }
-  };
-
-  const handleTwoFactorToggle = async (value: boolean) => {
-    try {
-      setSaving2FA(true);
-
-      if (value) {
-        if (!emailVerified) {
-          screenAlert(
-            'Verify your email first',
-            'For your safety, two-factor authentication needs a verified email first. You can still use the app without 2FA, but verification makes account recovery and login codes safer.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Verify now',
-                onPress: () =>
-                  router.push({
-                    pathname: '/verifyemail',
-                    params: { email, next: 'userinfo', autoSend: 'true' },
-                  }),
-              },
-            ]
-          );
-          return;
-        }
-
-        screenAlert(
-          'Enable two-factor authentication?',
-          'After this is enabled, login will require a one-time code in addition to your password.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Enable',
-              onPress: async () => {
-                try {
-                  setSaving2FA(true);
-                  await requestApi.setTwoFactorEnabled(true);
-                  await AsyncStorage.setItem('twoFactorEnabled', 'true');
-                  setTwoFactorEnabled(true);
-                  screenAlert('2FA enabled', 'Your account now requires a verification code during login.');
-                } catch (error: any) {
-    if (isScreenRequestCancelled(error)) return;
-                  screenAlert('Could not enable 2FA', error.message || 'Please try again.');
-                } finally {
-                  setSaving2FA(false);
-                }
-              },
-            },
-          ]
-        );
-        return;
-      }
-
-      screenAlert(
-        'Disable two-factor authentication?',
-        'Your account will only require email and password to sign in.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Disable',
-            style: 'destructive',
-            onPress: async () => {
-              try {
-                setSaving2FA(true);
-                await requestApi.setTwoFactorEnabled(false);
-                await AsyncStorage.setItem('twoFactorEnabled', 'false');
-                setTwoFactorEnabled(false);
-                screenAlert('2FA disabled', 'Two-factor authentication has been turned off.');
-              } catch (error: any) {
-    if (isScreenRequestCancelled(error)) return;
-                screenAlert('Could not disable 2FA', error.message || 'Please try again.');
-              } finally {
-                setSaving2FA(false);
-              }
-            },
-          },
-        ]
-      );
-    } finally {
-      setSaving2FA(false);
     }
   };
 

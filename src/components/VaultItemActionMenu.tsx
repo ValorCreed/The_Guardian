@@ -276,6 +276,7 @@ export default function VaultItemActionMenu({
         dismissFallbackRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Animated.Value refs are stable handles; [visible] is the true trigger.
   }, [visible]);
 
   const normalizedFocusRect = useMemo(() => {

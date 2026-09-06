@@ -52,12 +52,12 @@ import {
 } from '../utils/secureClipboard';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 
-const ACTIONS: Array<{
+const ACTIONS: {
   value: EstateActionType;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   description: string;
-}> = [
+}[] = [
   {
     value: 'RELEASE',
     label: 'Release',
@@ -96,12 +96,12 @@ const ACTIONS: Array<{
   },
 ];
 
-const TRIGGERS: Array<{
+const TRIGGERS: {
   value: EstateTriggerType;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   description: string;
-}> = [
+}[] = [
   {
     value: 'OWNER_RELEASE',
     label: 'Release manually',
@@ -1445,7 +1445,7 @@ function ReleasedItemModal({
 }
 
 function ReleasedItemRows({ item, C, styles, onCopy }: any) {
-  const rows: Array<[string, string]> = [];
+  const rows: [string, string][] = [];
   if (item.itemType === 'PASSWORD') {
     if (item.website) rows.push(['Website', item.website]);
     if (item.usernameValue) rows.push(['Username', item.usernameValue]);

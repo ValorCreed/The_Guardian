@@ -192,7 +192,7 @@ export default function PasswordGeneratorScreen() {
 
     setGenerated(value);
     await addHistory(value);
-  }, [addHistory, includeNumbers, includeSymbols, includeUppercase, isPaid, length, mode, wordCount]);
+  }, [addHistory, includeNumbers, includeSymbols, includeUppercase, isPaid, length, mode, screenAlert, wordCount]);
 
   useEffect(() => {
     const load = async () => {
@@ -220,7 +220,7 @@ export default function PasswordGeneratorScreen() {
     };
 
     load();
-  }, []);
+  }, [requestApi]);
 
   useEffect(() => {
     if (!isPaid && length > 16) setLength(16);
@@ -240,7 +240,7 @@ export default function PasswordGeneratorScreen() {
     screenAlert('Copied', getSecureClipboardMessage('Generated password'));
   };
 
-  const useInAddPassword = () => {
+  const goToAddPassword = () => {
     if (!generated) return;
 
     router.push({
@@ -379,7 +379,7 @@ export default function PasswordGeneratorScreen() {
           <Text style={styles.secondaryButtonText}>Copy password</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.secondaryButton} onPress={() => { hapticMedium(); useInAddPassword(); }} activeOpacity={0.82}>
+        <TouchableOpacity style={styles.secondaryButton} onPress={() => { hapticMedium(); goToAddPassword(); }} activeOpacity={0.82}>
           <Ionicons name="add-circle-outline" size={20} color={C.primary} />
           <Text style={styles.secondaryButtonText}>Use in Add Password</Text>
         </TouchableOpacity>
@@ -424,7 +424,11 @@ function ToggleRow({ label, value, onValueChange, C, disabled = false }: { label
       <Switch
         value={value}
         onValueChange={(nextValue) => {
-          nextValue ? hapticToggleOn() : hapticToggleOff();
+          if (nextValue) {
+            hapticToggleOn();
+          } else {
+            hapticToggleOff();
+          }
           onValueChange(nextValue);
         }}
         disabled={disabled}

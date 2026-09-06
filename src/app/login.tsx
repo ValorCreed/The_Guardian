@@ -20,7 +20,7 @@ const guardianLogo = require('../assets/guardian-floating-logo.png');
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const pick = (...values: Array<string | undefined | null>) =>
+const pick = (...values: (string | undefined | null)[]) =>
   values.find(value => typeof value === 'string' && value.length > 0) || '#000000';
 
 const isVeryDarkColor = (value?: string) => {
@@ -126,16 +126,6 @@ const WelcomeScreen = () => {
   //   inputRange: [0, 1],
   //   outputRange: [1.15, 0.82],
   // });
-
-  const shadowScaleY = floatAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0.72],
-  });
-
-  const shadowOpacity = floatAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.16, 0.06],
-  });
 
   const entranceTranslateY = entranceAnim.interpolate({
     inputRange: [0, 1],

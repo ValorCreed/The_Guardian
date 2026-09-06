@@ -68,7 +68,7 @@ export default function UnlockScreen() {
       return () => {
         active = false;
       };
-    }, []),
+    }, [screenAlert]),
   );
 
 

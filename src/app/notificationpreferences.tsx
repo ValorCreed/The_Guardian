@@ -51,12 +51,12 @@ const DEFAULT_PUSH_STATE: PushNotificationState = {
   registered: false,
 };
 
-const CATEGORY_ROWS: Array<{
+const CATEGORY_ROWS: {
   key: CategoryPreferenceKey;
   title: string;
   description: string;
   icon: keyof typeof Ionicons.glyphMap;
-}> = [
+}[] = [
   {
     key: 'securityAlerts',
     title: 'Security alerts',
@@ -291,7 +291,11 @@ export default function NotificationPreferencesScreen() {
       const body: UpdateNotificationPreferences = { [key]: value };
       const saved = await api.updateNotificationPreferences(body);
       setPreferences(saved);
-      value ? hapticToggleOn() : hapticToggleOff();
+      if (value) {
+        hapticToggleOn();
+      } else {
+        hapticToggleOff();
+      }
     } catch (error: any) {
       setPreferences(previous);
       hapticWarning();

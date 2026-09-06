@@ -340,7 +340,6 @@ function useAdaptiveTabBarPalette(): AdaptiveTabBarPalette {
     colors.backgroundElement,
     colors.primary,
     colors.primaryDark,
-    colors.primaryLight,
     colors.surface,
     highTextContrast,
     isDark,
@@ -617,7 +616,7 @@ function FloatingTabBar() {
       springPillToIndex(index);
       resetPillShape();
     },
-    [pathname, resetPillShape, springPillToIndex]
+    [pathname, resetPillShape, springPillToIndex, visibleTabs]
   );
 
   useEffect(() => {
@@ -661,7 +660,7 @@ function FloatingTabBar() {
       hapticSelection();
       moveToTabImmediately(index);
     },
-    [animateStationaryPillBounce, moveToTabImmediately, pathname]
+    [animateStationaryPillBounce, moveToTabImmediately, pathname, visibleTabs]
   );
 
   const androidBlurMethod =

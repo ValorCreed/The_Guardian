@@ -24,7 +24,6 @@ import {
   FileKey2,
   HardDriveDownload,
   History,
-  LockKeyhole,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -319,7 +318,7 @@ export default function BackupScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [requestApi]);
 
   useFocusEffect(
     useCallback(() => {

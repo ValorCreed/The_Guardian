@@ -120,7 +120,7 @@ const AddPasswordScreen = () => {
     };
 
     loadPlanLimits();
-  }, []);
+  }, [requestApi]);
 
   const score = useMemo(() => getStrengthScore(password), [password]);
   const scoreColor = score >= 75 ? C.success : score >= 45 ? C.warning : C.danger;
@@ -407,7 +407,11 @@ const AddPasswordScreen = () => {
                 <Switch
                   value={includeNumbers}
                   onValueChange={(val) => {
-                    val ? hapticToggleOn() : hapticToggleOff();
+                    if (val) {
+                      hapticToggleOn();
+                    } else {
+                      hapticToggleOff();
+                    }
                     setIncludeNumbers(val);
                     regenerate(passLength, val, includeSymbols);
                   }}
@@ -427,7 +431,11 @@ const AddPasswordScreen = () => {
                 <Switch
                   value={includeSymbols}
                   onValueChange={(val) => {
-                    val ? hapticToggleOn() : hapticToggleOff();
+                    if (val) {
+                      hapticToggleOn();
+                    } else {
+                      hapticToggleOff();
+                    }
                     setIncludeSymbols(val);
                     regenerate(passLength, includeNumbers, val);
                   }}

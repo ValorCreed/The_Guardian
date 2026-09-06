@@ -294,7 +294,7 @@ export default function NotificationsScreen() {
         updateAppBadge(nextUnreadCount),
       ]);
       return { ...notification, ...updated, read: true };
-    } catch (error) {
+    } catch {
       return notification;
     } finally {
       setWorkingId(null);

@@ -122,7 +122,11 @@ export default function VerificationScreen() {
   const togglePrivacy = () => {
     setPrivacyAccepted((current) => {
       const next = !current;
-      next ? hapticLight() : hapticWarning();
+      if (next) {
+        hapticLight();
+      } else {
+        hapticWarning();
+      }
       return next;
     });
   };
@@ -130,7 +134,11 @@ export default function VerificationScreen() {
   const toggleTerms = () => {
     setTermsAccepted((current) => {
       const next = !current;
-      next ? hapticLight() : hapticWarning();
+      if (next) {
+        hapticLight();
+      } else {
+        hapticWarning();
+      }
       return next;
     });
   };

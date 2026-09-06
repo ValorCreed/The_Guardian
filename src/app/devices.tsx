@@ -110,7 +110,7 @@ export default function DevicesScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

@@ -1,11 +1,11 @@
 export type ThemePalette = {
-  surfaceElevated(surfaceElevated: any, backgroundElement: string, surface: string): unknown;
   text: string;
   textSecondary: string;
   textPrimary: string;
   background: string;
   backgroundElement: string;
   surface: string;
+  surfaceElevated: string;
   backgroundSelected: string;
   primary: string;
   primaryDark: string;
@@ -42,6 +42,7 @@ export const Colors: Record<ThemePaletteName, ThemePalette> = {
     background: '#F8FAF9',
     backgroundElement: '#FFFFFF',
     surface: '#FFFFFF',
+    surfaceElevated: '#FFFFFF',
     backgroundSelected: '#E8F2EC',
 
     // Brand Colors
@@ -93,6 +94,7 @@ export const Colors: Record<ThemePaletteName, ThemePalette> = {
     background: '#0A0F14',
     backgroundElement: '#111827',
     surface: '#111827',
+    surfaceElevated: '#1A2330',
     backgroundSelected: '#1F2937',
 
     // Brand Colors
@@ -144,6 +146,7 @@ export const Colors: Record<ThemePaletteName, ThemePalette> = {
     background: '#000000',
     backgroundElement: '#050A08',
     surface: '#050A08',
+    surfaceElevated: '#0A1610',
     backgroundSelected: '#06130F',
 
     // Brand Colors

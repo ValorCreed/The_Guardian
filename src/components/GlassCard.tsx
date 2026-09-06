@@ -38,7 +38,7 @@ export default function GlassCard({
   intensity = 22,
   radius = 26,
 }: GlassCardProps) {
-  const { isDark, colors: C } = useAppTheme();
+  const { isDark } = useAppTheme();
 
   const borderColor = isDark
     ? 'rgba(255,255,255,0.09)'

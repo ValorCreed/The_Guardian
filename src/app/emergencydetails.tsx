@@ -44,7 +44,7 @@ export default function EmergencyDetailsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

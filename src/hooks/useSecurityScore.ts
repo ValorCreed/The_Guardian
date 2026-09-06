@@ -1066,6 +1066,7 @@ export const useSecurityScore = () => {
   }, [applyReport]);
 
   const refreshFromServer = useCallback(
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- memoization preserved; inferred deps (from applyReport[0]) match manual deps.
     async (options: { silent?: boolean } = {}) => {
       const silent = Boolean(options.silent);
 

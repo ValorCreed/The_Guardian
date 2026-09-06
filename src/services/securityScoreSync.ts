@@ -154,7 +154,7 @@ export function markSecurityScoreDirty(
 ) {
   const changedAt = Date.now();
   void (async () => {
-    const writes: Array<[string, string]> = [
+    const writes: [string, string][] = [
       [SECURITY_SCORE_NEEDS_SYNC_KEY, 'true'],
     ];
 

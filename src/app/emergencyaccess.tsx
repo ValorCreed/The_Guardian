@@ -61,7 +61,7 @@ export default function EmergencyAccessScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {

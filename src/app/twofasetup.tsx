@@ -63,7 +63,7 @@ export default function TwoFactorSetupScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [requestApi, screenAlert]);
 
   useFocusEffect(
     useCallback(() => {
@@ -206,7 +206,11 @@ export default function TwoFactorSetupScreen() {
               <Switch
                 value={settings.twoFactorEnabled}
                 onValueChange={(nextValue) => {
-                  nextValue ? hapticToggleOn() : hapticToggleOff();
+                  if (nextValue) {
+                    hapticToggleOn();
+                  } else {
+                    hapticToggleOff();
+                  }
                   toggleTwoFactor(nextValue);
                 }}
                 trackColor={{ false: C.border, true: C.primary }}

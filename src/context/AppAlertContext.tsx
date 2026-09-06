@@ -551,6 +551,7 @@ export function useAppAlert() {
         activeRef.current = false;
         context?.hideAlert();
       };
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- context.showAlert/hideAlert are memoized stable callbacks; granular deps are correct.
     }, [context?.hideAlert])
   );
 
@@ -572,6 +573,7 @@ export function useAppAlert() {
         })),
       });
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- context.showAlert is a memoized stable callback; granular dep is correct.
     [context?.showAlert]
   );
 

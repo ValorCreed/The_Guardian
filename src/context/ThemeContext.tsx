@@ -105,7 +105,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const activeUserEmail = await AsyncStorage.getItem('userEmail');
-      const writes: Array<[string, string]> = [
+      const writes: [string, string][] = [
         [GLOBAL_THEME_KEY, newMode],
       ];
 
@@ -133,7 +133,7 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     setMode('system');
 
     try {
-      const writes: Array<[string, string]> = [
+      const writes: [string, string][] = [
         [GLOBAL_THEME_KEY, 'system'],
       ];
 

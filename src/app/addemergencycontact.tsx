@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -69,22 +69,10 @@ export default function AddEmergencyContactScreen() {
     };
 
     loadPlan();
-  }, []);
+  }, [requestApi]);
 
   const isPaid = plan === 'PREMIUM' || plan === 'FAMILY';
   const effectiveAllowNotes = isPaid ? allowNotes : true;
-
-  const planNote = useMemo(() => {
-    if (plan === 'FREE') {
-      return 'Free users can add 1 emergency contact with emergency note access. Upgrade to share passwords, cards, and documents.';
-    }
-
-    if (plan === 'PREMIUM') {
-      return 'Premium users can add up to 3 emergency contacts and choose what emergency items can be accessed.';
-    }
-
-    return 'Family users can add more emergency contacts and allow emergency access to passwords, cards, documents, and notes.';
-  }, [plan]);
 
   const handleSave = async () => {
     if (saving) return;
@@ -374,7 +362,11 @@ function PermissionRow({ title, subtitle, value, onValueChange, C, disabled, fir
       <Switch
         value={value}
         onValueChange={(nextValue) => {
-          nextValue ? hapticToggleOn() : hapticToggleOff();
+          if (nextValue) {
+            hapticToggleOn();
+          } else {
+            hapticToggleOff();
+          }
           onValueChange(nextValue);
         }}
         disabled={disabled}

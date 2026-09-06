@@ -130,7 +130,7 @@ export default function AutofillScreen() {
         );
       }
     }
-  }, []);
+  }, [screenAlert]);
 
   const syncAutofillVault = useCallback(async () => {
     if (Platform.OS !== 'android') {
@@ -178,7 +178,7 @@ export default function AutofillScreen() {
       setSyncing(false);
       setRefreshing(false);
     }
-  }, [nativeAutofillAvailable]);
+  }, [nativeAutofillAvailable, screenAlert]);
 
   const clearAutofill = useCallback(async () => {
     if (!nativeAutofillAvailable) return;
@@ -209,7 +209,7 @@ export default function AutofillScreen() {
         },
       ]
     );
-  }, [nativeAutofillAvailable]);
+  }, [nativeAutofillAvailable, screenAlert]);
 
   const toggleAutofill = async (value: boolean) => {
     if (value) {
