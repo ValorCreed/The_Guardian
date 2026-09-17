@@ -2,6 +2,15 @@ spring:
   application:
     name: api-gateway
 
+  # Spring Cloud Gateway Server Web MVC uses Spring Boot's RestClient
+  # infrastructure for downstream proxy calls. Render Free cold starts can
+  # legitimately take around a minute, so do not fail a routed request after
+  # only a few seconds.
+  http:
+    clients:
+      connect-timeout: 10s
+      read-timeout: 120s
+
   cloud:
     gateway:
       server:
@@ -55,3 +64,31 @@ spring:
 server:
   address: 0.0.0.0
   port: ${PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+
+guardian:
+  gateway:
+    readiness:
+      enabled: ${GATEWAY_DOWNSTREAM_READINESS_ENABLED:true}
+      # A target cannot have spun down within this window after a successful
+      # probe. This keeps normal traffic fast while still detecting Render
+      # sleep before the 15-minute idle boundary.
+      ready-ttl-ms: ${GATEWAY_DOWNSTREAM_READY_TTL_MS:600000}
+      # Render documents that a Free service cold start can take about a minute.
+      startup-timeout-ms: ${GATEWAY_DOWNSTREAM_STARTUP_TIMEOUT_MS:90000}
+      probe-timeout-ms: ${GATEWAY_DOWNSTREAM_PROBE_TIMEOUT_MS:12000}
+      min-backoff-ms: ${GATEWAY_DOWNSTREAM_MIN_BACKOFF_MS:750}
+      max-backoff-ms: ${GATEWAY_DOWNSTREAM_MAX_BACKOFF_MS:5000}
+
+logging:
+  level:
+    com.vault.gateway: INFO
+    org.springframework.cloud.gateway: INFO

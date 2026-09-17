@@ -4,7 +4,10 @@ import com.vault.theguardian.subscription.SubscriptionPlan;
 import com.vault.theguardian.user.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -21,14 +24,17 @@ public class NotificationClient {
 
     private final RestClient restClient;
     private final String internalServiceKey;
+    private final TaskExecutor notificationDispatchExecutor;
 
     public NotificationClient(
             RestClient.Builder builder,
             @Value("${services.notification.url}") String notificationServiceUrl,
-            @Value("${internal.service.key}") String internalServiceKey
+            @Value("${internal.service.key}") String internalServiceKey,
+            @Qualifier("notificationDispatchExecutor") TaskExecutor notificationDispatchExecutor
     ) {
         this.restClient = builder.baseUrl(notificationServiceUrl).build();
         this.internalServiceKey = internalServiceKey;
+        this.notificationDispatchExecutor = notificationDispatchExecutor;
     }
 
     public void createNotification(
@@ -329,13 +335,31 @@ public class NotificationClient {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    publish(request);
+                    dispatch(request);
                 }
             });
             return;
         }
 
-        publish(request);
+        dispatch(request);
+    }
+
+    private void dispatch(CreateNotificationRequest request) {
+        try {
+            notificationDispatchExecutor.execute(() -> publish(request));
+        } catch (TaskRejectedException exception) {
+            /*
+             * Notifications are deliberately best-effort. A busy or sleeping
+             * notification service must never hold up login, registration,
+             * vault writes, payments, or recovery.
+             */
+            log.warn(
+                    "Notification dispatch queue rejected event type={} userId={}: {}",
+                    request.type(),
+                    request.userId(),
+                    exception.getMessage()
+            );
+        }
     }
 
     private void publish(CreateNotificationRequest request) {
