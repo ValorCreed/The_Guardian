@@ -34,6 +34,10 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
+        if (!wakeCoordinator.isEnabled()) {
+            return true;
+        }
+
         String path = request.getRequestURI();
         return path == null
                 || path.startsWith("/actuator")

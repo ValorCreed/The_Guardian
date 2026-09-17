@@ -379,9 +379,9 @@ services:
       - key: EMAIL_SERVICE_URL
         value: https://guardian-vault-email.onrender.com
       - key: GATEWAY_COLD_START_ENABLED
-        value: "true"
+        value: "false"
       - key: GATEWAY_PREWARM_ALL_ON_STARTUP
-        value: "true"
+        value: "false"
       - key: GATEWAY_READY_TTL_MS
         value: "600000"
       - key: GATEWAY_COLD_START_MAX_WAIT_MS

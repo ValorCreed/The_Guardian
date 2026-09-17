@@ -5,7 +5,7 @@ spring:
   http:
     clients:
       connect-timeout: 15s
-      read-timeout: 150s
+      read-timeout: 180s
 
   cloud:
     gateway:
@@ -61,9 +61,12 @@ server:
   address: 0.0.0.0
   port: ${PORT:8080}
 
-# Render Free services can take about a minute to resume from idle.
-# The gateway proactively wakes all downstream services when it starts, then
-# waits for the exact route target before forwarding the user's real request.
+# Render Free services wake on the next real inbound HTTP request. On Free, do
+# not preflight/warm downstream services through the public edge: that creates
+# extra service-initiated traffic and can be edge-rate-limited before Spring starts.
+# The production Blueprint disables this custom guard and lets the actual proxied
+# request wake the target service. The 180s backend read timeout allows the route
+# request to remain open through a normal cold start.
 guardian:
   cold-start:
     enabled: ${GATEWAY_COLD_START_ENABLED:false}
