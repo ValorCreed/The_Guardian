@@ -12,9 +12,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Locale;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import tools.jackson.databind.json.JsonMapper;
 import java.util.Map;
-import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -36,6 +37,8 @@ public class DownstreamWakeCoordinator {
     ) {
     }
 
+    private static final JsonMapper JSON = JsonMapper.builder().build();
+    private final Map<String, Instant> retryNotBefore = new ConcurrentHashMap<>();
     private final HttpClient httpClient;
     private final ExecutorService executor;
     private final Map<String, CompletableFuture<WakeResult>> inFlight = new ConcurrentHashMap<>();
@@ -49,13 +52,13 @@ public class DownstreamWakeCoordinator {
     private final long maxBackoffMs;
 
     public DownstreamWakeCoordinator(
-            @Value("${guardian.cold-start.enabled:false}") boolean enabled,
-            @Value("${guardian.cold-start.ready-ttl-ms:600000}") long readyTtlMs,
-            @Value("${guardian.cold-start.max-wait-ms:120000}") long maxWaitMs,
+            @Value("${guardian.cold-start.enabled:true}") boolean enabled,
+            @Value("${guardian.cold-start.ready-ttl-ms:60000}") long readyTtlMs,
+            @Value("${guardian.cold-start.max-wait-ms:180000}") long maxWaitMs,
             @Value("${guardian.cold-start.probe-timeout-ms:70000}") long probeTimeoutMs,
             @Value("${guardian.cold-start.connect-timeout-ms:10000}") long connectTimeoutMs,
-            @Value("${guardian.cold-start.initial-backoff-ms:1000}") long initialBackoffMs,
-            @Value("${guardian.cold-start.max-backoff-ms:5000}") long maxBackoffMs
+            @Value("${guardian.cold-start.initial-backoff-ms:5000}") long initialBackoffMs,
+            @Value("${guardian.cold-start.max-backoff-ms:15000}") long maxBackoffMs
     ) {
         this.enabled = enabled;
         this.readyTtlMs = Math.max(1_000L, readyTtlMs);
@@ -106,7 +109,12 @@ public class DownstreamWakeCoordinator {
 
         executor.submit(() -> {
             try {
-                created.complete(wakeLoop(service, requestId, trigger));
+                WakeResult result = wakeLoop(service, requestId, trigger);
+                if (!result.ready()) {
+                    retryNotBefore.merge(service.name(), Instant.now().plusSeconds(15),
+                            (oldValue, newValue) -> oldValue.isAfter(newValue) ? oldValue : newValue);
+                }
+                created.complete(result);
             } catch (Throwable throwable) {
                 log.error(
                         "GW-WAKE-CRASH requestId={} service={} trigger={} errorType={} message={}",
@@ -127,9 +135,13 @@ public class DownstreamWakeCoordinator {
             String requestId,
             String trigger
     ) {
+        return awaitReady(wakeAsync(service, requestId, trigger), service, requestId);
+    }
+
+    public WakeResult awaitReady(CompletableFuture<WakeResult> pending,
+            DownstreamServiceRegistry.DownstreamService service, String requestId) {
         try {
-            return wakeAsync(service, requestId, trigger)
-                    .get(maxWaitMs + probeTimeoutMs + 5_000L, TimeUnit.MILLISECONDS);
+            return pending.get(maxWaitMs + 5_000L, TimeUnit.MILLISECONDS);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             return new WakeResult(false, 0, 0, 0, "interrupted");
@@ -161,12 +173,29 @@ public class DownstreamWakeCoordinator {
         );
 
         while (System.nanoTime() < deadlineNanos) {
+            Instant notBefore = retryNotBefore.get(service.name());
+            long cooldownMs = notBefore == null ? 0 : Duration.between(Instant.now(), notBefore).toMillis();
+            long remainingBudgetMs = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime());
+            if (remainingBudgetMs <= 0) break;
+            if (cooldownMs > 0) {
+                try {
+                    Thread.sleep(Math.min(cooldownMs, remainingBudgetMs));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return new WakeResult(false, lastStatus, attempt, elapsedMs(startedAt), "interrupted");
+                }
+                continue;
+            }
             attempt++;
-            ProbeResult probe = probe(service.healthUri(), requestId);
+            ProbeResult probe = probe(service.healthUri(), requestId, Math.min(probeTimeoutMs, remainingBudgetMs));
+            if (probe.retryAfterMs() > 0) {
+                retryNotBefore.put(service.name(), Instant.now().plusMillis(probe.retryAfterMs()));
+            }
             lastStatus = probe.status();
             lastDetail = probe.detail();
 
             if (probe.ready()) {
+                retryNotBefore.remove(service.name());
                 readyUntil.put(service.name(), Instant.now().plusMillis(readyTtlMs));
                 long elapsedMs = elapsedMs(startedAt);
                 log.info(
@@ -217,9 +246,9 @@ public class DownstreamWakeCoordinator {
         return new WakeResult(false, lastStatus, attempt, elapsedMs, lastDetail);
     }
 
-    private ProbeResult probe(URI healthUri, String requestId) {
+    private ProbeResult probe(URI healthUri, String requestId, long timeoutMs) {
         HttpRequest request = HttpRequest.newBuilder(healthUri)
-                .timeout(Duration.ofMillis(probeTimeoutMs))
+                .timeout(Duration.ofMillis(Math.max(1, timeoutMs)))
                 .header("Accept", "application/json")
                 .header("User-Agent", WAKE_USER_AGENT)
                 .header("X-Guardian-Request-Id", safe(requestId))
@@ -230,10 +259,16 @@ public class DownstreamWakeCoordinator {
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             int status = response.statusCode();
             String body = response.body() == null ? "" : response.body();
-            String normalized = body.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
-            boolean actuatorUp = status >= 200
-                    && status < 300
-                    && normalized.contains("\"STATUS\":\"UP\"");
+            // Only the root Actuator status proves readiness. HTML loading pages and
+            // nested component statuses must never release a pending business request.
+            boolean actuatorUp = false;
+            if (status == 200) {
+                try {
+                    actuatorUp = "UP".equals(JSON.readTree(body).path("status").asText());
+                } catch (Exception ignored) {
+                    // A platform loading page is not an Actuator response.
+                }
+            }
 
             if (actuatorUp) {
                 return new ProbeResult(true, false, status, 0L, "UP");
@@ -259,7 +294,7 @@ public class DownstreamWakeCoordinator {
 
     private long computeDelayMs(int attempt, long retryAfterMs) {
         if (retryAfterMs > 0) {
-            return Math.min(Math.max(retryAfterMs, initialBackoffMs), 15_000L);
+            return Math.max(retryAfterMs, initialBackoffMs);
         }
 
         int exponent = Math.min(Math.max(attempt - 1, 0), 4);
@@ -269,7 +304,11 @@ public class DownstreamWakeCoordinator {
     }
 
     private long parseRetryAfterMillis(HttpResponse<?> response) {
-        String value = response.headers().firstValue("Retry-After").orElse("").trim();
+        return parseRetryAfterMillis(response.headers().firstValue("Retry-After").orElse(""));
+    }
+
+    static long parseRetryAfterMillis(String header) {
+        String value = header.trim();
         if (value.isEmpty()) {
             return 0L;
         }
@@ -277,7 +316,12 @@ public class DownstreamWakeCoordinator {
             long seconds = Long.parseLong(value);
             return TimeUnit.SECONDS.toMillis(Math.max(0L, seconds));
         } catch (NumberFormatException ignored) {
-            return 0L;
+            try {
+                return Math.max(0L, Duration.between(Instant.now(),
+                        ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant()).toMillis());
+            } catch (Exception invalidDate) {
+                return 0L;
+            }
         }
     }
 

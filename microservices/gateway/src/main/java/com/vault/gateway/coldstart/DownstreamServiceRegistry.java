@@ -47,7 +47,7 @@ public class DownstreamServiceRegistry {
             @Value("${EMAIL_SERVICE_URL:http://localhost:8091}") String emailUrl
     ) {
         this.services = List.of(
-                service("auth", authUrl, true, List.of("email"),
+                service("auth", authUrl, true, List.of("email", "notifications"),
                         "/vault/auth", "/vault/sessions"),
                 service("notifications", notificationUrl, true, List.of("auth"),
                         "/vault/notifications"),

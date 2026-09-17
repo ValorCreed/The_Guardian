@@ -40,6 +40,7 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
 
         String path = request.getRequestURI();
         return path == null
+                || "OPTIONS".equalsIgnoreCase(request.getMethod())
                 || path.startsWith("/actuator")
                 || path.startsWith("/error");
     }
@@ -80,15 +81,14 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
 
         // Start every required wake concurrently first. awaitReady below then joins the same
         // single-flight futures instead of serially waking dependencies.
-        required.forEach(requiredService ->
-                wakeCoordinator.wakeAsync(requiredService, requestId, trigger)
-        );
+        var pending = required.stream()
+                .map(requiredService -> wakeCoordinator.wakeAsync(requiredService, requestId, trigger))
+                .toList();
 
-        for (DownstreamServiceRegistry.DownstreamService requiredService : required) {
+        for (int index = 0; index < required.size(); index++) {
+            var requiredService = required.get(index);
             DownstreamWakeCoordinator.WakeResult result = wakeCoordinator.awaitReady(
-                    requiredService,
-                    requestId,
-                    trigger
+                    pending.get(index), requiredService, requestId
             );
 
             if (!result.ready()) {
@@ -119,10 +119,12 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
         response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setHeader("Retry-After", "5");
+        response.setHeader("Retry-After", "15");
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("X-Guardian-Request-Forwarded", "false");
         response.getWriter().write(
                 "{\"error\":\"SERVICE_WAKING\","
-                        + "\"message\":\"A required Guardian service did not become ready in time. Please retry shortly.\","
+                        + "\"message\":\"Guardian is still starting. Please wait a moment and try again.\","
                         + "\"service\":\"" + jsonEscape(targetService) + "\","
                         + "\"dependency\":\"" + jsonEscape(failedService) + "\","
                         + "\"requestId\":\"" + jsonEscape(requestId) + "\"}"

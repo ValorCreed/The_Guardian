@@ -61,22 +61,18 @@ server:
   address: 0.0.0.0
   port: ${PORT:8080}
 
-# Render Free services wake on the next real inbound HTTP request. On Free, do
-# not preflight/warm downstream services through the public edge: that creates
-# extra service-initiated traffic and can be edge-rate-limited before Spring starts.
-# The production Blueprint disables this custom guard and lets the actual proxied
-# request wake the target service. The 180s backend read timeout allows the route
-# request to remain open through a normal cold start.
+# Wake only the requested route and its dependencies, using shared health probes.
+# No business POST is replayed and no scheduled keep-alive prevents idle shutdown.
 guardian:
   cold-start:
-    enabled: ${GATEWAY_COLD_START_ENABLED:false}
+    enabled: ${GATEWAY_COLD_START_ENABLED:true}
     prewarm-all-on-startup: ${GATEWAY_PREWARM_ALL_ON_STARTUP:false}
-    ready-ttl-ms: ${GATEWAY_READY_TTL_MS:600000}
-    max-wait-ms: ${GATEWAY_COLD_START_MAX_WAIT_MS:120000}
+    ready-ttl-ms: ${GATEWAY_READY_TTL_MS:60000}
+    max-wait-ms: ${GATEWAY_COLD_START_MAX_WAIT_MS:180000}
     probe-timeout-ms: ${GATEWAY_COLD_START_PROBE_TIMEOUT_MS:70000}
     connect-timeout-ms: ${GATEWAY_COLD_START_CONNECT_TIMEOUT_MS:10000}
-    initial-backoff-ms: ${GATEWAY_COLD_START_INITIAL_BACKOFF_MS:1000}
-    max-backoff-ms: ${GATEWAY_COLD_START_MAX_BACKOFF_MS:5000}
+    initial-backoff-ms: ${GATEWAY_COLD_START_INITIAL_BACKOFF_MS:5000}
+    max-backoff-ms: ${GATEWAY_COLD_START_MAX_BACKOFF_MS:15000}
 
 logging:
   level:

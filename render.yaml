@@ -379,21 +379,21 @@ services:
       - key: EMAIL_SERVICE_URL
         value: https://guardian-vault-email.onrender.com
       - key: GATEWAY_COLD_START_ENABLED
-        value: "false"
+        value: "true"
       - key: GATEWAY_PREWARM_ALL_ON_STARTUP
         value: "false"
       - key: GATEWAY_READY_TTL_MS
-        value: "600000"
+        value: "60000"
       - key: GATEWAY_COLD_START_MAX_WAIT_MS
-        value: "120000"
+        value: "180000"
       - key: GATEWAY_COLD_START_PROBE_TIMEOUT_MS
         value: "70000"
       - key: GATEWAY_COLD_START_CONNECT_TIMEOUT_MS
         value: "10000"
       - key: GATEWAY_COLD_START_INITIAL_BACKOFF_MS
-        value: "1000"
-      - key: GATEWAY_COLD_START_MAX_BACKOFF_MS
         value: "5000"
+      - key: GATEWAY_COLD_START_MAX_BACKOFF_MS
+        value: "15000"
       - key: SPRING_PROFILES_ACTIVE
         value: prod
       - key: SERVER_ERROR_INCLUDE_STACKTRACE
