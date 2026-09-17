@@ -98,7 +98,8 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
                         result.attempts(), result.elapsedMs(), result.detail()
                 );
 
-                writeUnavailable(response, requestId, service.name(), requiredService.name());
+                writeUnavailable(response, requestId, service.name(), requiredService.name(),
+                        result.lastStatus(), wakeCoordinator.retryAfterSeconds(requiredService));
                 return;
             }
         }
@@ -114,17 +115,28 @@ public class DownstreamReadinessFilter extends OncePerRequestFilter {
             HttpServletResponse response,
             String requestId,
             String targetService,
-            String failedService
+            String failedService,
+            int upstreamStatus,
+            long retryAfterSeconds
     ) throws IOException {
+        boolean throttled = upstreamStatus == 429;
+        boolean configurationFailure = upstreamStatus == 401 || upstreamStatus == 403 || upstreamStatus == 404;
+        String code = throttled ? "SERVICE_THROTTLED" : configurationFailure ? "SERVICE_UNAVAILABLE" : "SERVICE_WAKING";
+        String message = throttled
+                ? "Guardian cannot start a required service yet because the hosting service is limiting requests. Please wait before trying again."
+                : configurationFailure ? "Guardian could not connect to a required service. Please try again shortly."
+                : "Guardian is still starting. Please wait a moment and try again.";
         response.setStatus(HttpServletResponse.SC_SERVICE_UNAVAILABLE);
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setHeader("Retry-After", "15");
+        response.setHeader("Retry-After", String.valueOf(retryAfterSeconds));
         response.setHeader("Cache-Control", "no-store");
         response.setHeader("X-Guardian-Request-Forwarded", "false");
         response.getWriter().write(
-                "{\"error\":\"SERVICE_WAKING\","
-                        + "\"message\":\"Guardian is still starting. Please wait a moment and try again.\","
+                "{\"error\":\"" + code + "\",\"code\":\"" + code + "\","
+                        + "\"message\":\"" + message + "\","
+                        + "\"upstreamStatus\":" + upstreamStatus + ","
+                        + "\"retryAfterSeconds\":" + retryAfterSeconds + ","
                         + "\"service\":\"" + jsonEscape(targetService) + "\","
                         + "\"dependency\":\"" + jsonEscape(failedService) + "\","
                         + "\"requestId\":\"" + jsonEscape(requestId) + "\"}"

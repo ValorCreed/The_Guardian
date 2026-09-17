@@ -38,6 +38,7 @@ public class DownstreamWakeCoordinator {
     }
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
+    private final Map<String, WakeResult> recentFailures = new ConcurrentHashMap<>();
     private final Map<String, Instant> retryNotBefore = new ConcurrentHashMap<>();
     private final HttpClient httpClient;
     private final ExecutorService executor;
@@ -96,6 +97,12 @@ public class DownstreamWakeCoordinator {
             return CompletableFuture.completedFuture(new WakeResult(true, 200, 0, 0, "recently-ready"));
         }
 
+        Instant cooldownUntil = retryNotBefore.get(service.name());
+        WakeResult recentFailure = recentFailures.get(service.name());
+        if (recentFailure != null && cooldownUntil != null && Instant.now().isBefore(cooldownUntil)) {
+            return CompletableFuture.completedFuture(recentFailure);
+        }
+
         CompletableFuture<WakeResult> created = new CompletableFuture<>();
         CompletableFuture<WakeResult> existing = inFlight.putIfAbsent(service.name(), created);
 
@@ -111,6 +118,7 @@ public class DownstreamWakeCoordinator {
             try {
                 WakeResult result = wakeLoop(service, requestId, trigger);
                 if (!result.ready()) {
+                    recentFailures.put(service.name(), result);
                     retryNotBefore.merge(service.name(), Instant.now().plusSeconds(15),
                             (oldValue, newValue) -> oldValue.isAfter(newValue) ? oldValue : newValue);
                 }
@@ -194,7 +202,19 @@ public class DownstreamWakeCoordinator {
             lastStatus = probe.status();
             lastDetail = probe.detail();
 
+            // A 429 is an explicit rejection, not proof of ordinary cold startup.
+            // Stop this wake task and retain the cooldown so new clients cannot
+            // start another probe loop. Do not try another host or route around it.
+            if (probe.status() == 429) {
+                retryNotBefore.put(service.name(), Instant.now().plusMillis(
+                        Math.max(60_000L, probe.retryAfterMs())));
+                log.warn("GW-WAKE-THROTTLED requestId={} service={} retryAfterSeconds={} detail={}",
+                        safe(requestId), service.name(), retryAfterSeconds(service), safeMessage(probe.detail()));
+                return new WakeResult(false, 429, attempt, elapsedMs(startedAt), probe.detail());
+            }
+
             if (probe.ready()) {
+                recentFailures.remove(service.name());
                 retryNotBefore.remove(service.name());
                 readyUntil.put(service.name(), Instant.now().plusMillis(readyTtlMs));
                 long elapsedMs = elapsedMs(startedAt);
@@ -279,6 +299,10 @@ public class DownstreamWakeCoordinator {
             String contentType = response.headers().firstValue("Content-Type").orElse("unknown");
             String detail = "http=" + status
                     + ",contentType=" + sanitize(contentType)
+                    + ",server=" + sanitize(response.headers().firstValue("Server").orElse("none"))
+                    + ",cfRay=" + sanitize(response.headers().firstValue("CF-Ray").orElse("none"))
+                    + ",renderId=" + sanitize(response.headers().firstValue("Rndr-Id").orElse("none"))
+                    + ",retryAfter=" + sanitize(response.headers().firstValue("Retry-After").orElse("none"))
                     + ",body=" + bodyPreview(body);
             return new ProbeResult(false, permanentFailure, status, retryAfterMs, detail);
         } catch (Exception exception) {
@@ -323,6 +347,12 @@ public class DownstreamWakeCoordinator {
                 return 0L;
             }
         }
+    }
+
+    public long retryAfterSeconds(DownstreamServiceRegistry.DownstreamService service) {
+        Instant until = retryNotBefore.get(service.name());
+        if (until == null) return 15L;
+        return Math.max(1L, (Math.max(0L, Duration.between(Instant.now(), until).toMillis()) + 999L) / 1000L);
     }
 
     private static long elapsedMs(long startedAtNanos) {

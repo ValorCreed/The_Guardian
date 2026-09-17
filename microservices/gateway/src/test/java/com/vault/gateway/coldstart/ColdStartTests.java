@@ -76,7 +76,7 @@ class ColdStartTests {
     }
 
     @Test
-    void throttledHealthProbeHonorsRetryAfterBeforeTryingAgain() throws Exception {
+    void throttledHealthProbeStopsAndSharesCooldownAcrossRequests() throws Exception {
         var calls = new AtomicInteger();
         var firstAt = new java.util.concurrent.atomic.AtomicLong();
         var secondAt = new java.util.concurrent.atomic.AtomicLong();
@@ -99,9 +99,14 @@ class ColdStartTests {
         var coordinator = new DownstreamWakeCoordinator(true, 60000, 10000, 1000, 1000, 250, 250);
         try {
             var target = registry("http://127.0.0.1:" + server.getAddress().getPort()).byName("auth").orElseThrow();
-            assertTrue(coordinator.wakeAsync(target, "test", "test").get(6, TimeUnit.SECONDS).ready());
-            assertEquals(2, calls.get());
-            assertTrue(TimeUnit.NANOSECONDS.toMillis(secondAt.get() - firstAt.get()) >= 2000);
+            var rejected = coordinator.wakeAsync(target, "test", "test").get(6, TimeUnit.SECONDS);
+            assertFalse(rejected.ready());
+            assertEquals(429, rejected.lastStatus());
+            assertTrue(coordinator.retryAfterSeconds(target) >= 59);
+            for (int i = 0; i < 10; i++) {
+                assertFalse(coordinator.wakeAsync(target, "next", "test").get(1, TimeUnit.SECONDS).ready());
+            }
+            assertEquals(1, calls.get());
         } finally { coordinator.shutdown(); server.stop(0); }
     }
 
@@ -130,7 +135,7 @@ class ColdStartTests {
                 (req, res) -> fail("Login must not reach a sleeping dependency"));
         assertEquals(503, response.getStatus());
         assertEquals("false", response.getHeader("X-Guardian-Request-Forwarded"));
-        assertTrue(response.getContentAsString().contains("SERVICE_WAKING"));
+        assertTrue(response.getContentAsString().contains("SERVICE_THROTTLED"));
         coordinator.shutdown();
     }
 
