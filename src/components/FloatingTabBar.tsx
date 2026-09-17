@@ -67,10 +67,7 @@ type AdaptiveTabBarPalette = {
   inactiveShadow: string;
   pillBackground: string;
   pillBorder: string;
-  pillBottomShade: string;
-  pillDepth: string;
   pillHighlight: string;
-  pillShadow: string;
   reduceTransparency: boolean;
   scrim: string;
   shadowOpacity: number;
@@ -80,11 +77,11 @@ type AdaptiveTabBarPalette = {
 const BAR_RADIUS = 50;
 const BAR_VERTICAL_PADDING = 8;
 const BAR_HORIZONTAL_PADDING = 8;
-const BAR_HEIGHT = 72;
+const BAR_HEIGHT = 70;
 
-const PILL_HEIGHT = 64;
-const PILL_WIDTH_RATIO = 0.92;
-const PILL_RADIUS = 24;
+const PILL_HEIGHT = 65;
+const PILL_WIDTH_RATIO = 0.99;
+const PILL_RADIUS = 50;
 
 const TAB_SWITCH_SPRING = {
   friction: 14,
@@ -274,10 +271,10 @@ function useAdaptiveTabBarPalette(): AdaptiveTabBarPalette {
       : highTextContrast
         ? 0.95
         : isOled
-          ? 0.96
+          ? 0.9
           : isDark
-            ? 0.94
-            : 0.93;
+            ? 0.87
+            : 0.84;
 
     const estimatedSurface = blendColors(
       materialBase,
@@ -316,18 +313,15 @@ function useAdaptiveTabBarPalette(): AdaptiveTabBarPalette {
       blurIntensity: reduceTransparency
         ? 1
         : Platform.OS === 'android'
-          ? 35
+          ? 45
           : 62,
       inactiveContent,
       inactiveShadow: inactiveIsLight
         ? 'rgba(0,0,0,0.52)'
         : 'rgba(255,255,255,0.36)',
-      pillBackground: rgba(pillBase, highTextContrast ? 1 : 0.98),
-      pillBorder: rgba(activeContent, highTextContrast ? 0.5 : 0.28),
-      pillBottomShade: 'rgba(0,0,0,0.16)',
-      pillDepth: blendColors(pillBase, '#000000', isDark ? 0.7 : 0.76),
-      pillHighlight: rgba(activeContent, activeIsLight ? 0.16 : 0.11),
-      pillShadow: isDark ? '#000000' : blendColors(pillBase, '#000000', 0.58),
+      pillBackground: rgba(pillBase, highTextContrast ? 1 : 0.97),
+      pillBorder: rgba(activeContent, highTextContrast ? 0.42 : 0.22),
+      pillHighlight: rgba(activeContent, activeIsLight ? 0.11 : 0.08),
       reduceTransparency,
       scrim: isDark
         ? 'rgba(0,0,0,0.10)'
@@ -370,7 +364,7 @@ function FloatingTabItem({
 }) {
   const itemScale = useRef(new Animated.Value(active ? 1.04 : 1)).current;
   const itemTranslateY = useRef(new Animated.Value(active ? -2 : 0)).current;
-  const itemOpacity = useRef(new Animated.Value(1)).current;
+  const itemOpacity = useRef(new Animated.Value(active ? 1 : 0.92)).current;
   const pressScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -388,7 +382,7 @@ function FloatingTabItem({
         useNativeDriver: true,
       }),
       Animated.timing(itemOpacity, {
-        toValue: 1,
+        toValue: active ? 1 : 0.92,
         duration: 100,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
@@ -449,7 +443,7 @@ function FloatingTabItem({
       >
         <Ionicons
           name={(active ? tab.activeIcon : tab.icon) as any}
-          size={active ? 25 : 24}
+          size={23}
           color={contentColor}
           style={{
             textShadowColor: contentShadow,
@@ -746,7 +740,8 @@ function FloatingTabBar() {
                     width: pillWidth,
                     height: PILL_HEIGHT,
                     top: pillTop,
-                    shadowColor: palette.pillShadow,
+                    backgroundColor: palette.pillBackground,
+                    borderColor: palette.pillBorder,
                     transform: [
                       { translateX: indicatorX },
                       { translateY: pillTranslateY },
@@ -758,34 +753,12 @@ function FloatingTabBar() {
                 <View
                   pointerEvents="none"
                   style={[
-                    styles.pillDepth,
-                    { backgroundColor: palette.pillDepth },
-                  ]}
-                />
-
-                <View
-                  pointerEvents="none"
-                  style={[
-                    styles.pillSurface,
+                    styles.pillHighlight,
                     {
-                      backgroundColor: palette.pillBackground,
-                      borderColor: palette.pillBorder,
+                      backgroundColor: palette.pillHighlight,
                     },
                   ]}
-                >
-                  <View
-                    style={[
-                      styles.pillHighlight,
-                      { backgroundColor: palette.pillHighlight },
-                    ]}
-                  />
-                  <View
-                    style={[
-                      styles.pillBottomShade,
-                      { backgroundColor: palette.pillBottomShade },
-                    ]}
-                  />
-                </View>
+                />
               </Animated.View>
             )}
 
@@ -824,9 +797,9 @@ const styles = StyleSheet.create({
   shadowContainer: {
     borderRadius: BAR_RADIUS,
     shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowRadius: 24,
-    elevation: 20,
+    shadowOffset: { width: 0, height: 10 },
+    shadowRadius: 22,
+    elevation: 18,
   },
 
   blurBox: {
@@ -846,45 +819,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     borderRadius: PILL_RADIUS,
-    zIndex: 1,
-    shadowOffset: { width: 0, height: 9 },
-    shadowOpacity: 0.34,
-    shadowRadius: 12,
-    elevation: 12,
-  },
-
-  pillDepth: {
-    position: 'absolute',
-    left: 3,
-    right: 3,
-    top: 7,
-    bottom: -4,
-    borderRadius: PILL_RADIUS,
-    opacity: 0.94,
-  },
-
-  pillSurface: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: PILL_RADIUS,
     overflow: 'hidden',
-    borderWidth: 1.25,
+    borderWidth: 1,
+    zIndex: 1,
   },
 
   pillHighlight: {
     position: 'absolute',
     left: 5,
     right: 5,
-    top: 4,
-    height: '43%',
+    top: 5,
+    bottom: 5,
     borderRadius: PILL_RADIUS - 5,
-  },
-
-  pillBottomShade: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: '38%',
   },
 
   item: {
@@ -903,7 +849,7 @@ const styles = StyleSheet.create({
 
   label: {
     marginTop: 3,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
   },
 });

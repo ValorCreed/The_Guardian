@@ -6,11 +6,11 @@
     "orientation": "portrait",
     "scheme": "theguardian",
     "userInterfaceStyle": "automatic",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "ios": {
       "icon": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
-      "runtimeVersion": {
-        "policy": "appVersion"
-      },
       "config": {
         "usesNonExemptEncryption": false
       }
@@ -23,7 +23,6 @@
       },
       "predictiveBackGestureEnabled": true,
       "package": "com.vault.theguardian",
-      "runtimeVersion": "1.0.0",
       "allowBackup": false,
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize",
@@ -70,7 +69,9 @@
           "color": "#0B8FAC",
           "defaultChannel": "guardian-security"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
