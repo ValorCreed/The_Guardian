@@ -6,8 +6,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.task.TaskExecutor;
-import org.springframework.core.task.TaskRejectedException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -16,6 +14,8 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 
 @Component
 public class NotificationClient {
@@ -24,13 +24,13 @@ public class NotificationClient {
 
     private final RestClient restClient;
     private final String internalServiceKey;
-    private final TaskExecutor notificationDispatchExecutor;
+    private final Executor notificationDispatchExecutor;
 
     public NotificationClient(
             RestClient.Builder builder,
             @Value("${services.notification.url}") String notificationServiceUrl,
             @Value("${internal.service.key}") String internalServiceKey,
-            @Qualifier("notificationDispatchExecutor") TaskExecutor notificationDispatchExecutor
+            @Qualifier("notificationDispatchExecutor") Executor notificationDispatchExecutor
     ) {
         this.restClient = builder.baseUrl(notificationServiceUrl).build();
         this.internalServiceKey = internalServiceKey;
@@ -335,30 +335,23 @@ public class NotificationClient {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    dispatch(request);
+                    dispatchAsync(request);
                 }
             });
             return;
         }
 
-        dispatch(request);
+        dispatchAsync(request);
     }
 
-    private void dispatch(CreateNotificationRequest request) {
+    private void dispatchAsync(CreateNotificationRequest request) {
         try {
             notificationDispatchExecutor.execute(() -> publish(request));
-        } catch (TaskRejectedException exception) {
-            /*
-             * Notifications are deliberately best-effort. A busy or sleeping
-             * notification service must never hold up login, registration,
-             * vault writes, payments, or recovery.
-             */
-            log.warn(
-                    "Notification dispatch queue rejected event type={} userId={}: {}",
-                    request.type(),
-                    request.userId(),
-                    exception.getMessage()
-            );
+        } catch (RejectedExecutionException exception) {
+            // Notifications are intentionally best-effort. Never make auth/login wait for
+            // or fail because the Notification Service is cold or temporarily unavailable.
+            log.warn("Notification dispatch queue rejected event type={} userId={}: {}",
+                    request.type(), request.userId(), exception.getMessage());
         }
     }
 

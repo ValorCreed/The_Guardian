@@ -62,10 +62,6 @@ services:
         value: https://guardian-vault-core.onrender.com
       - key: ACCESS_SHARING_SERVICE_URL
         value: https://guardian-vault-sharing.onrender.com
-      - key: AUTH_HTTP_CONNECT_TIMEOUT
-        value: 10s
-      - key: AUTH_HTTP_READ_TIMEOUT
-        value: 75s
       - key: SPRING_PROFILES_ACTIVE
         value: prod
       - key: SERVER_ERROR_INCLUDE_STACKTRACE
@@ -380,17 +376,23 @@ services:
         value: https://guardian-vault-security.onrender.com
       - key: SUPPORT_SERVICE_URL
         value: https://guardian-vault-support.onrender.com
-      - key: GATEWAY_DOWNSTREAM_READINESS_ENABLED
+      - key: EMAIL_SERVICE_URL
+        value: https://guardian-vault-email.onrender.com
+      - key: GATEWAY_COLD_START_ENABLED
         value: "true"
-      - key: GATEWAY_DOWNSTREAM_READY_TTL_MS
+      - key: GATEWAY_PREWARM_ALL_ON_STARTUP
+        value: "true"
+      - key: GATEWAY_READY_TTL_MS
         value: "600000"
-      - key: GATEWAY_DOWNSTREAM_STARTUP_TIMEOUT_MS
-        value: "90000"
-      - key: GATEWAY_DOWNSTREAM_PROBE_TIMEOUT_MS
-        value: "12000"
-      - key: GATEWAY_DOWNSTREAM_MIN_BACKOFF_MS
-        value: "750"
-      - key: GATEWAY_DOWNSTREAM_MAX_BACKOFF_MS
+      - key: GATEWAY_COLD_START_MAX_WAIT_MS
+        value: "120000"
+      - key: GATEWAY_COLD_START_PROBE_TIMEOUT_MS
+        value: "70000"
+      - key: GATEWAY_COLD_START_CONNECT_TIMEOUT_MS
+        value: "10000"
+      - key: GATEWAY_COLD_START_INITIAL_BACKOFF_MS
+        value: "1000"
+      - key: GATEWAY_COLD_START_MAX_BACKOFF_MS
         value: "5000"
       - key: SPRING_PROFILES_ACTIVE
         value: prod

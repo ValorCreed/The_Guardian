@@ -1,0 +1,333 @@
+package com.vault.gateway.coldstart;
+
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Locale;
+import java.util.Map;
+import java.util.OptionalLong;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
+
+@Component
+public class DownstreamWakeCoordinator {
+    private static final Logger log = LoggerFactory.getLogger(DownstreamWakeCoordinator.class);
+    private static final String WAKE_USER_AGENT = "Guardian-Gateway-ColdStart/1.0";
+
+    public record WakeResult(
+            boolean ready,
+            int lastStatus,
+            int attempts,
+            long elapsedMs,
+            String detail
+    ) {
+    }
+
+    private final HttpClient httpClient;
+    private final ExecutorService executor;
+    private final Map<String, CompletableFuture<WakeResult>> inFlight = new ConcurrentHashMap<>();
+    private final Map<String, Instant> readyUntil = new ConcurrentHashMap<>();
+
+    private final boolean enabled;
+    private final long readyTtlMs;
+    private final long maxWaitMs;
+    private final long probeTimeoutMs;
+    private final long initialBackoffMs;
+    private final long maxBackoffMs;
+
+    public DownstreamWakeCoordinator(
+            @Value("${guardian.cold-start.enabled:false}") boolean enabled,
+            @Value("${guardian.cold-start.ready-ttl-ms:600000}") long readyTtlMs,
+            @Value("${guardian.cold-start.max-wait-ms:120000}") long maxWaitMs,
+            @Value("${guardian.cold-start.probe-timeout-ms:70000}") long probeTimeoutMs,
+            @Value("${guardian.cold-start.connect-timeout-ms:10000}") long connectTimeoutMs,
+            @Value("${guardian.cold-start.initial-backoff-ms:1000}") long initialBackoffMs,
+            @Value("${guardian.cold-start.max-backoff-ms:5000}") long maxBackoffMs
+    ) {
+        this.enabled = enabled;
+        this.readyTtlMs = Math.max(1_000L, readyTtlMs);
+        this.maxWaitMs = Math.max(10_000L, maxWaitMs);
+        this.probeTimeoutMs = Math.max(1_000L, probeTimeoutMs);
+        this.initialBackoffMs = Math.max(250L, initialBackoffMs);
+        this.maxBackoffMs = Math.max(this.initialBackoffMs, maxBackoffMs);
+        this.executor = Executors.newVirtualThreadPerTaskExecutor();
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofMillis(Math.max(1_000L, connectTimeoutMs)))
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .executor(executor)
+                .build();
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public boolean isRecentlyReady(DownstreamServiceRegistry.DownstreamService service) {
+        Instant until = readyUntil.get(service.name());
+        return until != null && Instant.now().isBefore(until);
+    }
+
+    public CompletableFuture<WakeResult> wakeAsync(
+            DownstreamServiceRegistry.DownstreamService service,
+            String requestId,
+            String trigger
+    ) {
+        if (!enabled) {
+            return CompletableFuture.completedFuture(new WakeResult(true, 0, 0, 0, "cold-start-guard-disabled"));
+        }
+
+        if (isRecentlyReady(service)) {
+            return CompletableFuture.completedFuture(new WakeResult(true, 200, 0, 0, "recently-ready"));
+        }
+
+        CompletableFuture<WakeResult> created = new CompletableFuture<>();
+        CompletableFuture<WakeResult> existing = inFlight.putIfAbsent(service.name(), created);
+
+        if (existing != null) {
+            log.info(
+                    "GW-WAKE-JOIN requestId={} service={} trigger={} state=in-flight",
+                    safe(requestId), service.name(), safe(trigger)
+            );
+            return existing;
+        }
+
+        executor.submit(() -> {
+            try {
+                created.complete(wakeLoop(service, requestId, trigger));
+            } catch (Throwable throwable) {
+                log.error(
+                        "GW-WAKE-CRASH requestId={} service={} trigger={} errorType={} message={}",
+                        safe(requestId), service.name(), safe(trigger),
+                        throwable.getClass().getSimpleName(), safeMessage(throwable.getMessage())
+                );
+                created.complete(new WakeResult(false, 0, 0, 0, throwable.getClass().getSimpleName()));
+            } finally {
+                inFlight.remove(service.name(), created);
+            }
+        });
+
+        return created;
+    }
+
+    public WakeResult awaitReady(
+            DownstreamServiceRegistry.DownstreamService service,
+            String requestId,
+            String trigger
+    ) {
+        try {
+            return wakeAsync(service, requestId, trigger)
+                    .get(maxWaitMs + probeTimeoutMs + 5_000L, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException interruptedException) {
+            Thread.currentThread().interrupt();
+            return new WakeResult(false, 0, 0, 0, "interrupted");
+        } catch (Exception exception) {
+            log.warn(
+                    "GW-WAKE-AWAIT-FAILED requestId={} service={} errorType={} message={}",
+                    safe(requestId), service.name(), exception.getClass().getSimpleName(),
+                    safeMessage(exception.getMessage())
+            );
+            return new WakeResult(false, 0, 0, 0, exception.getClass().getSimpleName());
+        }
+    }
+
+    private WakeResult wakeLoop(
+            DownstreamServiceRegistry.DownstreamService service,
+            String requestId,
+            String trigger
+    ) {
+        long startedAt = System.nanoTime();
+        long deadlineNanos = startedAt + TimeUnit.MILLISECONDS.toNanos(maxWaitMs);
+        int attempt = 0;
+        int lastStatus = 0;
+        String lastDetail = "not-started";
+
+        log.info(
+                "GW-WAKE-START requestId={} service={} trigger={} targetHost={} maxWaitMs={}",
+                safe(requestId), service.name(), safe(trigger),
+                safeHost(service.baseUri()), maxWaitMs
+        );
+
+        while (System.nanoTime() < deadlineNanos) {
+            attempt++;
+            ProbeResult probe = probe(service.healthUri(), requestId);
+            lastStatus = probe.status();
+            lastDetail = probe.detail();
+
+            if (probe.ready()) {
+                readyUntil.put(service.name(), Instant.now().plusMillis(readyTtlMs));
+                long elapsedMs = elapsedMs(startedAt);
+                log.info(
+                        "GW-WAKE-READY requestId={} service={} trigger={} attempt={} status={} elapsedMs={}",
+                        safe(requestId), service.name(), safe(trigger), attempt, probe.status(), elapsedMs
+                );
+                return new WakeResult(true, probe.status(), attempt, elapsedMs, "UP");
+            }
+
+            if (probe.permanentFailure()) {
+                long elapsedMs = elapsedMs(startedAt);
+                log.error(
+                        "GW-WAKE-PERMANENT-FAIL requestId={} service={} trigger={} attempt={} status={} elapsedMs={} detail={}",
+                        safe(requestId), service.name(), safe(trigger), attempt, probe.status(), elapsedMs,
+                        safeMessage(probe.detail())
+                );
+                return new WakeResult(false, probe.status(), attempt, elapsedMs, probe.detail());
+            }
+
+            long delayMs = computeDelayMs(attempt, probe.retryAfterMs());
+            long remainingMs = Math.max(0L, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime()));
+            delayMs = Math.min(delayMs, remainingMs);
+
+            log.warn(
+                    "GW-WAKE-RETRY requestId={} service={} trigger={} attempt={} status={} retryInMs={} remainingMs={} detail={}",
+                    safe(requestId), service.name(), safe(trigger), attempt, probe.status(), delayMs,
+                    remainingMs, safeMessage(probe.detail())
+            );
+
+            if (delayMs <= 0) {
+                break;
+            }
+
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException interruptedException) {
+                Thread.currentThread().interrupt();
+                return new WakeResult(false, lastStatus, attempt, elapsedMs(startedAt), "interrupted");
+            }
+        }
+
+        long elapsedMs = elapsedMs(startedAt);
+        log.error(
+                "GW-WAKE-TIMEOUT requestId={} service={} trigger={} attempts={} lastStatus={} elapsedMs={} detail={}",
+                safe(requestId), service.name(), safe(trigger), attempt, lastStatus, elapsedMs,
+                safeMessage(lastDetail)
+        );
+        return new WakeResult(false, lastStatus, attempt, elapsedMs, lastDetail);
+    }
+
+    private ProbeResult probe(URI healthUri, String requestId) {
+        HttpRequest request = HttpRequest.newBuilder(healthUri)
+                .timeout(Duration.ofMillis(probeTimeoutMs))
+                .header("Accept", "application/json")
+                .header("User-Agent", WAKE_USER_AGENT)
+                .header("X-Guardian-Request-Id", safe(requestId))
+                .GET()
+                .build();
+
+        try {
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            int status = response.statusCode();
+            String body = response.body() == null ? "" : response.body();
+            String normalized = body.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+            boolean actuatorUp = status >= 200
+                    && status < 300
+                    && normalized.contains("\"STATUS\":\"UP\"");
+
+            if (actuatorUp) {
+                return new ProbeResult(true, false, status, 0L, "UP");
+            }
+
+            boolean permanentFailure = status == 401 || status == 403 || status == 404;
+            long retryAfterMs = parseRetryAfterMillis(response);
+            String contentType = response.headers().firstValue("Content-Type").orElse("unknown");
+            String detail = "http=" + status
+                    + ",contentType=" + sanitize(contentType)
+                    + ",body=" + bodyPreview(body);
+            return new ProbeResult(false, permanentFailure, status, retryAfterMs, detail);
+        } catch (Exception exception) {
+            return new ProbeResult(
+                    false,
+                    false,
+                    0,
+                    0L,
+                    exception.getClass().getSimpleName() + ":" + safeMessage(exception.getMessage())
+            );
+        }
+    }
+
+    private long computeDelayMs(int attempt, long retryAfterMs) {
+        if (retryAfterMs > 0) {
+            return Math.min(Math.max(retryAfterMs, initialBackoffMs), 15_000L);
+        }
+
+        int exponent = Math.min(Math.max(attempt - 1, 0), 4);
+        long exponential = initialBackoffMs * (1L << exponent);
+        long base = Math.min(exponential, maxBackoffMs);
+        return base + ThreadLocalRandom.current().nextLong(0L, 251L);
+    }
+
+    private long parseRetryAfterMillis(HttpResponse<?> response) {
+        String value = response.headers().firstValue("Retry-After").orElse("").trim();
+        if (value.isEmpty()) {
+            return 0L;
+        }
+        try {
+            long seconds = Long.parseLong(value);
+            return TimeUnit.SECONDS.toMillis(Math.max(0L, seconds));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
+    }
+
+    private static long elapsedMs(long startedAtNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAtNanos);
+    }
+
+    private static String bodyPreview(String body) {
+        if (body == null || body.isBlank()) {
+            return "<empty>";
+        }
+        String singleLine = body.replaceAll("[\\r\\n\\t]+", " ").trim();
+        if (singleLine.length() > 180) {
+            singleLine = singleLine.substring(0, 180) + "...";
+        }
+        return sanitize(singleLine);
+    }
+
+    private static String safeHost(URI uri) {
+        if (uri == null) return "unknown";
+        String host = uri.getHost();
+        return host == null ? "unknown" : host;
+    }
+
+    private static String safe(String value) {
+        if (value == null || value.isBlank()) return "none";
+        return sanitize(value.length() > 120 ? value.substring(0, 120) : value);
+    }
+
+    private static String safeMessage(String value) {
+        if (value == null || value.isBlank()) return "none";
+        String clean = sanitize(value);
+        return clean.length() > 240 ? clean.substring(0, 240) + "..." : clean;
+    }
+
+    private static String sanitize(String value) {
+        return value == null ? "" : value.replaceAll("[\\r\\n\\t]", " ");
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdownNow();
+    }
+
+    private record ProbeResult(
+            boolean ready,
+            boolean permanentFailure,
+            int status,
+            long retryAfterMs,
+            String detail
+    ) {
+    }
+}

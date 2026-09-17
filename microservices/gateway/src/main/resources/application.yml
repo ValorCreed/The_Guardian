@@ -2,14 +2,10 @@ spring:
   application:
     name: api-gateway
 
-  # Spring Cloud Gateway Server Web MVC uses Spring Boot's RestClient
-  # infrastructure for downstream proxy calls. Render Free cold starts can
-  # legitimately take around a minute, so do not fail a routed request after
-  # only a few seconds.
   http:
     clients:
-      connect-timeout: 10s
-      read-timeout: 120s
+      connect-timeout: 15s
+      read-timeout: 150s
 
   cloud:
     gateway:
@@ -65,6 +61,24 @@ server:
   address: 0.0.0.0
   port: ${PORT:8080}
 
+# Render Free services can take about a minute to resume from idle.
+# The gateway proactively wakes all downstream services when it starts, then
+# waits for the exact route target before forwarding the user's real request.
+guardian:
+  cold-start:
+    enabled: ${GATEWAY_COLD_START_ENABLED:false}
+    prewarm-all-on-startup: ${GATEWAY_PREWARM_ALL_ON_STARTUP:false}
+    ready-ttl-ms: ${GATEWAY_READY_TTL_MS:600000}
+    max-wait-ms: ${GATEWAY_COLD_START_MAX_WAIT_MS:120000}
+    probe-timeout-ms: ${GATEWAY_COLD_START_PROBE_TIMEOUT_MS:70000}
+    connect-timeout-ms: ${GATEWAY_COLD_START_CONNECT_TIMEOUT_MS:10000}
+    initial-backoff-ms: ${GATEWAY_COLD_START_INITIAL_BACKOFF_MS:1000}
+    max-backoff-ms: ${GATEWAY_COLD_START_MAX_BACKOFF_MS:5000}
+
+logging:
+  level:
+    com.vault.gateway: INFO
+
 management:
   endpoints:
     web:
@@ -73,22 +87,3 @@ management:
   endpoint:
     health:
       show-details: never
-
-guardian:
-  gateway:
-    readiness:
-      enabled: ${GATEWAY_DOWNSTREAM_READINESS_ENABLED:true}
-      # A target cannot have spun down within this window after a successful
-      # probe. This keeps normal traffic fast while still detecting Render
-      # sleep before the 15-minute idle boundary.
-      ready-ttl-ms: ${GATEWAY_DOWNSTREAM_READY_TTL_MS:600000}
-      # Render documents that a Free service cold start can take about a minute.
-      startup-timeout-ms: ${GATEWAY_DOWNSTREAM_STARTUP_TIMEOUT_MS:90000}
-      probe-timeout-ms: ${GATEWAY_DOWNSTREAM_PROBE_TIMEOUT_MS:12000}
-      min-backoff-ms: ${GATEWAY_DOWNSTREAM_MIN_BACKOFF_MS:750}
-      max-backoff-ms: ${GATEWAY_DOWNSTREAM_MAX_BACKOFF_MS:5000}
-
-logging:
-  level:
-    com.vault.gateway: INFO
-    org.springframework.cloud.gateway: INFO
