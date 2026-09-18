@@ -984,9 +984,6 @@ const loadItem = async () => {
                 <Text style={styles.title}>
                   {getFriendlyVaultTitle(item.title, item.website, 'Saved login')}
                 </Text>
-                <Text style={styles.subtitle}>
-                  {getFriendlyVaultSubtitle(undefined, item.website, 'Login details')}
-                </Text>
 
                 <View style={styles.infoCard}>
                   <InfoRow label="Username" value={item.usernameValue || ''} onCopy={() => copyValue('Username', item.usernameValue)} styles={styles} C={C} />
@@ -1606,7 +1603,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       shadowRadius: 18,
       shadowOffset: { width: 0, height: 11 },
       elevation: 10,},
-    headerTitle: { fontSize: 18, fontWeight: '800', color: C.text },
+    headerTitle: { fontSize: 8, fontWeight: '800', color: C.text },
     content: { paddingHorizontal: 20, alignItems: 'center' },
     estateActionWrap: {
       paddingHorizontal: 20,
@@ -1661,7 +1658,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
  width: 100, height: 100, borderRadius: 76, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
-    title: { fontSize: 24, fontWeight: '800', color: C.text, textAlign: 'center' },
+    title: { fontSize: 27, fontWeight: '800', color: C.text, textAlign: 'center' , marginBottom: 22 },
     documentTitle: { marginBottom: 22 },
     subtitle: { fontSize: 14, color: C.textSecondary, textAlign: 'center', marginTop: 4, marginBottom: 22 },
     infoCard: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 18
