@@ -14,7 +14,6 @@ import {
   Platform,
   Pressable,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 import { BlurView } from 'expo-blur';
@@ -443,7 +442,7 @@ function FloatingTabItem({
       >
         <Ionicons
           name={(active ? tab.activeIcon : tab.icon) as any}
-          size={23}
+          size={29}
           color={contentColor}
           style={{
             textShadowColor: contentShadow,
@@ -452,21 +451,6 @@ function FloatingTabItem({
           }}
         />
 
-        <Text
-          numberOfLines={1}
-          maxFontSizeMultiplier={1.2}
-          style={[
-            styles.label,
-            {
-              color: contentColor,
-              textShadowColor: contentShadow,
-              textShadowOffset: { width: 0, height: 1 },
-              textShadowRadius: 2,
-            },
-          ]}
-        >
-          {tab.label}
-        </Text>
       </Animated.View>
     </Pressable>
   );
@@ -847,9 +831,4 @@ const styles = StyleSheet.create({
     minHeight: 60,
   },
 
-  label: {
-    marginTop: 3,
-    fontSize: 11,
-    fontWeight: '900',
-  },
 });

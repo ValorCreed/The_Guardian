@@ -54,9 +54,9 @@ export default function TermsOfServiceScreen() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.kicker}>LEGAL</Text>
+        {/* <Text style={styles.kicker}>LEGAL</Text> */}
         <Text style={styles.title}>Terms of Service</Text>
-        <Text style={styles.updated}>Last updated: July 2026</Text>
+        <Text style={styles.updated}>Last updated: September 2026</Text>
 
         {/* <View style={styles.noticeCard}>
           <Text style={styles.noticeText}>
@@ -90,15 +90,15 @@ const makeStyles = (C: any) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: C.background },
   scrollContent: { paddingHorizontal: 20, paddingTop: 112, paddingBottom: 150 },
   kicker: { color: C.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, marginBottom: 8 },
-  title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.7 },
-  updated: { color: C.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 20 },
+  title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.7 ,textAlign: 'center' },
+  updated: { color: C.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 6, marginBottom: 20,textAlign: 'center' },
   noticeCard: {
     shadowColor: '#000000',
     shadowOpacity: 0.2,
     shadowRadius: 22,
     elevation: 10,
     shadowOffset: { width: 0, height: 12 },
- backgroundColor: C.alertWarningBg, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 18 },
+ backgroundColor: C.alertWarningBg, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 18 },
   noticeText: { color: C.text, fontSize: 13, lineHeight: 20, fontWeight: '700' },
   card: {
     shadowColor: '#000000',
@@ -106,14 +106,14 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowRadius: 22,
     elevation: 10,
     shadowOffset: { width: 0, height: 12 },
- flexDirection: 'row', backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 14 },
+ flexDirection: 'row', backgroundColor: C.backgroundElement, borderRadius: 29, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 14 },
   cardIcon: {
     shadowColor: '#000000',
     shadowOpacity: 0.2,
     shadowRadius: 22,
     elevation: 10,
     shadowOffset: { width: 0, height: 12 },
- width: 42, height: 42, borderRadius: 16, backgroundColor: C.actionCard || C.backgroundSelected, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+ width: 42, height: 42, borderRadius: 18, backgroundColor: C.actionCard || C.backgroundSelected, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
   sectionTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginBottom: 5 },
   body: { color: C.textSecondary, fontSize: 13, lineHeight: 20, fontWeight: '600' },
   button: {
@@ -122,6 +122,6 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowRadius: 18,
     elevation: 10,
     shadowOffset: { width: 0, height: 11 },
- height: 54, borderRadius: 20, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+ height: 54, borderRadius: 72, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
   buttonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900' },
 });

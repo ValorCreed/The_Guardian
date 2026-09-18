@@ -99,7 +99,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 12,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 16,

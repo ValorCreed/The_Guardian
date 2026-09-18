@@ -22,6 +22,7 @@ import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelab
 import { encryptJson } from '../utils/vaultcrypto';
 import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -190,20 +191,18 @@ export default function AddNoteScreen() {
           contentContainerStyle={styles.scrollContent}
         >
           <View style={styles.header}>
-            <View style={styles.noteIcon}>
+            {/* <View style={styles.noteIcon}>
               <Ionicons name="reader-outline" size={26} color={C.primary} />
-            </View>
+            </View> */}
             <View style={{ flex: 1 }}>
               <Text style={styles.title}>Add SecureNote</Text>
             </View>
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.label}>Title</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="Gmail recovery codes"
-              placeholderTextColor={C.tabInactive}
+              label="Title"
               value={title}
               onChangeText={setTitle}
             />
@@ -238,11 +237,9 @@ export default function AddNoteScreen() {
               />
             </View>
 
-            <Text style={styles.label}>SecureNote</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.noteInput}
-              placeholder="Write your private note here..."
-              placeholderTextColor={C.tabInactive}
+              label="SecureNote"
               value={content}
               onChangeText={setContent}
               multiline
@@ -282,8 +279,8 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 56, height: 56, borderRadius: 28, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
-    title: { color: C.text, fontSize: 25, fontWeight: '900' },
+ width: 56, height: 56, borderRadius: 30, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    title: { color: C.text, fontSize: 25, fontWeight: '900' , textAlign: 'center' },
     subTitle: { color: C.textSecondary, fontSize: 13, marginTop: 3, fontWeight: '700' },
     form: { paddingHorizontal: 20 },
     label: { fontSize: 14, color: C.text, fontWeight: '800', marginBottom: 8 },
@@ -293,7 +290,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
+ backgroundColor: C.backgroundElement, borderRadius: 40, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
     categoryRow: { gap: 8, paddingBottom: 18 },
     categoryChip: {
       shadowColor: '#000000',
@@ -311,7 +308,7 @@ const makeStyles = (C: ThemeColors) =>
  backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
-    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
+    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 40, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
       ,shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,
@@ -325,8 +322,8 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
-    noticeBox: { backgroundColor: C.actionCard, borderRadius: 16, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20
+ minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 27, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
+    noticeBox: { backgroundColor: C.actionCard, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -342,7 +339,7 @@ const makeStyles = (C: ThemeColors) =>
     saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '900' },
     disabledBtn: { opacity: 0.7 },
     lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingBottom: 40 },
-    noteIconLarge: { width: 86, height: 86, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+    noteIconLarge: { width: 86, height: 86, borderRadius: 32, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
     lockedTitle: { color: C.text, fontSize: 30, fontWeight: '900', marginBottom: 10 },
     lockedSubtitle: { color: C.textSecondary, fontSize: 15, lineHeight: 23, marginBottom: 24 },
     notNowBtn: {

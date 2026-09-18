@@ -38,6 +38,7 @@ import {
   hapticSuccess,
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type DocumentOption = {
   id: number;
@@ -326,10 +327,9 @@ export default function NewMemberScreen() {
         <Text style={styles.label}>Member email</Text>
         <View style={styles.inputBox}>
           <Mail size={20} color={C.textSecondary} />
-          <TextInput
+          <FloatingLabelInput
             style={styles.input}
-            placeholder="family@example.com"
-            placeholderTextColor={C.tabInactive}
+            label="Family member email"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -498,7 +498,7 @@ const makeStyles = (C: any) =>
     iconBox: {
       width: 86,
       height: 86,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -516,7 +516,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       paddingHorizontal: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -537,7 +537,7 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 22,
       flexDirection: 'row',
       alignItems: 'center',
@@ -552,7 +552,7 @@ const makeStyles = (C: any) =>
     loadingText: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
     itemsCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',

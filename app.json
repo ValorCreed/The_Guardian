@@ -6,9 +6,7 @@
     "orientation": "portrait",
     "scheme": "theguardian",
     "userInterfaceStyle": "automatic",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "4.0.0",
     "ios": {
       "icon": "./src/assets/GuardianAdaptiveForeground_safe_50.png",
       "config": {

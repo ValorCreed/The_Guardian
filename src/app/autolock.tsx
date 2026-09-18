@@ -136,9 +136,9 @@ export default function AutoLockScreen() {
 
         <Text style={styles.title}>Auto-lock</Text>
 
-        <Text style={styles.subtitle}>
+        {/* <Text style={styles.subtitle}>
           Auto-lock protects your vault when you leave the app.
-        </Text>
+        </Text> */}
 
         {/* <View style={styles.infoCard}>
           <InfoRow
@@ -263,7 +263,7 @@ const makeStyles = (C: any) =>
 
       width: 82,
       height: 82,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -286,7 +286,7 @@ const makeStyles = (C: any) =>
 
     infoCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -313,7 +313,7 @@ const makeStyles = (C: any) =>
 
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: 24,
       backgroundColor: C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
@@ -350,7 +350,7 @@ const makeStyles = (C: any) =>
 
     optionsCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -426,7 +426,7 @@ const makeStyles = (C: any) =>
 
     doneButton: {
       height: 56,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',

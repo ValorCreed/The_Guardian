@@ -19,6 +19,7 @@ import { api, saveLoginSession } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppAlert } from '../context/AppAlertContext';
 import { useAppTheme } from '../context/ThemeContext';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const AUTO_VERIFY_DELAY_MS = 260;
 
@@ -196,20 +197,22 @@ export default function TwoFactorScreen() {
               We sent a 6-digit login code to {email || 'your email'}. Enter it below to continue.
             </Text>
 
-            <TextInput
+            <FloatingLabelInput
               ref={inputRef}
+              label="Verification code"
               value={code}
               onChangeText={handleCodeChange}
-              placeholder="000000"
-              placeholderTextColor={C.tabInactive}
               keyboardType="number-pad"
-              textContentType="oneTimeCode"
               autoComplete="one-time-code"
+              importantForAutofill="yes"
               maxLength={6}
-              style={styles.input}
               textAlign="center"
               editable={!loading}
               autoFocus
+              containerStyle={styles.codeField}
+              inputStyle={styles.codeInputText}
+              accessibilityLabel="Verification code"
+              accessibilityHint="Enter the six digit code sent to your email"
             />
 
             <Text style={styles.autoVerifyText}>
@@ -267,7 +270,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       width: '100%',
       maxWidth: 460,
       backgroundColor: C.backgroundElement,
-      borderRadius: 30,
+      borderRadius: 32,
       borderWidth: 1,
       borderColor: C.border,
       paddingHorizontal: 22,
@@ -308,23 +311,27 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       lineHeight: 22,
       marginBottom: 24,
     },
-    input: {
+    codeField: {
       width: '100%',
-      height: 70,
-      borderWidth: 1,
-      borderColor: C.inputBorder || C.border,
+      minHeight: 72,
+      borderRadius: 22,
       backgroundColor: C.inputBackground || C.backgroundElement,
-      borderRadius: 20,
-      paddingHorizontal: 16,
-      fontSize: 28,
-      fontWeight: '800',
-      letterSpacing: 10,
-      color: C.text,
       shadowColor: '#000000',
       shadowOffset: { width: 0, height: 7 },
       shadowOpacity: isOled ? 0.34 : isDark ? 0.20 : 0.06,
       shadowRadius: 12,
       elevation: 3,
+      marginBottom: 0,
+    },
+
+    codeInputText: {
+      minHeight: 72,
+      fontSize: 28,
+      fontWeight: '800',
+      letterSpacing: 10,
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 5,
     },
     autoVerifyText: {
       color: C.textSecondary,
@@ -339,7 +346,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       minHeight: 56,
       backgroundColor: C.backgroundbutton || C.primary,
       paddingVertical: 16,
-      borderRadius: 18,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: C.primary,

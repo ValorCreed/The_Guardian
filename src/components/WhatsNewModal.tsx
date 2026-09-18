@@ -88,7 +88,7 @@ export default function WhatsNewModal({ visible, onClose }: WhatsNewModalProps) 
               </View>
 
               <View style={styles.versionPill}>
-                <Ionicons name="sparkles" size={13} color="#BBF7D0" />
+                
                 <Text style={styles.versionText}>{WHATS_NEW_VERSION}</Text>
               </View>
 
@@ -116,7 +116,7 @@ export default function WhatsNewModal({ visible, onClose }: WhatsNewModalProps) 
             ))}
 
             <View style={styles.footerNote}>
-              <Ionicons name="shield-checkmark-outline" size={18} color={C.primary} />
+              {/* <Ionicons name="shield-checkmark-outline" size={18} color={C.primary} /> */}
               <Text style={styles.footerNoteText}>{WHATS_NEW_FOOTER_MESSAGE}</Text>
             </View>
           </ScrollView>
@@ -168,7 +168,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       maxWidth: 430,
       maxHeight: '88%',
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 30,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(6,95,70,0.12)',
@@ -311,7 +311,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       flexDirection: 'row',
       gap: 10,
       backgroundColor: isDark ? 'rgba(16,185,129,0.09)' : '#E8F2EC',
-      borderRadius: 16,
+      borderRadius: 18,
       padding: 13,
       borderWidth: 1,
       borderColor: isDark ? 'rgba(16,185,129,0.14)' : 'rgba(6,95,70,0.10)',
@@ -331,7 +331,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       marginTop: 12,
       marginBottom: Platform.OS === 'ios' ? 20 : 18,
       backgroundColor: C.backgroundbutton || C.primary,
-      borderRadius: 18,
+      borderRadius: 20,
       minHeight: 52,
       flexDirection: 'row',
       alignItems: 'center',

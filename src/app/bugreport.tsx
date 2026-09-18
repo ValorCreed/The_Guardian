@@ -30,6 +30,7 @@ import {
   hapticToggleOn,
   hapticWarning,
 } from '../utils/haptics';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const CATEGORIES = ['Vault', 'Documents', 'Family', 'Security', 'Payment', 'UI', 'Other'];
 const SEVERITIES = ['Low', 'Medium', 'High', 'Critical'];
@@ -135,18 +136,16 @@ export default function BugReportScreen() {
           automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         >
           <Text style={styles.title}>Report a Bug</Text>
-          <Text style={styles.subtitle}>
+          {/* <Text style={styles.subtitle}>
             Describe the issue without including passwords, card numbers, recovery codes, notes, or document contents.
-          </Text>
+          </Text> */}
 
           <View style={styles.card}>
-            <Text style={styles.label}>Bug title</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
               value={title}
               onChangeText={setTitle}
-              placeholder="Document download button freezes"
-              placeholderTextColor={C.textSecondary}
+              label="Bug title"
               maxLength={140}
             />
 
@@ -184,25 +183,22 @@ export default function BugReportScreen() {
               })}
             </View>
 
-            <Text style={styles.label}>What happened?</Text>
-            <TextInput
+            <FloatingLabelInput
               style={[styles.input, styles.textArea]}
               value={description}
               onChangeText={setDescription}
-              placeholder="Describe the bug clearly..."
-              placeholderTextColor={C.textSecondary}
+              label="What happened?"
               multiline
               textAlignVertical="top"
               maxLength={4000}
             />
 
-            <Text style={styles.label}>Steps to reproduce</Text>
-            <TextInput
+            <Text></Text>
+            <FloatingLabelInput
               style={[styles.input, styles.textArea]}
               value={stepsToReproduce}
               onChangeText={setStepsToReproduce}
-              placeholder={"1. Open Vault \n2. Tap Documents \n3. ..."}
-              placeholderTextColor={C.textSecondary}
+              label={"Steps to reproduce (optional)"}
               multiline
               textAlignVertical="top"
               maxLength={4000}
@@ -270,6 +266,8 @@ const makeStyles = (C: any) => StyleSheet.create({
     fontSize: 34,
     fontWeight: '900',
     letterSpacing: -0.7,
+    textAlign: 'center',
+    marginBottom: 16,
   },
   subtitle: {
     color: C.textSecondary,
@@ -281,7 +279,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   card: {
     backgroundColor: C.backgroundElement,
-    borderRadius: 28,
+    borderRadius: 39,
     borderWidth: 1,
     borderColor: C.border,
     padding: 17,
@@ -300,7 +298,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   input: {
     minHeight: 52,
-    borderRadius: 18,
+    borderRadius: 30,
     borderWidth: 1,
     borderColor: C.inputBorder || C.border,
     backgroundColor: C.inputBackground || C.surface,
@@ -334,7 +332,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   chip: {
     paddingHorizontal: 13,
     paddingVertical: 10,
-    borderRadius: 15,
+    borderRadius: 55,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.background,
@@ -369,7 +367,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 14,
     paddingVertical: 14,
-    borderRadius: 20,
+    borderRadius: 32,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.background,
@@ -396,7 +394,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   submitButton: {
     height: 58,
-    borderRadius: 21,
+    borderRadius: 51,
     backgroundColor: C.primary,
     alignItems: 'center',
     justifyContent: 'center',
@@ -423,7 +421,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   secondaryButton: {
     height: 54,
-    borderRadius: 19,
+    borderRadius: 51,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 12,

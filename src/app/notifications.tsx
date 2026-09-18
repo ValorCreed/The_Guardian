@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
+  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -20,6 +21,9 @@ import PulsingSkeleton from '../components/PulsingSkeleton';
 import { setGuardianAppBadgeCount } from '../services/pushNotifications';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 import { humanizeVaultPresentationText } from '../utils/vaultPresentation';
+import FloatingActionBar from '../components/FloatingActionBar';
+import FloatingHeaderActions from '../components/FloatingHeaderActions';
+import { hapticSelection } from '../utils/haptics';
 
 const HOME_NEEDS_SYNC_KEY = 'homeNeedsInitialSync';
 
@@ -185,7 +189,14 @@ export default function NotificationsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [workingId, setWorkingId] = useState<number | string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedNotificationId, setSelectedNotificationId] = useState<number | string | null>(null);
+
+  const selectedNotification = useMemo(
+    () => notifications.find((item) => item.id === selectedNotificationId) || null,
+    [notifications, selectedNotificationId]
+  );
 
   const unreadCount = useMemo(
     () => notifications.filter((item) => !item.read).length,
@@ -330,6 +341,72 @@ export default function NotificationsScreen() {
     }
   };
 
+  const deleteAllNotifications = () => {
+    if (deletingAll || notifications.length === 0) return;
+
+    screenAlert(
+      'Delete all notifications?',
+      'This removes every notification currently in your notification center. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete all',
+          style: 'destructive',
+          onPress: async () => {
+            const snapshot = [...notifications];
+
+            try {
+              setDeletingAll(true);
+              setSelectedNotificationId(null);
+
+              const results = await Promise.allSettled(
+                snapshot.map((notification) =>
+                  api.deleteNotification(notification.id)
+                )
+              );
+
+              const successfulIds = new Set<number | string>();
+              results.forEach((result, index) => {
+                if (result.status === 'fulfilled') {
+                  successfulIds.add(snapshot[index].id);
+                }
+              });
+
+              const remaining = snapshot.filter(
+                (notification) => !successfulIds.has(notification.id)
+              );
+              const remainingUnread = remaining.filter(
+                (notification) => !notification.read
+              ).length;
+
+              setNotifications(remaining);
+
+              await Promise.all([
+                syncHomeNotificationSnapshot(remainingUnread),
+                updateAppBadge(remainingUnread),
+              ]);
+
+              const failedCount = results.length - successfulIds.size;
+              if (failedCount > 0) {
+                screenAlert(
+                  'Some notifications remain',
+                  `${failedCount} notification${failedCount === 1 ? '' : 's'} could not be deleted. Pull down to refresh and try again.`
+                );
+              }
+            } catch (error: any) {
+              screenAlert(
+                'Delete all failed',
+                error?.message || 'Please try again.'
+              );
+            } finally {
+              setDeletingAll(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const deleteNotification = (notification: AppNotification) => {
     screenAlert(
       'Delete notification?',
@@ -409,21 +486,6 @@ export default function NotificationsScreen() {
             </Text>
           </View>
 
-          <View style={styles.headerActions}>
-            <TouchableOpacity
-              style={[styles.markAllButton, (unreadCount === 0 || markingAll) && styles.disabledButton]}
-              activeOpacity={0.82}
-              onPress={markAllAsRead}
-              disabled={unreadCount === 0 || markingAll}
-            >
-              {markingAll ? (
-                <ActivityIndicator size="small" color={C.primary} />
-              ) : (
-                <Ionicons name="checkmark-done-outline" size={17} color={C.primary} />
-              )}
-              <Text style={styles.markAllText}>Mark all</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
         {loading ? (
@@ -465,27 +527,40 @@ export default function NotificationsScreen() {
                 humanizeVaultPresentationText(item.title) || 'Guardian notification';
               const presentationMessage = humanizeVaultPresentationText(item.message);
 
-              const actionRoute = normalizeActionRoute(item.actionRoute);
+
+              const selected = selectedNotificationId === item.id;
 
               return (
-                <View
+                <Pressable
                   key={String(item.id)}
-                  style={[styles.notificationCard, !item.read && styles.unreadCard]}
-                  accessibilityRole="summary"
-                  accessibilityLabel={`${item.read ? '' : 'Unread notification. '}${presentationTitle}. ${presentationMessage}`}
-                >
-                  <TouchableOpacity
-                    style={styles.notificationOpenArea}
-                    activeOpacity={0.82}
-                    onPress={() => openNotification(item)}
-                    disabled={isWorking}
-                    accessibilityRole="button"
-                    accessibilityHint={
-                      actionRoute
-                        ? 'Marks this notification as read and opens the related screen.'
-                        : 'Marks this notification as read.'
+                  delayLongPress={500}
+                  onLongPress={() => {
+                    if (isWorking) return;
+                    hapticSelection();
+                    setSelectedNotificationId(item.id);
+                  }}
+                  onPress={() => {
+                    if (isWorking) return;
+
+                    if (selectedNotificationId !== null) {
+                      setSelectedNotificationId(selected ? null : item.id);
+                      return;
                     }
-                  >
+
+                    void openNotification(item);
+                  }}
+                  disabled={isWorking}
+                  style={[
+                    styles.notificationCard,
+                    !item.read && styles.unreadCard,
+                    selected && { borderColor: C.primary, borderWidth: 2 },
+                  ]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${item.read ? '' : 'Unread notification. '}${presentationTitle}. ${presentationMessage}`}
+                  accessibilityHint="Tap to open. Press and hold to select notification actions."
+                  accessibilityState={{ disabled: isWorking, selected }}
+                >
+                  <View style={styles.notificationOpenArea}>
                     <View style={[styles.notificationIcon, { backgroundColor: visual.iconBg }]}>
                       <Ionicons name={visual.icon as any} size={21} color={visual.iconColor} />
                     </View>
@@ -498,24 +573,14 @@ export default function NotificationsScreen() {
                       <Text style={styles.notificationMessage}>{presentationMessage}</Text>
                       <Text style={styles.notificationDate}>{formatNotificationDate(item.createdAt)}</Text>
                     </View>
-                  </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.deleteButton}
-                    activeOpacity={0.75}
-                    onPress={() => deleteNotification(item)}
-                    disabled={isWorking}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete notification: ${presentationTitle}`}
-                    accessibilityState={{ disabled: isWorking }}
-                  >
-                    {isWorking ? (
-                      <ActivityIndicator size="small" color={C.textSecondary} />
-                    ) : (
-                      <Ionicons name="trash-outline" size={18} color={C.textSecondary} />
-                    )}
-                  </TouchableOpacity>
-                </View>
+                    {selected ? (
+                      <View style={styles.deleteButton}>
+                        <Ionicons name="checkmark" size={18} color={C.primary} />
+                      </View>
+                    ) : null}
+                  </View>
+                </Pressable>
               );
             })}
           </View>
@@ -523,6 +588,92 @@ export default function NotificationsScreen() {
 
         <View style={{ height: 120 }} />
       </ScrollView>
+
+      <FloatingHeaderActions
+        visible={!loading && !loadError}
+        actions={[
+          {
+            key: 'mark-all-notifications',
+            icon: 'checkmark-done-outline',
+            tone: 'primary',
+            accessibilityLabel:
+              unreadCount === 0
+                ? 'All notifications are already read'
+                : 'Mark all notifications as read',
+            loading: markingAll,
+            disabled: unreadCount === 0 || deletingAll,
+            onPress: () => {
+              void markAllAsRead();
+            },
+          },
+          {
+            key: 'delete-all-notifications',
+            icon: 'trash-outline',
+            tone: 'danger',
+            accessibilityLabel:
+              notifications.length === 0
+                ? 'No notifications to delete'
+                : 'Delete all notifications',
+            loading: deletingAll,
+            disabled: notifications.length === 0 || markingAll,
+            onPress: deleteAllNotifications,
+          },
+        ]}
+      />
+
+      <FloatingActionBar
+        visible={Boolean(selectedNotification)}
+        onDismiss={() => setSelectedNotificationId(null)}
+        actions={
+          selectedNotification
+            ? [
+                ...(normalizeActionRoute(selectedNotification.actionRoute)
+                  ? [
+                      {
+                        key: 'open-notification',
+                        label: 'Open',
+                        icon: 'open-outline' as const,
+                        tone: 'primary' as const,
+                        loading: workingId === selectedNotification.id,
+                        onPress: () => {
+                          const selected = selectedNotification;
+                          setSelectedNotificationId(null);
+                          void openNotification(selected);
+                        },
+                      },
+                    ]
+                  : !selectedNotification.read
+                    ? [
+                        {
+                          key: 'read-notification',
+                          label: 'Mark read',
+                          icon: 'checkmark-done-outline' as const,
+                          tone: 'primary' as const,
+                          loading: workingId === selectedNotification.id,
+                          onPress: () => {
+                            const selected = selectedNotification;
+                            setSelectedNotificationId(null);
+                            void markAsRead(selected);
+                          },
+                        },
+                      ]
+                    : []),
+                {
+                  key: 'delete-notification',
+                  label: 'Delete',
+                  icon: 'trash-outline',
+                  tone: 'danger',
+                  loading: workingId === selectedNotification.id,
+                  onPress: () => {
+                    const selected = selectedNotification;
+                    setSelectedNotificationId(null);
+                    deleteNotification(selected);
+                  },
+                },
+              ]
+            : []
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -532,20 +683,12 @@ const makeStyles = (C: any) =>
     safeArea: { flex: 1, backgroundColor: C.background },
     scrollContent: { paddingTop: 88, paddingBottom: 24 },
     header: { paddingHorizontal: 20, marginBottom: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
-    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
     eyebrow: { color: C.primary, fontSize: 12, fontWeight: '900', letterSpacing: 1.2, textTransform: 'uppercase' },
     title: { color: C.text, fontSize: 31, fontWeight: '900', marginTop: 4 },
     subtitle: { color: C.textSecondary, fontSize: 14, marginTop: 4, lineHeight: 20 },
-    markAllButton: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 999, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border
-      ,shadowColor: '#000',
-      shadowOpacity: 0.25,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 11 },
-      elevation: 10,},
-    markAllText: { color: C.primary, fontSize: 12, fontWeight: '900' },
     disabledButton: { opacity: 0.55 },
     content: { paddingHorizontal: 20, gap: 12 },
-    notificationCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 10, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 8
+    notificationCard: { backgroundColor: C.backgroundElement, borderRadius: 22, padding: 10, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 8
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -564,14 +707,14 @@ const makeStyles = (C: any) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 42, height: 42, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+ width: 42, height: 42, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
     notificationContent: { flex: 1, minWidth: 0 },
     notificationTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
     notificationTitle: { color: C.text, fontSize: 15, fontWeight: '900', flex: 1, flexShrink: 1, lineHeight: 21 },
     unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary },
     notificationMessage: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginTop: 4, flexShrink: 1 },
     notificationDate: { color: C.tabInactive, fontSize: 11, fontWeight: '800', marginTop: 8 },
-    deleteButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center'
+    deleteButton: { width: 36, height: 36, borderRadius: 20, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center'
       ,shadowColor: '#000',
       shadowOpacity: 0.25,
       shadowRadius: 18,
@@ -580,7 +723,7 @@ const makeStyles = (C: any) =>
     errorCard: {
       marginHorizontal: 20,
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       padding: 24,
@@ -594,7 +737,7 @@ const makeStyles = (C: any) =>
     errorIcon: {
       width: 68,
       height: 68,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.alertWarningBg || C.backgroundSelected,
       borderWidth: 1,
       borderColor: `${C.warning}35`,
@@ -641,7 +784,7 @@ const makeStyles = (C: any) =>
       fontSize: 14,
       fontWeight: '900',
     },
-    emptyCard: { marginHorizontal: 20, backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 24, alignItems: 'center'
+    emptyCard: { marginHorizontal: 20, backgroundColor: C.backgroundElement, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 24, alignItems: 'center'
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -653,7 +796,7 @@ const makeStyles = (C: any) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 68, height: 68, borderRadius: 24, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+ width: 68, height: 68, borderRadius: 26, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
     emptyTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
     emptyText: { color: C.textSecondary, textAlign: 'center', marginTop: 8, lineHeight: 20 },
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999
@@ -662,7 +805,7 @@ const makeStyles = (C: any) =>
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
       elevation: 2,},
-    skeletonCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12
+    skeletonCard: { backgroundColor: C.backgroundElement, borderRadius: 22, padding: 14, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -674,7 +817,7 @@ const makeStyles = (C: any) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 42, height: 42, borderRadius: 16 },
+ width: 42, height: 42, borderRadius: 18 },
     skeletonTitle: { width: '50%', height: 14, marginBottom: 10 },
     skeletonMessage: { width: '88%', height: 12 },
   });

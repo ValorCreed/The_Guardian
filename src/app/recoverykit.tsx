@@ -25,6 +25,8 @@ import { hapticLight, hapticMedium, hapticWarning, hapticDelete } from '../utils
 import { api, RecoveryKitResponse, RecoveryKitStatusResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not created yet';
@@ -247,27 +249,15 @@ export default function RecoveryKitScreen() {
               <Text style={styles.fieldLabel}>Recovery key</Text>
               <Text selectable style={styles.secretBox}>{generatedKit.recoveryKey}</Text>
 
-              <View style={styles.buttonRow}>
-                <TouchableOpacity style={styles.secondaryAction} onPress={() => { hapticLight(); copyRecoveryKit(); }} activeOpacity={0.8}>
-                  <Ionicons name="copy-outline" size={18} color={C.primary} />
-                  <Text style={styles.secondaryActionText}>Copy</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.secondaryAction} onPress={() => { hapticMedium(); saveRecoveryKit(); }} activeOpacity={0.8}>
-                  <Ionicons name="download-outline" size={18} color={C.primary} />
-                  <Text style={styles.secondaryActionText}>Save</Text>
-                </TouchableOpacity>
-              </View>
             </View>
           )}
 
           <View style={styles.card}>
             <Text style={styles.fieldLabel}>Account password</Text>
             <View style={styles.passwordWrap}>
-              <TextInput
+              <FloatingLabelInput
                 style={styles.passwordInput}
-                placeholder="Enter your password"
-                placeholderTextColor={C.tabInactive}
+                label="Master password"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -281,15 +271,6 @@ export default function RecoveryKitScreen() {
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity style={[styles.primaryButton, generating && styles.disabled]} onPress={() => { hapticWarning(); generateKit(); }} disabled={generating} activeOpacity={0.85}>
-              {generating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{status?.created ? 'Replace recovery kit' : 'Generate recovery kit'}</Text>}
-            </TouchableOpacity>
-
-            {status?.created && (
-              <TouchableOpacity style={[styles.dangerButton, revoking && styles.disabled]} onPress={() => { hapticDelete(); revokeKit(); }} disabled={revoking} activeOpacity={0.8}>
-                {revoking ? <ActivityIndicator color={C.danger} /> : <Text style={styles.dangerButtonText}>Revoke current recovery kit</Text>}
-              </TouchableOpacity>
-            )}
           </View>
 
           <TouchableOpacity
@@ -309,14 +290,73 @@ export default function RecoveryKitScreen() {
             <Ionicons name="chevron-forward" size={19} color={C.tabInactive} />
           </TouchableOpacity>
 
-          <View style={styles.infoBox}>
+          {/* <View style={styles.infoBox}>
             <Ionicons name="shield-checkmark-outline" size={22} color={C.primary} />
             <Text style={styles.infoText}>
               The Guardian stores only a protected copy of your recovery key. The raw key is shown once and cannot be recovered later.
             </Text>
-          </View>
+          </View> */}
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <FloatingActionBar
+        visible={!loading}
+        actions={[
+          ...(generatedKit
+            ? [
+                {
+                  key: 'recovery-kit-copy',
+                  label: 'Copy',
+                  icon: 'copy-outline' as const,
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    hapticLight();
+                    void copyRecoveryKit();
+                  },
+                },
+                {
+                  key: 'recovery-kit-save',
+                  label: 'Save',
+                  icon: 'download-outline' as const,
+                  onPress: () => {
+                    hapticMedium();
+                    void saveRecoveryKit();
+                  },
+                },
+              ]
+            : []),
+          {
+            key: 'recovery-kit-generate',
+            label: generating
+              ? 'Generating'
+              : status?.created
+                ? 'Replace'
+                : 'Generate',
+            icon: status?.created ? 'refresh-outline' : 'key-outline',
+            tone: 'primary',
+            loading: generating,
+            onPress: () => {
+              hapticWarning();
+              void generateKit();
+            },
+          },
+          ...(status?.created
+            ? [
+                {
+                  key: 'recovery-kit-revoke',
+                  label: revoking ? 'Revoking' : 'Revoke',
+                  icon: 'trash-outline' as const,
+                  tone: 'danger' as const,
+                  loading: revoking,
+                  onPress: () => {
+                    hapticDelete();
+                    revokeKit();
+                  },
+                },
+              ]
+            : []),
+        ]}
+      />
     </SafeAreaView>
   );
 }
@@ -325,17 +365,17 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
     flex: { flex: 1 },
-    scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 112, paddingBottom: 140 },
-    heroIcon: { width: 82, height: 82, borderRadius: 28, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
+    scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 112, paddingBottom: 175 },
+    heroIcon: { width: 82, height: 82, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
     title: { fontSize: 34, fontWeight: '900', color: C.text, marginBottom: 10 },
     subtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 22 },
-    card: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16
+    card: { backgroundColor: C.backgroundElement, borderRadius: 26, padding: 18, borderWidth: 1, borderColor: C.border, marginBottom: 16
      , shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
       elevation: 2,},
-    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 24, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16
+    generatedCard: { backgroundColor: C.securityScoreBg || C.backgroundElement, borderRadius: 26, padding: 18, borderWidth: 1, borderColor: C.warning, marginBottom: 16
       ,shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,
@@ -350,13 +390,13 @@ const makeStyles = (C: any) =>
     warningTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     warningText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, marginBottom: 14 },
     fieldLabel: { color: C.text, fontSize: 14, fontWeight: '900', marginBottom: 8, marginLeft: 4 },
-    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21
+    secretBox: { backgroundColor: C.background, color: C.text, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, fontSize: 14, fontWeight: '900', marginBottom: 14, lineHeight: 21
       , shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
       elevation: 2,},
-    passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.background, borderRadius: 20, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
+    passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.background, borderRadius: 22, borderWidth: 1, borderColor: C.border, marginBottom: 14 },
     passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 15, fontSize: 15 },
     eyeButton: { width: 52, height: 54, alignItems: 'center', justifyContent: 'center' },
     primaryButton: { minHeight: 56, borderRadius: 999, backgroundColor: C.backgroundbutton || C.primary, alignItems: 'center', justifyContent: 'center'
@@ -382,7 +422,7 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       gap: 12,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: `${C.primary}42`,
       padding: 16,
@@ -393,10 +433,10 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 8 },
       elevation: 3,
     },
-    circleIcon: { width: 48, height: 48, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    circleIcon: { width: 48, height: 48, borderRadius: 20, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     circleTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     circleText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
-    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16
+    infoBox: { flexDirection: 'row', gap: 12, backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 16
       ,shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,

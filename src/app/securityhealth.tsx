@@ -379,7 +379,7 @@ const makeStyles = (C: ThemePalette) =>
     },
     scoreCard: {
       backgroundColor: C.primary,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 18,
       flexDirection: 'row',
       alignItems: 'center',
@@ -459,7 +459,7 @@ const makeStyles = (C: ThemePalette) =>
     },
     riskCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 16,
@@ -503,7 +503,7 @@ const makeStyles = (C: ThemePalette) =>
       backgroundColor: C.securityScoreBg,
       borderWidth: 1,
       borderColor: C.warning,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 14,
       flexDirection: 'row',
       alignItems: 'center',

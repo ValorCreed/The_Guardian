@@ -170,9 +170,9 @@ export default function TwoFactorSetupScreen() {
         }
       >
         <Text style={styles.title}>Two-factor authentication</Text>
-        <Text style={styles.subtitle}>
+        {/* <Text style={styles.subtitle}>
           Require a code when signing in.
-        </Text>
+        </Text> */}
 
         <View style={styles.heroCard}>
           <View style={styles.heroIcon}>
@@ -236,9 +236,9 @@ export default function TwoFactorSetupScreen() {
           </TouchableOpacity>
         )}
 
-        <Text style={styles.sectionTitle}>How it protects you</Text>
+        {/* <Text style={styles.sectionTitle}>How it protects you</Text> */}
 
-        <View style={styles.card}>
+        {/* <View style={styles.card}>
           <InfoRow
             icon="shield-checkmark-outline"
             title="Extra sign-in protection"
@@ -262,7 +262,7 @@ export default function TwoFactorSetupScreen() {
             C={C}
             styles={styles}
           />
-        </View>
+        </View> */}
       </ScrollView>
     </SafeAreaView>
   );
@@ -345,7 +345,7 @@ const makeStyles = (C: ThemePalette) =>
 
     heroCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       padding: 18,
@@ -369,7 +369,7 @@ const makeStyles = (C: ThemePalette) =>
 
       width: 56,
       height: 56,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -390,7 +390,7 @@ const makeStyles = (C: ThemePalette) =>
 
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -424,7 +424,7 @@ const makeStyles = (C: ThemePalette) =>
 
     warningCard: {
       backgroundColor: C.securityScoreBg,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: C.warning,
       padding: 14,

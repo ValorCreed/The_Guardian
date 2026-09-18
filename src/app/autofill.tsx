@@ -448,7 +448,7 @@ const makeStyles = (C: any) =>
 
     heroCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 20,
       marginBottom: 16,
       borderWidth: 1,
@@ -469,7 +469,7 @@ const makeStyles = (C: any) =>
 
       width: 58,
       height: 58,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -514,7 +514,7 @@ const makeStyles = (C: any) =>
 
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 16,
@@ -648,7 +648,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 12,
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,

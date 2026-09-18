@@ -18,6 +18,7 @@ import { useAppTheme } from '../context/ThemeContext';
 import { api } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 export default function EmergencyRequestScreen() {
   const screenAlert = useScreenAlert();
@@ -79,11 +80,9 @@ export default function EmergencyRequestScreen() {
           </Text>
 
           <View style={styles.card}>
-            <Text style={styles.label}>Vault owner email</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="owner@example.com"
-              placeholderTextColor={C.tabInactive}
+              label="Vault owner email"
               value={ownerEmail}
               onChangeText={setOwnerEmail}
               autoCapitalize="none"
@@ -91,11 +90,9 @@ export default function EmergencyRequestScreen() {
               autoCorrect={false}
             />
 
-            <Text style={styles.label}>Message</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.messageInput}
-              placeholder="Explain why you need emergency access..."
-              placeholderTextColor={C.tabInactive}
+              label="Message"
               value={message}
               onChangeText={setMessage}
               multiline
@@ -143,7 +140,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 18 },
   card: {
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: C.border,
     padding: 16,
@@ -161,17 +158,17 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowRadius: 14,
     elevation: 6,
     shadowOffset: { width: 0, height: 7 },
- backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 },
+ backgroundColor: C.background, borderRadius: 18, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, marginBottom: 16 },
   messageInput: {
     shadowColor: '#000000',
     shadowOpacity: 0.13,
     shadowRadius: 14,
     elevation: 6,
     shadowOffset: { width: 0, height: 7 },
- backgroundColor: C.background, borderRadius: 16, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, minHeight: 130, textAlignVertical: 'top' },
+ backgroundColor: C.background, borderRadius: 18, borderWidth: 1, borderColor: C.border, color: C.text, paddingHorizontal: 14, paddingVertical: 13, minHeight: 130, textAlignVertical: 'top' },
   noticeBox: {
     backgroundColor: C.actionCard,
-    borderRadius: 16,
+    borderRadius: 18,
     padding: 14,
     flexDirection: 'row',
     gap: 10,

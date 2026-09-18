@@ -436,7 +436,7 @@ const makeStyles = (C: any) =>
       marginBottom: 24,
       paddingHorizontal: 10,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
     },
@@ -497,7 +497,7 @@ const makeStyles = (C: any) =>
     },
     legalCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 28,
       borderWidth: 1,
       borderColor: C.border,
       paddingHorizontal: 16,
@@ -553,7 +553,7 @@ const makeStyles = (C: any) =>
     },
     documentLinkButton: {
       minHeight: 38,
-      borderRadius: 16,
+      borderRadius: 18,
       paddingHorizontal: 10,
       flexDirection: 'row',
       alignItems: 'center',

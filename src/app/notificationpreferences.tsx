@@ -369,9 +369,8 @@ export default function NotificationPreferencesScreen() {
         }
       >
         <Text style={styles.title}>Notification Preferences</Text>
-        <Text style={styles.subtitle}>Choose the alerts you want to receive.</Text>
+        <Text ></Text>
 
-        <Text style={styles.sectionLabel}>THIS DEVICE</Text>
 
         <View style={styles.preferenceCard}>
           <View style={styles.deviceRow}>
@@ -539,7 +538,7 @@ const makeStyles = (C: any) =>
       color: C.text,
       fontSize: 31,
       fontWeight: '900',
-      letterSpacing: -0.6,
+      letterSpacing: -0.9,
     },
     subtitle: {
       color: C.textSecondary,
@@ -559,7 +558,7 @@ const makeStyles = (C: any) =>
     },
     preferenceCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 22,
@@ -578,7 +577,7 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 14,
       paddingVertical: 13,
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       flexDirection: 'row',
@@ -601,7 +600,7 @@ const makeStyles = (C: any) =>
     iconCircle: {
       width: 42,
       height: 42,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -652,7 +651,7 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
     },
     errorCard: {
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 22,
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
@@ -745,7 +744,7 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 14,
       paddingVertical: 13,
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       flexDirection: 'row',
@@ -778,7 +777,7 @@ const makeStyles = (C: any) =>
 
       width: 42,
       height: 42,
-      borderRadius: 16,
+      borderRadius: 18,
     },
     skeletonLine: {
       width: '56%',

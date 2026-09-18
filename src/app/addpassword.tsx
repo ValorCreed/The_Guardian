@@ -20,9 +20,10 @@ import AddScreenEntrance from '../components/AddScreenEntrance';
 import { api, isDuressSession } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { encryptPassword } from '../utils/vaultcrypto';
-import { hapticSelection, hapticToggleOff, hapticToggleOn } from '../utils/haptics';
+import { hapticSelection, hapticToggleOff, hapticToggleOn, hapticWarning } from '../utils/haptics';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -30,6 +31,124 @@ const NUMBERS = '0123456789';
 const SYMBOLS = '!@#$%^&*()_+-=[]{}';
 const FREE_PASSWORD_LIMIT = 10;
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY' | string;
+
+const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_LENGTH = 32;
+const WEBSITE_CHECK_DEBOUNCE_MS = 650;
+const WEBSITE_CHECK_TIMEOUT_MS = 6500;
+
+type PasswordLengthBoundary = 'min' | 'max' | null;
+
+type WebsiteCheckState = {
+  status: 'idle' | 'app' | 'checking' | 'reachable' | 'warning' | 'unreachable' | 'invalid';
+  title: string;
+  detail: string;
+  normalizedUrl?: string;
+};
+
+const IDLE_WEBSITE_CHECK: WebsiteCheckState = {
+  status: 'idle',
+  title: '',
+  detail: '',
+};
+
+const looksLikeWebsiteCandidate = (value: string) => {
+  const input = value.trim();
+  if (!input || /\s/.test(input)) return false;
+
+  return (
+    /^https?:\/\//i.test(input) ||
+    /^www\./i.test(input) ||
+    /^[^/@]+\.[A-Za-z]{2,}(?:[/:?#]|$)/.test(input)
+  );
+};
+
+const inspectWebsiteCandidate = (
+  value: string
+):
+  | { kind: 'app' }
+  | { kind: 'invalid'; title: string; detail: string }
+  | { kind: 'warning'; title: string; detail: string }
+  | { kind: 'website'; url: string; hostname: string } => {
+  const input = value.trim();
+
+  if (!looksLikeWebsiteCandidate(input)) {
+    return { kind: 'app' };
+  }
+
+  try {
+    const withScheme = /^https?:\/\//i.test(input) ? input : `https://${input}`;
+    const parsed = new URL(withScheme);
+    const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
+
+    if (!hostname || !hostname.includes('.')) {
+      return {
+        kind: 'invalid',
+        title: 'Website address looks incomplete',
+        detail: 'Enter a complete domain such as example.com.',
+      };
+    }
+
+    if (parsed.username || parsed.password) {
+      return {
+        kind: 'warning',
+        title: 'Website needs review',
+        detail: 'Addresses containing embedded usernames or passwords can be misleading. Check the domain carefully.',
+      };
+    }
+
+    if (
+      hostname === 'localhost' ||
+      hostname.endsWith('.local') ||
+      /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname) ||
+      hostname.includes(':')
+    ) {
+      return {
+        kind: 'warning',
+        title: 'Website needs review',
+        detail: 'Local hosts and direct IP addresses cannot be treated as a verified public website.',
+      };
+    }
+
+    if (hostname.split('.').some((label) => !/^[a-z0-9-]+$/i.test(label) || label.startsWith('-') || label.endsWith('-'))) {
+      return {
+        kind: 'invalid',
+        title: 'Website address is not valid',
+        detail: 'Check the spelling and domain format.',
+      };
+    }
+
+    if (hostname.includes('xn--')) {
+      return {
+        kind: 'warning',
+        title: 'Lookalike-domain warning',
+        detail: 'This domain uses internationalized/punycode characters. Confirm the spelling before saving credentials.',
+      };
+    }
+
+    if (parsed.protocol !== 'https:') {
+      return {
+        kind: 'warning',
+        title: 'HTTPS required',
+        detail: 'Use the secure HTTPS version of this website before trusting it with credentials.',
+      };
+    }
+
+    parsed.hash = '';
+
+    return {
+      kind: 'website',
+      url: parsed.toString(),
+      hostname,
+    };
+  } catch {
+    return {
+      kind: 'invalid',
+      title: 'Website address is not valid',
+      detail: 'Check the spelling and enter a valid domain such as example.com.',
+    };
+  }
+};
 
 const generatePassword = (length: number, useNumbers: boolean, useSymbols: boolean) => {
   let chars = LOWER + UPPER;
@@ -86,6 +205,10 @@ const AddPasswordScreen = () => {
   const [plan, setPlan] = useState<Plan>('FREE');
   const [passwordCount, setPasswordCount] = useState(0);
   const [checkingLimits, setCheckingLimits] = useState(true);
+  const [lengthBoundaryNotice, setLengthBoundaryNotice] =
+    useState<PasswordLengthBoundary>(null);
+  const [websiteCheck, setWebsiteCheck] =
+    useState<WebsiteCheckState>(IDLE_WEBSITE_CHECK);
 
   useEffect(() => {
     if (params.generatedPassword) {
@@ -95,6 +218,90 @@ const AddPasswordScreen = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.generatedPassword]);
+
+  useEffect(() => {
+    const trimmedWebsite = website.trim();
+
+    if (!trimmedWebsite) {
+      setWebsiteCheck(IDLE_WEBSITE_CHECK);
+      return;
+    }
+
+    const inspected = inspectWebsiteCandidate(trimmedWebsite);
+
+    if (inspected.kind === 'app') {
+      setWebsiteCheck({
+        status: 'app',
+        title: 'App name',
+        detail: 'Website safety checking applies when you enter a web domain.',
+      });
+      return;
+    }
+
+    if (inspected.kind === 'invalid' || inspected.kind === 'warning') {
+      setWebsiteCheck({
+        status: inspected.kind,
+        title: inspected.title,
+        detail: inspected.detail,
+      });
+      return;
+    }
+
+    setWebsiteCheck({
+      status: 'checking',
+      title: 'Checking website',
+      detail: `Testing secure reachability for ${inspected.hostname}…`,
+      normalizedUrl: inspected.url,
+    });
+
+    const controller = new AbortController();
+    let requestTimeout: ReturnType<typeof setTimeout> | undefined;
+
+    const debounce = setTimeout(async () => {
+      requestTimeout = setTimeout(() => {
+        controller.abort();
+      }, WEBSITE_CHECK_TIMEOUT_MS);
+
+      try {
+        await fetch(inspected.url, {
+          method: 'HEAD',
+          redirect: 'follow',
+          signal: controller.signal,
+        });
+
+        setWebsiteCheck({
+          status: 'reachable',
+          title: 'HTTPS site reachable',
+          detail: `${inspected.hostname} responded over HTTPS. This confirms encrypted reachability, not ownership or phishing reputation.`,
+          normalizedUrl: inspected.url,
+        });
+      } catch (error: any) {
+        if (controller.signal.aborted) {
+          setWebsiteCheck({
+            status: 'unreachable',
+            title: 'Website could not be checked',
+            detail: 'The HTTPS check timed out. Recheck the address before saving credentials.',
+            normalizedUrl: inspected.url,
+          });
+        } else {
+          setWebsiteCheck({
+            status: 'unreachable',
+            title: 'Website could not be reached',
+            detail: 'The secure address did not respond to this check. Confirm the spelling before saving credentials.',
+            normalizedUrl: inspected.url,
+          });
+        }
+      } finally {
+        if (requestTimeout) clearTimeout(requestTimeout);
+      }
+    }, WEBSITE_CHECK_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(debounce);
+      if (requestTimeout) clearTimeout(requestTimeout);
+      controller.abort();
+    };
+  }, [website]);
 
   useEffect(() => {
     const loadPlanLimits = async () => {
@@ -130,6 +337,38 @@ const AddPasswordScreen = () => {
 
   const regenerate = (length = passLength, numbers = includeNumbers, symbols = includeSymbols) => {
     setPassword(generatePassword(length, numbers, symbols));
+  };
+
+  const adjustPasswordLength = (direction: -1 | 1) => {
+    if (direction < 0 && passLength <= MIN_PASSWORD_LENGTH) {
+      if (lengthBoundaryNotice !== 'min') {
+        hapticWarning();
+        screenAlert(
+          'Minimum length reached',
+          `${MIN_PASSWORD_LENGTH} characters is the minimum quick-generator length. Increase the length before trying to reduce it again.`
+        );
+      }
+      setLengthBoundaryNotice('min');
+      return;
+    }
+
+    if (direction > 0 && passLength >= MAX_PASSWORD_LENGTH) {
+      if (lengthBoundaryNotice !== 'max') {
+        hapticWarning();
+        screenAlert(
+          'Maximum length reached',
+          `${MAX_PASSWORD_LENGTH} characters is the maximum quick-generator length. Reduce the length before trying to increase it again.`
+        );
+      }
+      setLengthBoundaryNotice('max');
+      return;
+    }
+
+    const newLength = passLength + direction;
+    setLengthBoundaryNotice(null);
+    hapticSelection();
+    setPassLength(newLength);
+    regenerate(newLength, includeNumbers, includeSymbols);
   };
 
   const showPasswordLimitAlert = (message?: string) => {
@@ -274,28 +513,94 @@ const AddPasswordScreen = () => {
               </View>
               <View style={styles.sectionHeadingCopy}>
                 <Text style={styles.sectionTitle}>Login details</Text>
-                <Text style={styles.sectionSubtitle}>
+                {/* <Text style={styles.sectionSubtitle}>
                   Enter the app or website and account information.
-                </Text>
+                </Text> */}
               </View>
             </View>
 
-            <Text style={styles.label}>Website or app</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="example.com"
-              placeholderTextColor={C.tabInactive}
+              label="Website or app"
               value={website}
               onChangeText={setWebsite}
               autoCapitalize="none"
               autoCorrect={false}
+              keyboardType="url"
             />
 
-            <Text style={styles.label}>Username or email</Text>
-            <TextInput
+            {websiteCheck.status !== 'idle' && websiteCheck.status !== 'app' && (
+              <View
+                style={[
+                  styles.websiteCheckCard,
+                  websiteCheck.status === 'reachable' && styles.websiteCheckCardSuccess,
+                  (websiteCheck.status === 'warning' ||
+                    websiteCheck.status === 'unreachable') &&
+                    styles.websiteCheckCardWarning,
+                  websiteCheck.status === 'invalid' && styles.websiteCheckCardDanger,
+                ]}
+                accessibilityLiveRegion="polite"
+              >
+                <View
+                  style={[
+                    styles.websiteCheckIcon,
+                    websiteCheck.status === 'reachable' && {
+                      backgroundColor: `${C.success}18`,
+                    },
+                    (websiteCheck.status === 'warning' ||
+                      websiteCheck.status === 'unreachable') && {
+                      backgroundColor: `${C.warning}18`,
+                    },
+                    websiteCheck.status === 'invalid' && {
+                      backgroundColor: `${C.danger}18`,
+                    },
+                  ]}
+                >
+                  {websiteCheck.status === 'checking' ? (
+                    <ActivityIndicator size="small" color={C.primary} />
+                  ) : (
+                    <Ionicons
+                      name={
+                        websiteCheck.status === 'reachable'
+                          ? 'shield-checkmark-outline'
+                          : websiteCheck.status === 'invalid'
+                            ? 'close-circle-outline'
+                            : 'warning-outline'
+                      }
+                      size={19}
+                      color={
+                        websiteCheck.status === 'reachable'
+                          ? C.success
+                          : websiteCheck.status === 'invalid'
+                            ? C.danger
+                            : C.warning
+                      }
+                    />
+                  )}
+                </View>
+
+                <View style={styles.websiteCheckCopy}>
+                  <Text
+                    style={[
+                      styles.websiteCheckTitle,
+                      websiteCheck.status === 'reachable' && { color: C.success },
+                      (websiteCheck.status === 'warning' ||
+                        websiteCheck.status === 'unreachable') && {
+                        color: C.warning,
+                      },
+                      websiteCheck.status === 'invalid' && { color: C.danger },
+                    ]}
+                  >
+                    {websiteCheck.title}
+                  </Text>
+                  <Text style={styles.websiteCheckDetail}>{websiteCheck.detail}</Text>
+                </View>
+              </View>
+            )}
+
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="you@example.com"
-              placeholderTextColor={C.tabInactive}
+              label="Username or email"
               value={username}
               onChangeText={setUsername}
               autoCapitalize="none"
@@ -305,9 +610,9 @@ const AddPasswordScreen = () => {
               textContentType="username"
             />
 
-            <Text style={styles.label}>Password</Text>
             <View style={styles.passwordRow}>
-              <TextInput
+              <FloatingLabelInput
+                label="Password"
                 style={styles.passwordField}
                 value={password}
                 onChangeText={setPassword}
@@ -368,12 +673,7 @@ const AddPasswordScreen = () => {
                   <TouchableOpacity
                     style={styles.sliderBtn}
                     activeOpacity={0.8}
-                    onPress={() => {
-                      const newLen = Math.max(8, passLength - 1);
-                      hapticSelection();
-                      setPassLength(newLen);
-                      regenerate(newLen, includeNumbers, includeSymbols);
-                    }}
+                    onPress={() => adjustPasswordLength(-1)}
                   >
                     <Ionicons name="remove" size={19} color={C.primary} />
                   </TouchableOpacity>
@@ -385,12 +685,7 @@ const AddPasswordScreen = () => {
                   <TouchableOpacity
                     style={styles.sliderBtn}
                     activeOpacity={0.8}
-                    onPress={() => {
-                      const newLen = Math.min(32, passLength + 1);
-                      hapticSelection();
-                      setPassLength(newLen);
-                      regenerate(newLen, includeNumbers, includeSymbols);
-                    }}
+                    onPress={() => adjustPasswordLength(1)}
                   >
                     <Ionicons name="add" size={19} color={C.primary} />
                   </TouchableOpacity>
@@ -449,12 +744,13 @@ const AddPasswordScreen = () => {
 
             <TextInput
               style={styles.notesInput}
-              placeholder="Add an optional note..."
-              placeholderTextColor={C.tabInactive}
               value={notes}
               onChangeText={setNotes}
               multiline
               textAlignVertical="top"
+              placeholder=""
+              placeholderTextColor="transparent"
+              accessibilityLabel="Notes"
             />
           </View>
 
@@ -525,6 +821,7 @@ const makeStyles = (C: ThemeColors) =>
       fontSize: 31,
       fontWeight: '900',
       letterSpacing: -0.7,
+      textAlign: 'center',
     },
     headerSubtitle: {
       color: C.textSecondary,
@@ -535,7 +832,7 @@ const makeStyles = (C: ThemeColors) =>
     },
     advancedGeneratorCard: {
       minHeight: 112,
-      borderRadius: 26,
+      borderRadius: 38,
       padding: 16,
       marginBottom: 18,
       backgroundColor: C.primary,
@@ -553,7 +850,7 @@ const makeStyles = (C: ThemeColors) =>
     advancedGeneratorIcon: {
       width: 54,
       height: 54,
-      borderRadius: 19,
+      borderRadius: 49,
       backgroundColor: 'rgba(255,255,255,0.18)',
       borderWidth: 1,
       borderColor: 'rgba(255,255,255,0.22)',
@@ -592,7 +889,7 @@ const makeStyles = (C: ThemeColors) =>
     advancedGeneratorArrow: {
       width: 38,
       height: 38,
-      borderRadius: 14,
+      borderRadius: 54,
       backgroundColor: '#FFFFFF',
       alignItems: 'center',
       justifyContent: 'center',
@@ -635,7 +932,7 @@ const makeStyles = (C: ThemeColors) =>
     },
     formCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 40,
       borderWidth: 1,
       borderColor: C.border,
       padding: 17,
@@ -655,7 +952,7 @@ const makeStyles = (C: ThemeColors) =>
     sectionIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 48,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -690,7 +987,7 @@ const makeStyles = (C: ThemeColors) =>
     input: {
       minHeight: 55,
       backgroundColor: C.background,
-      borderRadius: 19,
+      borderRadius: 49,
       paddingHorizontal: 16,
       fontSize: 15,
       color: C.text,
@@ -703,10 +1000,61 @@ const makeStyles = (C: ThemeColors) =>
       shadowOffset: { width: 0, height: 6 },
       elevation: 4,
     },
+    websiteCheckCard: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 11,
+      marginTop: -7,
+      marginBottom: 17,
+      padding: 13,
+      borderRadius: 28,
+      backgroundColor: C.actionCard,
+      borderWidth: 1,
+      borderColor: C.border,
+      shadowColor: '#000000',
+      shadowOpacity: 0.07,
+      shadowRadius: 11,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 4,
+    },
+    websiteCheckCardSuccess: {
+      borderColor: `${C.success}55`,
+    },
+    websiteCheckCardWarning: {
+      borderColor: `${C.warning}55`,
+    },
+    websiteCheckCardDanger: {
+      borderColor: `${C.danger}55`,
+    },
+    websiteCheckIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      backgroundColor: C.backgroundSelected,
+      alignItems: 'center',
+      justifyContent: 'center',
+      flexShrink: 0,
+    },
+    websiteCheckCopy: {
+      flex: 1,
+      minWidth: 0,
+    },
+    websiteCheckTitle: {
+      color: C.text,
+      fontSize: 13,
+      fontWeight: '900',
+    },
+    websiteCheckDetail: {
+      color: C.textSecondary,
+      fontSize: 11,
+      lineHeight: 16,
+      fontWeight: '600',
+      marginTop: 3,
+    },
     passwordRow: {
       minHeight: 60,
       backgroundColor: C.background,
-      borderRadius: 20,
+      borderRadius: 52,
       paddingLeft: 16,
       paddingRight: 9,
       flexDirection: 'row',
@@ -729,7 +1077,7 @@ const makeStyles = (C: ThemeColors) =>
     iconButton: {
       width: 42,
       height: 42,
-      borderRadius: 15,
+      borderRadius: 45,
       backgroundColor: C.actionCard,
       borderWidth: 1,
       borderColor: C.border,
@@ -744,7 +1092,7 @@ const makeStyles = (C: ThemeColors) =>
     scorePanel: {
       marginTop: 13,
       padding: 13,
-      borderRadius: 18,
+      borderRadius: 40,
       backgroundColor: C.backgroundSelected,
       borderWidth: 1,
       borderColor: C.border,
@@ -781,7 +1129,7 @@ const makeStyles = (C: ThemeColors) =>
     },
     generatorCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 17,
       marginBottom: 18,
       borderWidth: 1,
@@ -801,7 +1149,7 @@ const makeStyles = (C: ThemeColors) =>
     generatorIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -919,7 +1267,7 @@ const makeStyles = (C: ThemeColors) =>
     },
     notesCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 28,
       borderWidth: 1,
       borderColor: C.border,
       padding: 16,
@@ -957,9 +1305,9 @@ const makeStyles = (C: ThemeColors) =>
     notesInput: {
       minHeight: 112,
       backgroundColor: C.background,
-      borderRadius: 19,
-      paddingHorizontal: 15,
-      paddingVertical: 14,
+      borderRadius: 28,
+      paddingHorizontal: 17,
+      paddingVertical: 15,
       fontSize: 15,
       color: C.text,
       borderWidth: 1,
@@ -973,7 +1321,7 @@ const makeStyles = (C: ThemeColors) =>
     saveBtn: {
       minHeight: 60,
       backgroundColor: C.backgroundbutton,
-      borderRadius: 22,
+      borderRadius: 54,
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',

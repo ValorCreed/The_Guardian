@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -18,6 +17,8 @@ import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, EmergencyAccessRequestResponse, EmergencyContactResponse, EmergencyOverviewResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
+import { hapticDelete, hapticSelection } from '../utils/haptics';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Not set';
@@ -48,6 +49,26 @@ export default function EmergencyAccessScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [workingRequestId, setWorkingRequestId] = useState<number | null>(null);
+  const [deletingContactId, setDeletingContactId] = useState<number | null>(null);
+  const [selection, setSelection] = useState<
+    | { kind: 'contact'; id: number }
+    | { kind: 'received'; id: number }
+    | { kind: 'sent'; id: number }
+    | null
+  >(null);
+
+  const selectedContact =
+    selection?.kind === 'contact'
+      ? overview?.contacts.find((item) => item.id === selection.id) || null
+      : null;
+  const selectedReceivedRequest =
+    selection?.kind === 'received'
+      ? overview?.receivedRequests.find((item) => item.id === selection.id) || null
+      : null;
+  const selectedSentRequest =
+    selection?.kind === 'sent'
+      ? overview?.sentRequests.find((item) => item.id === selection.id) || null
+      : null;
 
   const loadOverview = useCallback(async (showLoader = false) => {
     try {
@@ -141,6 +162,47 @@ export default function EmergencyAccessScreen() {
         },
       ]
     );
+  };
+
+  const removeContact = (contact: EmergencyContactResponse) => {
+    if (deletingContactId !== null) return;
+
+    hapticDelete();
+    screenAlert(
+      'Remove emergency contact?',
+      `${contact.contactEmail} will no longer be able to request emergency access.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setDeletingContactId(contact.id);
+              await requestApi.deleteEmergencyContact(contact.id);
+              setSelection(null);
+              await loadOverview(false);
+            } catch (error: any) {
+              if (isScreenRequestCancelled(error)) return;
+              screenAlert('Remove failed', error.message || 'Could not remove this contact.');
+            } finally {
+              setDeletingContactId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const openEmergencyVault = (request: EmergencyAccessRequestResponse) => {
+    router.push({
+      pathname: '/emergencyvault',
+      params: {
+        requestId: String(request.id),
+        ownerName: request.ownerName || request.ownerEmail,
+        ownerEmail: request.ownerEmail,
+      },
+    });
   };
 
   const contacts = overview?.contacts || [];
@@ -309,7 +371,26 @@ export default function EmergencyAccessScreen() {
             {contacts.length === 0 ? (
               <EmptyRow icon="people-outline" title="No emergency contacts yet" subtitle="Add a trusted contact to prepare for emergencies." C={C} styles={styles} />
             ) : contacts.map((contact, index) => (
-              <ContactRow key={contact.id} contact={contact} index={index} total={contacts.length} C={C} styles={styles} />
+              <ContactRow
+                key={contact.id}
+                contact={contact}
+                index={index}
+                total={contacts.length}
+                C={C}
+                styles={styles}
+                selected={selection?.kind === 'contact' && selection.id === contact.id}
+                onPress={() => {
+                  if (selection?.kind === 'contact' && selection.id === contact.id) {
+                    setSelection(null);
+                    return;
+                  }
+                  router.push({ pathname: '/emergencydetails', params: { id: String(contact.id) } });
+                }}
+                onLongPress={() => {
+                  hapticSelection();
+                  setSelection({ kind: 'contact', id: contact.id });
+                }}
+              />
             ))}
           </View>
         </View>
@@ -328,8 +409,17 @@ export default function EmergencyAccessScreen() {
                 C={C}
                 styles={styles}
                 working={workingRequestId === request.id}
-                onApprove={() => approveRequest(request)}
-                onDeny={() => denyRequest(request)}
+                selected={selection?.kind === 'received' && selection.id === request.id}
+                onPress={() => {
+                  if (selection?.kind === 'received' && selection.id === request.id) {
+                    setSelection(null);
+                  }
+                }}
+                onLongPress={() => {
+                  if (String(request.status || '').toUpperCase() !== 'PENDING') return;
+                  hapticSelection();
+                  setSelection({ kind: 'received', id: request.id });
+                }}
               />
             ))}
           </View>
@@ -341,7 +431,29 @@ export default function EmergencyAccessScreen() {
             {sentRequests.length === 0 ? (
               <EmptyRow icon="send-outline" title="No sent requests" subtitle="Requests you send to other vault owners will appear here." C={C} styles={styles} />
             ) : sentRequests.map((request, index) => (
-              <SentRequestRow key={request.id} request={request} index={index} total={sentRequests.length} C={C} styles={styles} />
+              <SentRequestRow
+                key={request.id}
+                request={request}
+                index={index}
+                total={sentRequests.length}
+                C={C}
+                styles={styles}
+                selected={selection?.kind === 'sent' && selection.id === request.id}
+                onPress={() => {
+                  if (selection?.kind === 'sent' && selection.id === request.id) {
+                    setSelection(null);
+                    return;
+                  }
+                  if (request.status === 'AVAILABLE' || request.status === 'APPROVED') {
+                    openEmergencyVault(request);
+                  }
+                }}
+                onLongPress={() => {
+                  if (request.status !== 'AVAILABLE' && request.status !== 'APPROVED') return;
+                  hapticSelection();
+                  setSelection({ kind: 'sent', id: request.id });
+                }}
+              />
             ))}
           </View>
         </View>
@@ -364,8 +476,79 @@ export default function EmergencyAccessScreen() {
           </View>
         </View>
 
-        <View style={{ height: 90 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
+
+      <FloatingActionBar
+        visible={Boolean(selectedContact || selectedReceivedRequest || selectedSentRequest)}
+        onDismiss={() => setSelection(null)}
+        actions={
+          selectedContact
+            ? [
+                {
+                  key: 'view-emergency-contact',
+                  label: 'View',
+                  icon: 'person-outline',
+                  tone: 'primary',
+                  onPress: () => {
+                    const contact = selectedContact;
+                    setSelection(null);
+                    router.push({ pathname: '/emergencydetails', params: { id: String(contact.id) } });
+                  },
+                },
+                {
+                  key: 'remove-emergency-contact',
+                  label: deletingContactId === selectedContact.id ? 'Removing' : 'Remove',
+                  icon: 'trash-outline',
+                  tone: 'danger',
+                  loading: deletingContactId === selectedContact.id,
+                  onPress: () => removeContact(selectedContact),
+                },
+              ]
+            : selectedReceivedRequest &&
+                String(selectedReceivedRequest.status || '').toUpperCase() === 'PENDING'
+              ? [
+                  {
+                    key: 'approve-emergency-request',
+                    label: 'Approve',
+                    icon: 'checkmark-circle-outline',
+                    tone: 'primary',
+                    onPress: () => {
+                      const request = selectedReceivedRequest;
+                      setSelection(null);
+                      approveRequest(request);
+                    },
+                  },
+                  {
+                    key: 'deny-emergency-request',
+                    label: 'Deny',
+                    icon: 'close-circle-outline',
+                    tone: 'danger',
+                    onPress: () => {
+                      const request = selectedReceivedRequest;
+                      setSelection(null);
+                      denyRequest(request);
+                    },
+                  },
+                ]
+              : selectedSentRequest &&
+                  (selectedSentRequest.status === 'AVAILABLE' || selectedSentRequest.status === 'APPROVED')
+                ? [
+                    {
+                      key: 'open-emergency-vault',
+                      label: 'Open vault',
+                      icon: 'lock-open-outline',
+                      tone: 'primary',
+                      onPress: () => {
+                        const request = selectedSentRequest;
+                        setSelection(null);
+                        openEmergencyVault(request);
+                      },
+                    },
+                  ]
+                : []
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -391,83 +574,120 @@ function EmptyRow({ icon, title, subtitle, C, styles }: any) {
   );
 }
 
-function ContactRow({ contact, index, total, C, styles }: { contact: EmergencyContactResponse; index: number; total: number; C: any; styles: any }) {
+function ContactRow({
+  contact,
+  index,
+  total,
+  C,
+  styles,
+  selected,
+  onPress,
+  onLongPress,
+}: any) {
   return (
     <TouchableOpacity
-      style={[styles.row, index !== total - 1 && styles.divider]}
-      onPress={() => router.push({ pathname: '/emergencydetails', params: { id: String(contact.id) } })}
+      style={[
+        styles.row,
+        index !== total - 1 && styles.divider,
+        selected && styles.selectedRow,
+      ]}
+      activeOpacity={0.78}
+      delayLongPress={500}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      accessibilityLabel={`${contact.contactName || contact.contactEmail}. Press and hold for contact actions.`}
     >
       <View style={styles.avatar}><Text style={styles.avatarText}>{(contact.contactName || contact.contactEmail).slice(0, 1).toUpperCase()}</Text></View>
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{contact.contactName || contact.contactEmail}</Text>
         <Text style={styles.rowSub}>{contact.contactEmail}</Text>
-        <Text style={styles.timeText}>Owner approval required</Text>
+        <Text style={styles.timeText}>Owner approval required · hold for actions</Text>
       </View>
-      <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
+      <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={18} color={selected ? C.primary : C.tabInactive} />
     </TouchableOpacity>
   );
 }
 
-function RequestRow({ request, index, total, C, styles, working, onApprove, onDeny }: any) {
+function RequestRow({ request, index, total, C, styles, working, selected, onPress, onLongPress }: any) {
   const color = statusColor(request.status, C);
   const normalizedStatus = String(request.status || '').toUpperCase();
   const canAct = normalizedStatus === 'PENDING';
 
   return (
-    <View style={[styles.requestRow, index !== total - 1 && styles.divider]}>
-      <View style={[styles.smallIcon, { backgroundColor: C.backgroundSelected }]}><Ionicons name="alert-circle-outline" size={18} color={color} /></View>
+    <TouchableOpacity
+      style={[
+        styles.requestRow,
+        index !== total - 1 && styles.divider,
+        selected && styles.selectedRow,
+      ]}
+      activeOpacity={canAct ? 0.82 : 1}
+      delayLongPress={500}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      disabled={working}
+      accessibilityRole={canAct ? 'button' : undefined}
+      accessibilityState={{ selected, disabled: working }}
+      accessibilityLabel={
+        canAct
+          ? `${request.requesterEmail}. Press and hold for emergency request actions.`
+          : request.requesterEmail
+      }
+    >
+      <View style={[styles.smallIcon, { backgroundColor: C.backgroundSelected }]}>
+        <Ionicons name={selected ? 'checkmark' : 'alert-circle-outline'} size={18} color={selected ? C.primary : color} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{request.requesterEmail}</Text>
         <Text style={styles.rowSub}>{request.message || 'Emergency access requested.'}</Text>
         <Text style={[styles.statusText, { color }]}>{request.status} · requested {formatDate(request.requestedAt)}</Text>
-        {canAct && (
-          <View style={styles.requestActions}>
-            <TouchableOpacity style={styles.approveMini} onPress={onApprove} disabled={working}>
-              {working ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.approveMiniText}>Approve</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.denyMini} onPress={onDeny} disabled={working}>
-              <Text style={styles.denyMiniText}>Deny</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+        {canAct ? <Text style={styles.selectionHint}>Press and hold for request actions.</Text> : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
-function SentRequestRow({ request, index, total, C, styles }: any) {
+function SentRequestRow({ request, index, total, C, styles, selected, onPress, onLongPress }: any) {
   const color = statusColor(request.status, C);
   const canOpenVault = request.status === 'AVAILABLE' || request.status === 'APPROVED';
 
   return (
-    <View style={[styles.requestRow, index !== total - 1 && styles.divider]}>
-      <View style={styles.smallIcon}><Ionicons name="send-outline" size={17} color={color} /></View>
+    <TouchableOpacity
+      style={[
+        styles.requestRow,
+        index !== total - 1 && styles.divider,
+        selected && styles.selectedRow,
+      ]}
+      activeOpacity={canOpenVault ? 0.82 : 1}
+      delayLongPress={500}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      accessibilityRole={canOpenVault ? 'button' : undefined}
+      accessibilityState={{ selected }}
+      accessibilityLabel={
+        canOpenVault
+          ? `${request.ownerEmail}. Press and hold for emergency vault actions.`
+          : request.ownerEmail
+      }
+    >
+      <View style={styles.smallIcon}>
+        <Ionicons name={selected ? 'checkmark' : 'send-outline'} size={17} color={selected ? C.primary : color} />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.rowTitle}>{request.ownerEmail}</Text>
         <Text style={styles.rowSub}>Status: {request.status}</Text>
         <Text style={styles.timeText}>Requested {formatDate(request.requestedAt)}</Text>
-
         {canOpenVault ? (
-          <TouchableOpacity
-            style={styles.openVaultButton}
-            activeOpacity={0.85}
-            onPress={() => router.push({
-              pathname: '/emergencyvault',
-              params: {
-                requestId: String(request.id),
-                ownerName: request.ownerName || request.ownerEmail,
-                ownerEmail: request.ownerEmail,
-              },
-            })}
-          >
-            <Ionicons name="lock-open-outline" size={16} color="#fff" />
-            <Text style={styles.openVaultButtonText}>Open emergency vault</Text>
-          </TouchableOpacity>
+          <Text style={styles.selectionHint}>Tap to open · press and hold for actions.</Text>
         ) : request.status === 'PENDING' ? (
           <Text style={styles.waitingText}>Waiting for the vault owner to approve or deny this request.</Text>
         ) : null}
       </View>
-    </View>
+      {canOpenVault ? (
+        <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={18} color={selected ? C.primary : C.tabInactive} />
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -489,7 +709,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
     shadowOffset: { width: 0, height: 6 },
- width: 56, height: 56, borderRadius: 18 },
+ width: 56, height: 56, borderRadius: 20 },
   skeletonHeroTitle: { width: '70%', height: 17, marginBottom: 9 },
   skeletonHeroSub: { width: '50%', height: 12 },
   skeletonActionShell: {
@@ -527,7 +747,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   title: { color: C.text, fontSize: 30, fontWeight: '900', marginTop: 2 },
   subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 18 },
   heroCardShell: {
-    borderRadius: 24,
+    borderRadius: 26,
     marginBottom: 14,
     shadowColor: '#000',
     shadowOpacity: 0.24,
@@ -543,7 +763,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOffset: { width: 0, height: 14 },
 
     backgroundColor: C.backgroundElement,
-    borderRadius: 24,
+    borderRadius: 26,
     padding: 18,
     borderWidth: 1,
     borderColor: C.border,
@@ -555,7 +775,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   heroIcon: {
     width: 56,
     height: 56,
-    borderRadius: 28,
+    borderRadius: 30,
     backgroundColor: C.actionCard,
     alignItems: 'center',
     justifyContent: 'center',
@@ -604,7 +824,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   secondaryActionText: { color: C.primary, fontSize: 14, fontWeight: '900' },
   safetyCheckCardShell: {
-    borderRadius: 20,
+    borderRadius: 22,
     marginBottom: 14,
     shadowColor: '#000',
     shadowOpacity: 0.2,
@@ -621,7 +841,7 @@ const makeStyles = (C: any) => StyleSheet.create({
 
     minHeight: 92,
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: `${C.primary}42`,
     paddingHorizontal: 15,
@@ -683,7 +903,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   upgradeCard: {
     backgroundColor: C.securityScoreBg,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: C.warning,
     padding: 14,
@@ -699,7 +919,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   upgradeText: { color: C.warning, flex: 1, fontSize: 13, fontWeight: '800', lineHeight: 18 },
   cardShell: {
-    borderRadius: 20,
+    borderRadius: 22,
     marginBottom: 16,
     shadowColor: '#000',
     shadowOpacity: 0.2,
@@ -715,13 +935,14 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
 
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: C.border,
     overflow: 'hidden',
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
   requestRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 15 },
+  selectedRow: { backgroundColor: C.actionCard, borderLeftWidth: 3, borderLeftColor: C.primary },
   auditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 15 },
   emptyRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 15 },
   divider: { borderBottomWidth: 1, borderBottomColor: C.border },
@@ -744,6 +965,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   rowSub: { color: C.textSecondary, fontSize: 12, lineHeight: 17, marginTop: 3 },
   timeText: { color: C.tabInactive, fontSize: 11, marginTop: 5, fontWeight: '700' },
   statusText: { fontSize: 12, marginTop: 6, fontWeight: '900' },
+  selectionHint: { color: C.primary, fontSize: 11, lineHeight: 16, marginTop: 8, fontWeight: '800' },
   requestActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
   approveMini: { backgroundColor: C.primary, borderRadius: 999, paddingVertical: 8, paddingHorizontal: 14, minWidth: 78, alignItems: 'center' },
   approveMiniText: { color: '#fff', fontWeight: '900', fontSize: 12 },

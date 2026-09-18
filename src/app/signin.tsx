@@ -3,7 +3,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
@@ -29,6 +28,7 @@ import { useAppTheme } from "../context/ThemeContext";
 import { saveBiometricCredentials, biometricLogin } from "../utils/secureAuth";
 import { safeLogError } from "../utils/asyncResilience";
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 export default function UnlockScreen() {
   const screenAlert = useScreenAlert();
@@ -333,17 +333,14 @@ export default function UnlockScreen() {
             </View>
 
             <Text style={styles.title}>Welcome back</Text>
-            <Text style={styles.subtitle}>
+            {/* <Text style={styles.subtitle}>
               Enter your email and master password.
-            </Text>
+            </Text> */}
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="you@example.com"
-              placeholderTextColor={C.tabInactive}
+            <FloatingLabelInput
+              label="Email"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -356,37 +353,35 @@ export default function UnlockScreen() {
               editable={!loading}
             />
 
-            <Text style={styles.label}>Master Password</Text>
-            <View style={styles.passwordBox}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Enter master password"
-                placeholderTextColor={C.tabInactive}
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={setPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="current-password"
-                textContentType="password"
-                importantForAutofill="yes"
-                returnKeyType="done"
-                onSubmitEditing={handleLogin}
-                editable={!loading}
-              />
-
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword((current) => !current)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={22}
-                  color={C.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
+            <FloatingLabelInput
+              label="Master Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="current-password"
+              textContentType="password"
+              importantForAutofill="yes"
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              editable={!loading}
+              rightAccessory={
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword((current) => !current)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={22}
+                    color={C.textSecondary}
+                  />
+                </TouchableOpacity>
+              }
+            />
 
             <TouchableOpacity
               activeOpacity={0.7}
@@ -496,6 +491,7 @@ const makeStyles = (C: any) =>
       fontWeight: "900",
       color: C.text,
       marginBottom: 10,
+      textAlign: "center",
     },
 
     subtitle: {
@@ -507,7 +503,7 @@ const makeStyles = (C: any) =>
 
     formCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 34,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -529,7 +525,7 @@ const makeStyles = (C: any) =>
 
     input: {
       backgroundColor: C.background,
-      borderRadius: 18,
+      borderRadius: 58,
       paddingHorizontal: 16,
       paddingVertical: 15,
       fontSize: 15,
@@ -541,7 +537,7 @@ const makeStyles = (C: any) =>
 
     passwordBox: {
       backgroundColor: C.background,
-      borderRadius: 18,
+      borderRadius: 58,
       paddingLeft: 16,
       paddingRight: 8,
       flexDirection: "row",
@@ -562,12 +558,13 @@ const makeStyles = (C: any) =>
       color: C.text,
       paddingVertical: 15,
       paddingRight: 10,
+      borderRadius: 58,
     },
 
     eyeButton: {
       width: 42,
       height: 42,
-      borderRadius: 21,
+      borderRadius: 251,
       alignItems: "center",
       justifyContent: "center",
     },
@@ -592,7 +589,7 @@ const makeStyles = (C: any) =>
       marginBottom: 16,
       padding: 14,
       backgroundColor: C.actionCard,
-      borderRadius: 18,
+      borderRadius: 58,
       borderWidth: 1,
       borderColor: C.border,
 

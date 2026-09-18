@@ -21,7 +21,7 @@ import {
 import { useAppTheme } from '../context/ThemeContext';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 
-const APP_VERSION = '4.0.0';
+const APP_VERSION = '4.5.0';
 
 const Developers = [
   {
@@ -35,15 +35,7 @@ const Developers = [
   {
     name: 'Kelvin Obirigya',
     role: 'kelvinobirigya@gmail.com',
-  },
-  {
-    name: 'Developer Four',
-    role: 'UNKNOWN',
-  },
-  {
-    name: 'Developer Five',
-    role: 'UNKNOWN',
-  },
+  }
 ];
 
 export default function AboutScreen() {
@@ -59,9 +51,9 @@ export default function AboutScreen() {
         contentContainerStyle={styles.scrollContent}
       >
         <GuardianLogoTile
-          size={86}
-          logoSize={70}
-          radius={28}
+          size={150}
+          logoSize={90}
+          radius={289}
           style={styles.logoBox}
         />
 
@@ -128,7 +120,7 @@ export default function AboutScreen() {
           </View>
 
           <View style={{ flex: 1 }}>
-            <Text style={styles.companyName}>TheGuardian.LLC</Text>
+            <Text style={styles.companyName}>Kreed Corporations</Text>
             <Text style={styles.companyText}>
               Product design, mobile development, backend development, and
               a security focused organization.
@@ -160,7 +152,7 @@ export default function AboutScreen() {
         </View>
 
         <Text style={styles.footerText}>
-          © 2026 TheGuardian LLC. All rights reserved.
+          © 2026 Kreed Corporations. All rights reserved.
         </Text>
       </ScrollView>
     </SafeAreaView>
@@ -204,12 +196,12 @@ const makeStyles = (C: any) =>
     },
 
     logoBox: {
+      alignSelf: 'center',
       shadowColor: '#000000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
       elevation: 10,
       shadowOffset: { width: 0, height: 12 },
-
       marginBottom: 20,
     },
 
@@ -218,6 +210,7 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
       color: C.text,
       marginBottom: 10,
+      textAlign: 'center',
     },
 
     subtitle: {
@@ -231,7 +224,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 40,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -252,7 +245,7 @@ const makeStyles = (C: any) =>
 
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: 24,
       backgroundColor: C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
@@ -284,7 +277,7 @@ const makeStyles = (C: any) =>
 
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 32,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -311,7 +304,7 @@ const makeStyles = (C: any) =>
 
       width: 42,
       height: 42,
-      borderRadius: 21,
+      borderRadius: 41,
       backgroundColor: C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
@@ -340,7 +333,7 @@ const makeStyles = (C: any) =>
     companyCard: {
       flexDirection: 'row',
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 32,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -361,7 +354,7 @@ const makeStyles = (C: any) =>
 
       width: 48,
       height: 48,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',

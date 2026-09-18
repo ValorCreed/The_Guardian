@@ -440,7 +440,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       width: '100%',
       maxWidth: 410,
       maxHeight: '78%',
-      borderRadius: 28,
+      borderRadius: 30,
       overflow: 'hidden',
       backgroundColor: isOled
         ? 'rgba(0,0,0,0.97)'
@@ -492,7 +492,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     closeButton: {
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: color(
@@ -524,7 +524,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     issueIcon: {
       width: 42,
       height: 42,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
@@ -591,7 +591,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       alignSelf: 'stretch',
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.primary,
       marginTop: 20,
       paddingHorizontal: 18,

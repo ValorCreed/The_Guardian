@@ -6,7 +6,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -17,6 +16,7 @@ import { api } from "../services/api";
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { useAppTheme } from "../context/ThemeContext";
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const RegisterScreen = () => {
   const screenAlert = useScreenAlert();
@@ -135,23 +135,18 @@ const RegisterScreen = () => {
           </View>
 
           <View style={styles.formCard}>
-            <Text style={styles.label}>Full Name</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Alex Morgan"
-              placeholderTextColor={C.tabInactive}
+            <FloatingLabelInput
+              label="Full Name"
               value={fullName}
               onChangeText={setFullName}
               autoCapitalize="words"
               autoCorrect={false}
               returnKeyType="next"
+              editable={!loading}
             />
 
-            <Text style={styles.label}>Email</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="alex.morgan@gmail.com"
-              placeholderTextColor={C.tabInactive}
+            <FloatingLabelInput
+              label="Email"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -161,68 +156,67 @@ const RegisterScreen = () => {
               textContentType="username"
               importantForAutofill="yes"
               returnKeyType="next"
+              editable={!loading}
             />
 
-            <Text style={styles.label}>Master Password</Text>
-            <View style={styles.passwordBox}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Enter master password"
-                placeholderTextColor={C.tabInactive}
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="new-password"
-                textContentType="newPassword"
-                importantForAutofill="yes"
-                returnKeyType="next"
-              />
+            <FloatingLabelInput
+              label="Master Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              importantForAutofill="yes"
+              returnKeyType="next"
+              editable={!loading}
+              rightAccessory={
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword((current) => !current)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={22}
+                    color={C.textSecondary}
+                  />
+                </TouchableOpacity>
+              }
+            />
 
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword((current) => !current)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={22}
-                  color={C.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>Confirm Password</Text>
-            <View style={styles.passwordBox}>
-              <TextInput
-                style={styles.passwordInput}
-                placeholder="Re-enter master password"
-                placeholderTextColor={C.tabInactive}
-                value={confirmPassword}
-                onChangeText={setConfirmPassword}
-                secureTextEntry={!showConfirmPassword}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoComplete="new-password"
-                textContentType="newPassword"
-                importantForAutofill="yes"
-                returnKeyType="done"
-                onSubmitEditing={handleRegister}
-              />
-
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowConfirmPassword((current) => !current)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
-                  size={22}
-                  color={C.textSecondary}
-                />
-              </TouchableOpacity>
-            </View>
+            <FloatingLabelInput
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showConfirmPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="new-password"
+              textContentType="newPassword"
+              importantForAutofill="yes"
+              returnKeyType="done"
+              onSubmitEditing={handleRegister}
+              editable={!loading}
+              rightAccessory={
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowConfirmPassword((current) => !current)}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={showConfirmPassword ? 'Hide password' : 'Show password'}
+                >
+                  <Ionicons
+                    name={showConfirmPassword ? "eye-off-outline" : "eye-outline"}
+                    size={22}
+                    color={C.textSecondary}
+                  />
+                </TouchableOpacity>
+              }
+            />
           </View>
 
           <TouchableOpacity

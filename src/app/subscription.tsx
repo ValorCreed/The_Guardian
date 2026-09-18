@@ -771,7 +771,7 @@ export default function PlansScreen() {
       >
         <View style={styles.headerRow}>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Choose your protection</Text>
+            <Text style={styles.title}>My Subscription</Text>
             {/* <Text style={styles.headerSubtitle}>
               Family offers the highest level of protection and sharing.
             </Text> */}
@@ -794,13 +794,11 @@ export default function PlansScreen() {
 
         {currentPlan !== 'FREE' && (
           <View style={styles.currentPlanCard}>
-            <View style={styles.currentPlanIcon}>
-              <Clock3 size={22} color={colors.primary} />
-            </View>
+            
 
             <View style={{ flex: 1 }}>
               <Text style={styles.currentPlanTitle}>
-                {currentPlan} plan active
+                {currentPlan}
               </Text>
               <Text style={styles.currentPlanText}>Expires {formatDate(expiresAt)}</Text>
             </View>
@@ -968,7 +966,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       backgroundColor: C.backgroundSelected,
       borderColor: C.primary,
       borderWidth: 1,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 14,
       marginBottom: 18,
     },
@@ -990,7 +988,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       backgroundColor: C.alertWarningBg,
       borderColor: C.warning,
       borderWidth: 1,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 14,
       marginBottom: 18,
     
@@ -1024,6 +1022,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       fontWeight: '800',
       color: C.text,
       letterSpacing: -0.5,
+      textAlign:'center',
     },
 
     headerSubtitle: {
@@ -1037,7 +1036,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     currentPlanCard: {
       flexDirection: 'row',
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 44,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -1058,7 +1057,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
 
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: 24,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.backgroundSelected,
@@ -1070,18 +1069,20 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       fontSize: 16,
       fontWeight: '900',
       marginBottom: 4,
+      textAlign: 'center',
     },
 
     currentPlanText: {
       color: C.textSecondary,
       fontSize: 13,
       lineHeight: 19,
+      textAlign: 'center',
     },
 
     card: {
       position: 'relative',
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       padding: 20,
@@ -1286,7 +1287,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
       alignItems: 'center',
       gap: 10,
       padding: 11,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: isDark
         ? 'rgba(255,255,255,0.08)'
         : 'rgba(255,255,255,0.70)',
@@ -1483,7 +1484,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
 
     upgradeButton: {
       backgroundColor: C.securityScore,
-      borderRadius: 30,
+      borderRadius: 32,
       paddingVertical: 14,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1503,7 +1504,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
 
     chooseFamilyButton: {
       backgroundColor: FAMILY_ACCENT,
-      borderRadius: 30,
+      borderRadius: 32,
       paddingVertical: 16,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1529,7 +1530,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) =>
     },
 
     cancelButton: {
-      borderRadius: 30,
+      borderRadius: 32,
       paddingVertical: 15,
       alignItems: 'center',
       justifyContent: 'center',

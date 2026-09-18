@@ -932,12 +932,12 @@ const makeStyles = (C: any) =>
     skeletonPageSubtitle: {
       width: '96%',
       height: 54,
-      borderRadius: 16,
+      borderRadius: 18,
       marginBottom: 20,
     },
     skeletonCardShell: {
       width: '100%',
-      borderRadius: 26,
+      borderRadius: 28,
       marginBottom: 22,
       backgroundColor: C.backgroundElement,
       shadowColor: '#000',
@@ -954,7 +954,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       width: '100%',
-      borderRadius: 26,
+      borderRadius: 28,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1034,7 +1034,7 @@ const makeStyles = (C: any) =>
 
       width: '100%',
       height: 50,
-      borderRadius: 18,
+      borderRadius: 20,
       marginTop: 18,
     },
     skeletonSectionHeader: {
@@ -1068,7 +1068,7 @@ const makeStyles = (C: any) =>
 
       width: 56,
       height: 32,
-      borderRadius: 18,
+      borderRadius: 20,
       flexShrink: 0,
     },
     skeletonLabel: {
@@ -1198,7 +1198,7 @@ const makeStyles = (C: any) =>
       marginBottom: 20,
     },
     heroShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 20,
       shadowColor: '#000',
       shadowOpacity: 0.24,
@@ -1208,7 +1208,7 @@ const makeStyles = (C: any) =>
     },
     hero: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 19,
       borderWidth: 1,
       borderColor: C.border,
@@ -1329,7 +1329,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       marginBottom: 18,
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 13,
       backgroundColor: `${C.warning}12`,
       borderWidth: 1,
@@ -1353,7 +1353,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       marginTop: 14,
-      borderRadius: 16,
+      borderRadius: 18,
       padding: 12,
       backgroundColor: `${C.warning}12`,
       borderWidth: 1,
@@ -1371,7 +1371,7 @@ const makeStyles = (C: any) =>
     },
     dangerStrip: {
       marginTop: 14,
-      borderRadius: 16,
+      borderRadius: 18,
       padding: 12,
       backgroundColor: `${C.danger}12`,
       borderWidth: 1,
@@ -1396,7 +1396,7 @@ const makeStyles = (C: any) =>
 
       marginTop: 16,
       minHeight: 50,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.actionCard,
       borderWidth: 1,
       borderColor: `${C.primary}55`,
@@ -1436,7 +1436,7 @@ const makeStyles = (C: any) =>
 
       width: 56,
       height: 32,
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 3,
       backgroundColor: C.backgroundSelected,
       borderWidth: 1,
@@ -1483,7 +1483,7 @@ const makeStyles = (C: any) =>
       marginBottom: 10,
     },
     optionsShell: {
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 18,
       shadowColor: '#000',
       shadowOpacity: 0.2,
@@ -1499,7 +1499,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1595,7 +1595,7 @@ const makeStyles = (C: any) =>
       elevation: 10,
       shadowOffset: { width: 0, height: 12 },
 
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 16,
       marginBottom: 18,
       backgroundColor: C.backgroundElement,
@@ -1614,7 +1614,7 @@ const makeStyles = (C: any) =>
 
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1626,7 +1626,7 @@ const makeStyles = (C: any) =>
       elevation: 10,
       shadowOffset: { width: 0, height: 12 },
 
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 13,
       marginTop: -5,
       marginBottom: 18,
@@ -1689,7 +1689,7 @@ const makeStyles = (C: any) =>
       marginBottom: 18,
     },
     summaryShell: {
-      borderRadius: 24,
+      borderRadius: 26,
       marginTop: 8,
       marginBottom: 18,
       shadowColor: '#000',
@@ -1706,7 +1706,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1774,7 +1774,7 @@ const makeStyles = (C: any) =>
       paddingHorizontal: 14,
     },
     lockedCardShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -1789,7 +1789,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
 
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 21,
       borderWidth: 1,
       borderColor: C.border,
@@ -1804,7 +1804,7 @@ const makeStyles = (C: any) =>
 
       width: 66,
       height: 66,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',

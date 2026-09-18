@@ -6,6 +6,7 @@ import {
   RefreshControl,
   ScrollView,
   Share,
+  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -25,9 +26,7 @@ import {
   HardDriveDownload,
   History,
   LockKeyhole,
-  RefreshCw,
   ShieldCheck,
-  Trash2,
   UploadCloud,
 } from 'lucide-react-native';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -49,6 +48,8 @@ import {
 } from '../services/securityScoreSync';
 import { safeLogError } from '../utils/asyncResilience';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
+import { hapticSelection } from '../utils/haptics';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -255,7 +256,13 @@ export default function BackupScreen() {
   const [allowed, setAllowed] = useState(false);
   const [status, setStatus] = useState<BackupStatusResponse | null>(null);
   const [history, setHistory] = useState<BackupHistoryItem[]>([]);
+  const [selectedBackupId, setSelectedBackupId] = useState<string | null>(null);
   const [lastRestore, setLastRestore] = useState<BackupRestoreResponse | null>(null);
+
+  const selectedBackup = useMemo(
+    () => history.find((item) => item.id === selectedBackupId) || null,
+    [history, selectedBackupId]
+  );
 
   const currentPlanLabel = useMemo(() => {
     return plan.charAt(0) + plan.slice(1).toLowerCase();
@@ -600,7 +607,7 @@ export default function BackupScreen() {
         <Crown size={38} color={C.warning} />
       </View>
 
-      <Text style={styles.title}>Encrypted Backup</Text>
+      <Text style={styles.title}>Backup</Text>
       <Text style={styles.subtitle}>
         Backup and restore are Premium and Family features. Your current plan is {currentPlanLabel}.
       </Text>
@@ -644,7 +651,7 @@ export default function BackupScreen() {
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
     >
-      <AnimatedSkeleton styles={styles} style={styles.skeletonHeroIcon} />
+      
       <AnimatedSkeleton styles={styles} style={styles.skeletonPageTitle} />
       <AnimatedSkeleton styles={styles} style={styles.skeletonSubtitle} />
 
@@ -709,14 +716,14 @@ export default function BackupScreen() {
             />
           }
         >
-          <View style={styles.heroIcon}>
+          {/* <View style={styles.heroIcon}>
             <DatabaseBackup size={38} color="#fff" />
-          </View>
+          </View> */}
 
-          <Text style={styles.title}>Encrypted Backup</Text>
-          <Text style={styles.subtitle}>
+          <Text style={styles.title}>Backup</Text>
+          {/* <Text style={styles.subtitle}>
             Create, import and restore encrypted backups.
-          </Text>
+          </Text> */}
 
           <View style={styles.statusCard}>
             <View style={styles.statusHeaderRow}>
@@ -737,9 +744,9 @@ export default function BackupScreen() {
               <StatBox label="Family" value={status?.familyMemberCount ?? 0} styles={styles} />
             </View>
 
-            <Text style={styles.expiryText}>
-              Plan: {currentPlanLabel} · Expires {formatDate(status?.subscriptionExpiresAt)}
-            </Text>
+            {/* <Text style={styles.expiryText}>
+              Plan: {currentPlanLabel} {"\n"} Expires {formatDate(status?.subscriptionExpiresAt)}
+            </Text> */}
           </View>
 
           <View style={styles.actionCard}>
@@ -822,8 +829,30 @@ export default function BackupScreen() {
               </Text>
             </View>
           ) : (
-            history.map((item) => (
-              <View key={item.id} style={styles.historyCard}>
+            history.map((item) => {
+              const selected = selectedBackupId === item.id;
+
+              return (
+              <Pressable
+                key={item.id}
+                delayLongPress={500}
+                onLongPress={() => {
+                  hapticSelection();
+                  setSelectedBackupId(item.id);
+                }}
+                onPress={() => {
+                  if (selectedBackupId !== null) {
+                    setSelectedBackupId(selected ? null : item.id);
+                  }
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Backup ${item.fileName}`}
+                accessibilityHint="Press and hold to select backup actions"
+                style={[
+                  styles.historyCard,
+                  selected && { borderColor: C.primary, borderWidth: 2 },
+                ]}
+              >
                 <View style={styles.historyTopRow}>
                   <View style={styles.fileIconCircle}>
                     <FileKey2 size={20} color={C.primary} />
@@ -846,57 +875,63 @@ export default function BackupScreen() {
 
                 <Text style={styles.pathText} numberOfLines={2}>{item.path}</Text>
 
-                <View style={styles.historyActionsRow}>
-                  <TouchableOpacity
-                    style={[styles.smallActionButton, restoring && styles.disabledButton]}
-                    activeOpacity={0.8}
-                    onPress={() => restoreFromHistory(item)}
-                    disabled={restoring || creating || importing}
-                  >
-                    {restoring ? (
-                      <ActivityIndicator size="small" color={C.primary} />
-                    ) : (
-                      <ArchiveRestore size={16} color={C.primary} />
-                    )}
-                    <Text style={styles.smallActionText}>Restore</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.smallActionButton}
-                    activeOpacity={0.8}
-                    onPress={() => shareBackupInfo(item)}
-                    disabled={sharingId === item.id}
-                  >
-                    {sharingId === item.id ? (
-                      <ActivityIndicator size="small" color={C.primary} />
-                    ) : (
-                      <RefreshCw size={16} color={C.primary} />
-                    )}
-                    <Text style={styles.smallActionText}>Share info</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[styles.smallDangerButton, deletingId === item.id && styles.disabledButton]}
-                    activeOpacity={0.8}
-                    onPress={() => deleteHistoryItem(item)}
-                    disabled={deletingId === item.id}
-                  >
-                    {deletingId === item.id ? (
-                      <ActivityIndicator size="small" color={C.danger} />
-                    ) : (
-                      <Trash2 size={16} color={C.danger} />
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ))
+              </Pressable>
+              );
+            })
           )}
 
-          <Text style={styles.footnote}>
+          {/* <Text style={styles.footnote}>
             Restore currently restores passwords, cards, and documents. Family memberships are included in backup metadata but are not recreated during restore.
-          </Text>
+          </Text> */}
         </ScrollView>
       )}
+
+      <FloatingActionBar
+        visible={Boolean(allowed && selectedBackup)}
+        onDismiss={() => setSelectedBackupId(null)}
+        actions={
+          selectedBackup
+            ? [
+                {
+                  key: 'restore-backup',
+                  label: restoring ? 'Restoring' : 'Restore',
+                  icon: 'refresh-outline',
+                  tone: 'primary',
+                  loading: restoring,
+                  disabled: creating || importing,
+                  onPress: () => {
+                    const selected = selectedBackup;
+                    setSelectedBackupId(null);
+                    void restoreFromHistory(selected);
+                  },
+                },
+                {
+                  key: 'share-backup',
+                  label: sharingId === selectedBackup.id ? 'Sharing' : 'Share',
+                  icon: 'share-outline',
+                  loading: sharingId === selectedBackup.id,
+                  onPress: () => {
+                    const selected = selectedBackup;
+                    setSelectedBackupId(null);
+                    void shareBackupInfo(selected);
+                  },
+                },
+                {
+                  key: 'delete-backup',
+                  label: deletingId === selectedBackup.id ? 'Deleting' : 'Delete',
+                  icon: 'trash-outline',
+                  tone: 'danger',
+                  loading: deletingId === selectedBackup.id,
+                  onPress: () => {
+                    const selected = selectedBackup;
+                    setSelectedBackupId(null);
+                    deleteHistoryItem(selected);
+                  },
+                },
+              ]
+            : []
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -990,7 +1025,7 @@ const makeStyles = (C: any) =>
 
       width: 82,
       height: 82,
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 20,
     },
 
@@ -998,6 +1033,9 @@ const makeStyles = (C: any) =>
       width: '56%',
       height: 30,
       marginBottom: 12,
+      alignContent: 'center',
+      justifyContent: 'center',
+      alignSelf: 'center',
     },
 
     skeletonSubtitle: {
@@ -1063,7 +1101,7 @@ const makeStyles = (C: any) =>
 
       width: 42,
       height: 42,
-      borderRadius: 18,
+      borderRadius: 20,
     },
 
     skeletonHistoryTitle: {
@@ -1089,10 +1127,13 @@ const makeStyles = (C: any) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
+      textAlign: 'center',
+      alignContent: 'center',
+      
 
       width: 82,
       height: 82,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1108,7 +1149,7 @@ const makeStyles = (C: any) =>
 
       width: 82,
       height: 82,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.securityScoreBg,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1122,6 +1163,7 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
       color: C.text,
       marginBottom: 8,
+      textAlign: 'center',
     },
 
     subtitle: {
@@ -1133,7 +1175,7 @@ const makeStyles = (C: any) =>
 
     infoCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1160,7 +1202,7 @@ const makeStyles = (C: any) =>
 
       width: 44,
       height: 44,
-      borderRadius: 22,
+      borderRadius: 24,
       backgroundColor: C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1188,7 +1230,7 @@ const makeStyles = (C: any) =>
 
     statusCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 16,
@@ -1261,7 +1303,7 @@ const makeStyles = (C: any) =>
     statBox: {
       width: '47.8%',
       backgroundColor: C.backgroundSelected,
-      borderRadius: 16,
+      borderRadius: 18,
       paddingVertical: 12,
       paddingHorizontal: 12,
 
@@ -1291,7 +1333,7 @@ const makeStyles = (C: any) =>
 
     actionCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 16,
@@ -1374,7 +1416,7 @@ const makeStyles = (C: any) =>
 
     restoreResultCard: {
       backgroundColor: C.actionCard,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.primary,
       padding: 16,
@@ -1448,7 +1490,7 @@ const makeStyles = (C: any) =>
 
     emptyCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 22,
@@ -1478,7 +1520,7 @@ const makeStyles = (C: any) =>
 
     historyCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 15,

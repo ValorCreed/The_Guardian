@@ -17,9 +17,13 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { AppThemeProvider, useAppTheme } from '../context/ThemeContext';
 import { BlurTargetProvider } from '../context/BlurTargetContext';
+import { FloatingActionBarProvider } from '../context/FloatingActionBarContext';
+import { FloatingHeaderActionsProvider } from '../context/FloatingHeaderActionsContext';
 import { AppAlertProvider } from '../context/AppAlertContext';
 import { useAutoLock } from '../hooks/useAutoLock';
 import FloatingTabBar from '../components/FloatingTabBar';
+import { FloatingActionBarHost } from '../components/FloatingActionBar';
+import { FloatingHeaderActionsHost } from '../components/FloatingHeaderActions';
 import AnimatedBlurBackButton from '../components/AnimatedBlurBackButton';
 import AppErrorBoundary from '../components/AppErrorBoundary';
 import { AnalyticsProvider, AnalyticsRouteTracker } from '../services/analytics';
@@ -702,7 +706,8 @@ function AppStack() {
             <AnimatedBlurBackButton onPress={() => void handleGlobalBackPress()} />
           )}
 
-          {showTabBar && <FloatingTabBar />}
+          {showTabBar ? <FloatingTabBar /> : <FloatingActionBarHost />}
+          <FloatingHeaderActionsHost />
 
           <Modal
             visible={lockdownExitVisible}
@@ -792,7 +797,7 @@ const layoutStyles = StyleSheet.create({
   lockdownModalCard: {
     width: '100%',
     maxWidth: 390,
-    borderRadius: 28,
+    borderRadius: 30,
     borderWidth: 1,
     paddingHorizontal: 22,
     paddingVertical: 24,
@@ -806,7 +811,7 @@ const layoutStyles = StyleSheet.create({
   lockdownModalIcon: {
     width: 58,
     height: 58,
-    borderRadius: 20,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 15,
@@ -843,7 +848,11 @@ export default function RootLayout() {
     <AppErrorBoundary>
       <AppThemeProvider>
         <AnalyticsProvider>
-          <AppStack />
+          <FloatingActionBarProvider>
+            <FloatingHeaderActionsProvider>
+              <AppStack />
+            </FloatingHeaderActionsProvider>
+          </FloatingActionBarProvider>
         </AnalyticsProvider>
       </AppThemeProvider>
     </AppErrorBoundary>

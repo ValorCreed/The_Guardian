@@ -21,6 +21,7 @@ import { api } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import GuardianLogoTile from '../components/GuardianLogoTitle';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type RecoveryMode = 'kit' | 'erase';
 
@@ -166,10 +167,9 @@ export default function AccountRecoveryScreen() {
     <>
       <Text style={styles.label}>New master password</Text>
       <View style={styles.passwordWrap}>
-        <TextInput
+        <FloatingLabelInput
           style={styles.passwordInput}
-          placeholder="Enter new password"
-          placeholderTextColor={C.tabInactive}
+          label="New master password"
           value={newPassword}
           onChangeText={setNewPassword}
           secureTextEntry={!showPassword}
@@ -185,11 +185,9 @@ export default function AccountRecoveryScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.label}>Confirm master password</Text>
-      <TextInput
+      <FloatingLabelInput
         style={styles.input}
-        placeholder="Confirm new password"
-        placeholderTextColor={C.tabInactive}
+        label="Confirm master password"
         value={confirmPassword}
         onChangeText={setConfirmPassword}
         secureTextEntry={!showPassword}
@@ -291,11 +289,9 @@ export default function AccountRecoveryScreen() {
           <View style={styles.formCard}>
             {mode === 'kit' ? (
               <>
-                <Text style={styles.label}>Recovery ID</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
-                  placeholder="RK-XXXXXXXXXXXXXXXX"
-                  placeholderTextColor={C.tabInactive}
+                  label="Recovery ID"
                   value={recoveryId}
                   onChangeText={(value) => setRecoveryId(value.toUpperCase())}
                   autoCapitalize="characters"
@@ -304,11 +300,9 @@ export default function AccountRecoveryScreen() {
                   returnKeyType="next"
                 />
 
-                <Text style={styles.label}>Recovery key</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
-                  placeholder="XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX"
-                  placeholderTextColor={C.tabInactive}
+                  label="Recovery key"
                   value={recoveryKey}
                   onChangeText={(value) => setRecoveryKey(value.toUpperCase())}
                   autoCapitalize="characters"
@@ -330,11 +324,9 @@ export default function AccountRecoveryScreen() {
               </>
             ) : (
               <>
-                <Text style={styles.label}>Email address</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
-                  placeholder="you@example.com"
-                  placeholderTextColor={C.tabInactive}
+                  label="Email address"
                   value={email}
                   onChangeText={setEmail}
                   autoCapitalize="none"
@@ -362,11 +354,9 @@ export default function AccountRecoveryScreen() {
                   )}
                 </TouchableOpacity>
 
-                <Text style={styles.label}>Account reset code</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
-                  placeholder="6-digit code"
-                  placeholderTextColor={C.tabInactive}
+                  label="Account reset code"
                   value={resetCode}
                   onChangeText={setResetCode}
                   keyboardType="number-pad"
@@ -415,7 +405,7 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       gap: 12,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: `${C.primary}45`,
       padding: 15,
@@ -426,7 +416,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 8 },
       elevation: 4,
     },
-    circleIcon: { width: 48, height: 48, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    circleIcon: { width: 48, height: 48, borderRadius: 20, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     circleTitleRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 7 },
     circleTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     circleText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 5 },
@@ -468,7 +458,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 12,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 15,
@@ -484,7 +474,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 12,
       backgroundColor: C.securityScoreBg || C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.danger,
       padding: 15,
@@ -498,7 +488,7 @@ const makeStyles = (C: any) =>
     dangerText: { flex: 1, color: C.danger, fontSize: 13, lineHeight: 20, fontWeight: '800' },
     formCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,
@@ -511,7 +501,7 @@ const makeStyles = (C: any) =>
     label: { fontSize: 13, color: C.text, fontWeight: '800', marginBottom: 8, marginLeft: 4 },
     input: {
       backgroundColor: C.background,
-      borderRadius: 18,
+      borderRadius: 20,
       paddingHorizontal: 16,
       paddingVertical: 15,
       fontSize: 15,
@@ -524,7 +514,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.background,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: C.border,
       marginBottom: 16,

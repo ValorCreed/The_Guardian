@@ -29,6 +29,7 @@ import {
 import { formatExpiryInput, validateCardForm } from '../utils/cardValidation';
 import { syncGuardianAutofillCache } from '../services/autofillSync';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -323,11 +324,10 @@ const AddCardScreen = () => {
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.label}>Cardholder name</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="Alex Morgan"
-              placeholderTextColor={C.tabInactive}
+              containerStyle={styles.inputDepth}
+              label="Cardholder name"
               value={cardholderName}
               onChangeText={setCardholderName}
               autoCapitalize="words"
@@ -339,12 +339,11 @@ const AddCardScreen = () => {
               onSubmitEditing={() => cardNumberRef.current?.focus()}
             />
 
-            <Text style={styles.label}>Card number</Text>
-            <TextInput
+            <FloatingLabelInput
               ref={cardNumberRef}
               style={styles.input}
-              placeholder="0000 0000 0000 0000"
-              placeholderTextColor={C.tabInactive}
+              containerStyle={styles.inputDepth}
+              label="Card number"
               value={cardNumber}
               onChangeText={handleCardNumberChange}
               keyboardType="number-pad"
@@ -393,12 +392,11 @@ const AddCardScreen = () => {
 
             <View style={styles.row}>
               <View style={styles.halfField}>
-                <Text style={styles.label}>Expiry</Text>
-                <TextInput
+                <FloatingLabelInput
                   ref={expiryRef}
-                  style={styles.input}
-                  placeholder="MM/YY"
-                  placeholderTextColor={C.tabInactive}
+                  style={styles.halfInput}
+                  containerStyle={styles.inputDepth}
+                  label="Expiry"
                   value={expiry}
                   onChangeText={(value) => setExpiry(formatExpiryInput(value))}
                   keyboardType="number-pad"
@@ -411,19 +409,11 @@ const AddCardScreen = () => {
               </View>
 
               <View style={styles.halfField}>
-                <View style={styles.securityCodeLabelRow}>
-                  <Text style={styles.label}>CVV</Text>
-                  <Text style={styles.securityCodeHint}>
-                    {cardDetails.securityCodeLength} digits
-                  </Text>
-                </View>
-                <TextInput
+                <FloatingLabelInput
                   ref={cvvRef}
-                  style={styles.input}
-                  placeholder={
-                    cardDetails.securityCodeLength === 4 ? '••••' : '•••'
-                  }
-                  placeholderTextColor={C.tabInactive}
+                  style={styles.halfInput}
+                  containerStyle={styles.inputDepth}
+                  label="CVV"
                   value={cvv}
                   onChangeText={(value) =>
                     setCvv(
@@ -439,16 +429,16 @@ const AddCardScreen = () => {
                   returnKeyType="next"
                   blurOnSubmit={false}
                   onSubmitEditing={() => notesRef.current?.focus()}
+                  accessibilityHint={`${cardDetails.securityCodeLength}-digit card security code`}
                 />
               </View>
             </View>
 
-            <Text style={styles.label}>Notes</Text>
-            <TextInput
+            <FloatingLabelInput
               ref={notesRef}
               style={styles.notesInput}
-              placeholder="Add optional notes..."
-              placeholderTextColor={C.tabInactive}
+              containerStyle={styles.notesDepth}
+              label="Notes"
               value={notes}
               onChangeText={setNotes}
               multiline
@@ -518,6 +508,7 @@ const makeStyles = (C: ThemePalette) =>
       fontWeight: '900',
       color: C.text,
       letterSpacing: -0.4,
+      textAlign: 'center',
     },
     headerSubTitle: {
       color: C.textSecondary,
@@ -527,7 +518,7 @@ const makeStyles = (C: ThemePalette) =>
     },
     cardPreview: {
       backgroundColor: C.primary,
-      borderRadius: 28,
+      borderRadius: 30,
       marginHorizontal: 20,
       marginBottom: 28,
       padding: 24,
@@ -598,25 +589,39 @@ const makeStyles = (C: ThemePalette) =>
       marginLeft: 2,
     },
     input: {
+      minHeight: 55,
       backgroundColor: C.backgroundElement,
-      borderRadius: 18,
+      borderRadius: 49,
       paddingHorizontal: 18,
-      paddingVertical: 16,
       fontSize: 15,
       color: C.text,
       marginBottom: 18,
       borderWidth: 1,
       borderColor: C.border,
       fontWeight: '700',
+    },
+    halfInput: {
+      minHeight: 55,
+      backgroundColor: C.backgroundElement,
+      borderRadius: 49,
+      paddingHorizontal: 16,
+      fontSize: 15,
+      color: C.text,
+      marginBottom: 18,
+      borderWidth: 1,
+      borderColor: C.border,
+      fontWeight: '700',
+    },
+    inputDepth: {
       shadowColor: '#000000',
-      shadowOpacity: 0.035,
-      shadowRadius: 12,
+      shadowOpacity: 0.075,
+      shadowRadius: 11,
       shadowOffset: { width: 0, height: 6 },
-      elevation: 2,
+      elevation: 4,
     },
     detectedCard: {
       minHeight: 72,
-      borderRadius: 20,
+      borderRadius: 42,
       paddingHorizontal: 14,
       paddingVertical: 12,
       marginBottom: 18,
@@ -671,22 +676,18 @@ const makeStyles = (C: ThemePalette) =>
       fontWeight: '900',
       letterSpacing: 0.6,
     },
-    row: { flexDirection: 'row', gap: 12 },
-    halfField: { flex: 1 },
-    securityCodeLabelRow: {
+    row: {
       flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
+      alignItems: 'flex-start',
+      gap: 10,
     },
-    securityCodeHint: {
-      color: C.textSecondary,
-      fontSize: 10,
-      fontWeight: '800',
-      marginBottom: 8,
+    halfField: {
+      flex: 1,
+      minWidth: 0,
     },
     notesInput: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 34,
       paddingHorizontal: 18,
       paddingVertical: 16,
       fontSize: 15,
@@ -697,11 +698,13 @@ const makeStyles = (C: ThemePalette) =>
       minHeight: 110,
       textAlignVertical: 'top',
       fontWeight: '700',
+    },
+    notesDepth: {
       shadowColor: '#000000',
-      shadowOpacity: 0.035,
-      shadowRadius: 12,
+      shadowOpacity: 0.075,
+      shadowRadius: 11,
       shadowOffset: { width: 0, height: 6 },
-      elevation: 2,
+      elevation: 4,
     },
     saveBtn: {
       marginHorizontal: 20,
@@ -731,7 +734,7 @@ const makeStyles = (C: ThemePalette) =>
     cardIconLarge: {
       width: 86,
       height: 86,
-      borderRadius: 30,
+      borderRadius: 32,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',

@@ -4,6 +4,7 @@ import {
   KeyboardAvoidingView,
   Modal,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -39,6 +40,7 @@ import {
   useCancelableApi,
 } from '../hooks/useCancelableApi';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import FloatingActionBar from '../components/FloatingActionBar';
 import {
   hapticDelete,
   hapticLight,
@@ -51,6 +53,7 @@ import {
   setSecureClipboard,
 } from '../utils/secureClipboard';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const ACTIONS: Array<{
   value: EstateActionType;
@@ -193,6 +196,10 @@ export default function EstatePlaybooksScreen() {
   const [itemModalVisible, setItemModalVisible] = useState(false);
   const [loadingReleasedItem, setLoadingReleasedItem] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [selectedContext, setSelectedContext] = useState<{
+    kind: 'playbook' | 'ownerExecution' | 'receivedExecution';
+    id: number;
+  } | null>(null);
 
   useSensitiveScreenProtection(true);
 
@@ -202,6 +209,30 @@ export default function EstatePlaybooksScreen() {
         (item) => itemKey(item.itemType, item.id) === selectedItemKey
       ) || null,
     [overview, selectedItemKey]
+  );
+
+  const selectedPlaybook = useMemo(
+    () =>
+      selectedContext?.kind === 'playbook'
+        ? overview?.playbooks.find((item) => item.id === selectedContext.id) || null
+        : null,
+    [overview, selectedContext]
+  );
+
+  const selectedOwnerExecution = useMemo(
+    () =>
+      selectedContext?.kind === 'ownerExecution'
+        ? overview?.releasedByMe.find((item) => item.id === selectedContext.id) || null
+        : null,
+    [overview, selectedContext]
+  );
+
+  const selectedReceivedExecution = useMemo(
+    () =>
+      selectedContext?.kind === 'receivedExecution'
+        ? overview?.received.find((item) => item.id === selectedContext.id) || null
+        : null,
+    [overview, selectedContext]
   );
 
   const eligibleContacts = useMemo(
@@ -265,6 +296,7 @@ export default function EstatePlaybooksScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setSelectedContext(null);
       void load(true);
     }, [load])
   );
@@ -372,6 +404,7 @@ export default function EstatePlaybooksScreen() {
 
   const editPlaybook = (playbook: EstatePlaybook) => {
     hapticLight();
+    setSelectedContext(null);
     setEditingId(playbook.id);
     setSelectedItemKey(itemKey(playbook.itemType, playbook.itemId));
     setActionType(playbook.actionType);
@@ -664,7 +697,7 @@ export default function EstatePlaybooksScreen() {
         >
           <Text style={styles.title}>Digital Estate Playbooks</Text>
           <Text style={styles.subtitle}>
-            Choose the item, recipient and release trigger.
+            
           </Text>
 
           <View style={styles.heroShell}>
@@ -673,7 +706,7 @@ export default function EstatePlaybooksScreen() {
                 <Ionicons name="library-outline" size={28} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.heroEyebrow}>DIGITAL CONTINUITY</Text>
+                {/* <Text style={styles.heroEyebrow}>DIGITAL CONTINUITY</Text> */}
                 <Text style={styles.heroTitle}>
                   {overview?.playbooks.length || 0} active or paused playbook
                   {(overview?.playbooks.length || 0) === 1 ? '' : 's'}
@@ -688,6 +721,7 @@ export default function EstatePlaybooksScreen() {
               style={[styles.tabButton, tab === 'PLAN' && styles.tabButtonActive]}
               onPress={() => {
                 hapticSelection();
+                setSelectedContext(null);
                 setTab('PLAN');
               }}
             >
@@ -704,6 +738,7 @@ export default function EstatePlaybooksScreen() {
               style={[styles.tabButton, tab === 'RECEIVED' && styles.tabButtonActive]}
               onPress={() => {
                 hapticSelection();
+                setSelectedContext(null);
                 setTab('RECEIVED');
               }}
             >
@@ -759,6 +794,7 @@ export default function EstatePlaybooksScreen() {
                   activeOpacity={0.86}
                   onPress={() => {
                     hapticLight();
+                    setSelectedContext(null);
                     setFormVisible(true);
                   }}
                 >
@@ -946,13 +982,11 @@ export default function EstatePlaybooksScreen() {
 
                     {actionType !== 'NEVER_RELEASE' && (
                       <>
-                        <Text style={styles.label}>INSTRUCTIONS</Text>
-                        <TextInput
+                        <FloatingLabelInput
                           style={styles.instructionsInput}
                           value={instructions}
                           onChangeText={setInstructions}
-                          placeholder="Add the steps the recipient should follow."
-                          placeholderTextColor={C.tabInactive}
+                          label="INSTRUCTIONS"
                           multiline
                           maxLength={4000}
                           textAlignVertical="top"
@@ -988,11 +1022,24 @@ export default function EstatePlaybooksScreen() {
                     C={C}
                     styles={styles}
                     working={workingId === playbook.id}
-                    onEdit={() => editPlaybook(playbook)}
-                    onToggle={() => void togglePlaybook(playbook)}
-                    onRelease={() => releaseNow(playbook)}
-                    onArchive={() => archivePlaybook(playbook)}
-                    canConfigure={canChangePlaybooks}
+                    selected={
+                      selectedContext?.kind === 'playbook' &&
+                      selectedContext.id === playbook.id
+                    }
+                    selectionModeActive={Boolean(selectedContext)}
+                    onLongPress={() => {
+                      if (workingId === playbook.id) return;
+                      hapticSelection();
+                      setSelectedContext({ kind: 'playbook', id: playbook.id });
+                    }}
+                    onPress={() => {
+                      if (!selectedContext || workingId === playbook.id) return;
+                      setSelectedContext((current) =>
+                        current?.kind === 'playbook' && current.id === playbook.id
+                          ? null
+                          : { kind: 'playbook', id: playbook.id }
+                      );
+                    }}
                   />
                 ))
               ) : (
@@ -1015,9 +1062,24 @@ export default function EstatePlaybooksScreen() {
                     C={C}
                     styles={styles}
                     working={workingId === execution.id}
-                    onOpen={() => undefined}
-                    onCancel={() => cancelRelease(execution)}
-                    onComplete={() => undefined}
+                    selected={
+                      selectedContext?.kind === 'ownerExecution' &&
+                      selectedContext.id === execution.id
+                    }
+                    selectionModeActive={Boolean(selectedContext)}
+                    onLongPress={() => {
+                      if (!execution.canCancel || workingId === execution.id) return;
+                      hapticSelection();
+                      setSelectedContext({ kind: 'ownerExecution', id: execution.id });
+                    }}
+                    onPress={() => {
+                      if (!selectedContext || !execution.canCancel || workingId === execution.id) return;
+                      setSelectedContext((current) =>
+                        current?.kind === 'ownerExecution' && current.id === execution.id
+                          ? null
+                          : { kind: 'ownerExecution', id: execution.id }
+                      );
+                    }}
                   />
                 ))
               ) : (
@@ -1039,9 +1101,30 @@ export default function EstatePlaybooksScreen() {
                 C={C}
                 styles={styles}
                 working={workingId === execution.id}
-                onOpen={() => void openReleasedItem(execution)}
-                onCancel={() => undefined}
-                onComplete={() => void completeExecution(execution)}
+                selected={
+                  selectedContext?.kind === 'receivedExecution' &&
+                  selectedContext.id === execution.id
+                }
+                selectionModeActive={Boolean(selectedContext)}
+                onLongPress={() => {
+                  if ((!execution.canOpen && !execution.canComplete) || workingId === execution.id) return;
+                  hapticSelection();
+                  setSelectedContext({ kind: 'receivedExecution', id: execution.id });
+                }}
+                onPress={() => {
+                  if (
+                    !selectedContext ||
+                    (!execution.canOpen && !execution.canComplete) ||
+                    workingId === execution.id
+                  ) {
+                    return;
+                  }
+                  setSelectedContext((current) =>
+                    current?.kind === 'receivedExecution' && current.id === execution.id
+                      ? null
+                      : { kind: 'receivedExecution', id: execution.id }
+                  );
+                }}
               />
             ))
           ) : (
@@ -1054,15 +1137,146 @@ export default function EstatePlaybooksScreen() {
             />
           )}
 
-          <View style={styles.truthCard}>
+          {/* <View style={styles.truthCard}>
             <Ionicons name="information-circle-outline" size={21} color={C.primary} />
             <Text style={styles.truthText}>
               Guardian releases the linked vault information and records recipient acknowledgement. It cannot guarantee that an external provider transferred, cancelled, deleted or archived an account.
             </Text>
-          </View>
+          </View> */}
           <View style={{ height: 80 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <FloatingActionBar
+        visible={
+          !formVisible &&
+          !itemModalVisible &&
+          Boolean(selectedPlaybook || selectedOwnerExecution || selectedReceivedExecution)
+        }
+        onDismiss={() => setSelectedContext(null)}
+        actions={
+          selectedPlaybook
+            ? [
+                ...(canChangePlaybooks
+                  ? [
+                      {
+                        key: 'estate-edit-playbook',
+                        label: 'Edit',
+                        icon: 'create-outline' as const,
+                        tone: 'primary' as const,
+                        onPress: () => {
+                          const playbook = selectedPlaybook;
+                          setSelectedContext(null);
+                          editPlaybook(playbook);
+                        },
+                      },
+                    ]
+                  : []),
+                ...((selectedPlaybook.status === 'ACTIVE' || canChangePlaybooks)
+                  ? [
+                      {
+                        key: 'estate-toggle-playbook',
+                        label: selectedPlaybook.status === 'ACTIVE' ? 'Pause' : 'Resume',
+                        icon:
+                          selectedPlaybook.status === 'ACTIVE'
+                            ? ('pause-outline' as const)
+                            : ('play-outline' as const),
+                        loading: workingId === selectedPlaybook.id,
+                        onPress: () => {
+                          const playbook = selectedPlaybook;
+                          setSelectedContext(null);
+                          void togglePlaybook(playbook);
+                        },
+                      },
+                    ]
+                  : []),
+                ...(canChangePlaybooks &&
+                selectedPlaybook.actionType !== 'NEVER_RELEASE' &&
+                selectedPlaybook.status === 'ACTIVE' &&
+                selectedPlaybook.itemAvailable
+                  ? [
+                      {
+                        key: 'estate-release-playbook',
+                        label: 'Release',
+                        icon: 'send-outline' as const,
+                        tone: 'primary' as const,
+                        onPress: () => {
+                          const playbook = selectedPlaybook;
+                          setSelectedContext(null);
+                          releaseNow(playbook);
+                        },
+                      },
+                    ]
+                  : []),
+                {
+                  key: 'estate-archive-playbook',
+                  label: 'Archive',
+                  icon: 'archive-outline',
+                  tone: 'danger',
+                  loading: workingId === selectedPlaybook.id,
+                  onPress: () => {
+                    const playbook = selectedPlaybook;
+                    setSelectedContext(null);
+                    archivePlaybook(playbook);
+                  },
+                },
+              ]
+            : selectedOwnerExecution
+              ? [
+                  ...(selectedOwnerExecution.canCancel
+                    ? [
+                        {
+                          key: 'estate-cancel-release',
+                          label: 'Cancel release',
+                          icon: 'close-circle-outline' as const,
+                          tone: 'danger' as const,
+                          loading: workingId === selectedOwnerExecution.id,
+                          onPress: () => {
+                            const execution = selectedOwnerExecution;
+                            setSelectedContext(null);
+                            cancelRelease(execution);
+                          },
+                        },
+                      ]
+                    : []),
+                ]
+              : selectedReceivedExecution
+                ? [
+                    ...(selectedReceivedExecution.canOpen
+                      ? [
+                          {
+                            key: 'estate-open-release',
+                            label: 'Open',
+                            icon: 'lock-open-outline' as const,
+                            tone: 'primary' as const,
+                            loading: workingId === selectedReceivedExecution.id,
+                            onPress: () => {
+                              const execution = selectedReceivedExecution;
+                              setSelectedContext(null);
+                              void openReleasedItem(execution);
+                            },
+                          },
+                        ]
+                      : []),
+                    ...(selectedReceivedExecution.canComplete
+                      ? [
+                          {
+                            key: 'estate-complete-release',
+                            label: 'Complete',
+                            icon: 'checkmark-done-outline' as const,
+                            loading: workingId === selectedReceivedExecution.id,
+                            onPress: () => {
+                              const execution = selectedReceivedExecution;
+                              setSelectedContext(null);
+                              void completeExecution(execution);
+                            },
+                          },
+                        ]
+                      : []),
+                  ]
+                : []
+        }
+      />
 
       <ReleasedItemModal
         visible={itemModalVisible}
@@ -1159,16 +1373,24 @@ function PlaybookCard({
   C,
   styles,
   working,
-  onEdit,
-  onToggle,
-  onRelease,
-  onArchive,
-  canConfigure,
+  selected,
+  selectionModeActive,
+  onLongPress,
+  onPress,
 }: any) {
   const neverRelease = playbook.actionType === 'NEVER_RELEASE';
+
   return (
-    <View style={styles.playbookShell}>
-      <View style={styles.playbookCard}>
+    <Pressable
+      delayLongPress={500}
+      onLongPress={onLongPress}
+      onPress={selectionModeActive ? onPress : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={`${playbook.itemTitle} estate playbook`}
+      accessibilityState={{ selected, disabled: working }}
+      style={styles.playbookShell}
+    >
+      <View style={[styles.playbookCard, selected && styles.playbookCardSelected]}>
         <View style={styles.cardTopRow}>
           <View style={styles.itemIcon}>
             <Ionicons name={ITEM_ICONS[playbook.itemType as VaultItemType]} size={21} color={C.primary} />
@@ -1204,44 +1426,20 @@ function PlaybookCard({
           </Text>
         )}
 
-        <View style={styles.cardActions}>
-          {working ? (
+        {working ? (
+          <View style={styles.selectionStatusRow}>
             <ActivityIndicator size="small" color={C.primary} />
-          ) : (
-            <>
-              {canConfigure && (
-                <TouchableOpacity style={styles.smallAction} onPress={onEdit}>
-                  <Ionicons name="create-outline" size={17} color={C.primary} />
-                  <Text style={styles.smallActionText}>Edit</Text>
-                </TouchableOpacity>
-              )}
-              {(playbook.status === 'ACTIVE' || canConfigure) && (
-                <TouchableOpacity style={styles.smallAction} onPress={onToggle}>
-                  <Ionicons
-                    name={playbook.status === 'ACTIVE' ? 'pause-outline' : 'play-outline'}
-                    size={17}
-                    color={C.primary}
-                  />
-                  <Text style={styles.smallActionText}>
-                    {playbook.status === 'ACTIVE' ? 'Pause' : 'Resume'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-              {canConfigure && !neverRelease && playbook.status === 'ACTIVE' && playbook.itemAvailable && (
-                <TouchableOpacity style={styles.smallAction} onPress={onRelease}>
-                  <Ionicons name="send-outline" size={17} color={C.primary} />
-                  <Text style={styles.smallActionText}>Release now</Text>
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity style={styles.smallDangerAction} onPress={onArchive}>
-                <Ionicons name="archive-outline" size={17} color={C.danger} />
-                <Text style={styles.smallDangerText}>Archive</Text>
-              </TouchableOpacity>
-            </>
-          )}
-        </View>
+            <Text style={styles.selectionHint}>Updating playbook...</Text>
+          </View>
+        ) : !selected ? (
+          <Text></Text>
+        ) : (
+          <View>
+           
+          </View>
+        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -1251,9 +1449,10 @@ function ExecutionCard({
   C,
   styles,
   working,
-  onOpen,
-  onCancel,
-  onComplete,
+  selected,
+  selectionModeActive,
+  onLongPress,
+  onPress,
 }: any) {
   const statusColor =
     execution.status === 'COMPLETED'
@@ -1263,10 +1462,26 @@ function ExecutionCard({
         : execution.status === 'VIEWED'
           ? C.warning
           : C.primary;
+  const actionable = ownerView
+    ? Boolean(execution.canCancel)
+    : Boolean(execution.canOpen || execution.canComplete);
 
   return (
-    <View style={styles.playbookShell}>
-      <View style={styles.playbookCard}>
+    <Pressable
+      delayLongPress={500}
+      onLongPress={onLongPress}
+      onPress={selectionModeActive ? onPress : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={`${execution.itemTitle} estate release`}
+      // accessibilityHint={
+      //   actionable
+      //     ? ''
+      //     : 'This release has no available actions.'
+      // }
+      accessibilityState={{ selected, disabled: working || !actionable }}
+      style={styles.playbookShell}
+    >
+      <View style={[styles.playbookCard, selected && styles.playbookCardSelected]}>
         <View style={styles.cardTopRow}>
           <View style={styles.itemIcon}>
             <Ionicons name={ITEM_ICONS[execution.itemType as VaultItemType]} size={21} color={C.primary} />
@@ -1300,35 +1515,21 @@ function ExecutionCard({
           </View>
         )}
 
-        <View style={styles.cardActions}>
-          {working ? (
+        {working ? (
+          <View style={styles.selectionStatusRow}>
             <ActivityIndicator size="small" color={C.primary} />
-          ) : ownerView ? (
-            execution.canCancel && (
-              <TouchableOpacity style={styles.smallDangerAction} onPress={onCancel}>
-                <Ionicons name="close-circle-outline" size={17} color={C.danger} />
-                <Text style={styles.smallDangerText}>Cancel release</Text>
-              </TouchableOpacity>
-            )
-          ) : (
-            <>
-              {execution.canOpen && (
-                <TouchableOpacity style={styles.smallAction} onPress={onOpen}>
-                  <Ionicons name="lock-open-outline" size={17} color={C.primary} />
-                  <Text style={styles.smallActionText}>Open securely</Text>
-                </TouchableOpacity>
-              )}
-              {execution.canComplete && (
-                <TouchableOpacity style={styles.smallAction} onPress={onComplete}>
-                  <Ionicons name="checkmark-done-outline" size={17} color={C.primary} />
-                  <Text style={styles.smallActionText}>Mark complete</Text>
-                </TouchableOpacity>
-              )}
-            </>
-          )}
-        </View>
+            <Text style={styles.selectionHint}>Updating release...</Text>
+          </View>
+        ) : actionable && !selected ? (
+          <Text></Text>
+        ) : selected ? (
+          <View style={styles.selectionStatusRow}>
+            <Ionicons name="checkmark-circle" size={17} color={C.primary} />
+            <Text style={styles.selectionHint}>Release selected</Text>
+          </View>
+        ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -1493,12 +1694,12 @@ function ReleasedItemRows({ item, C, styles, onCopy }: any) {
 const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
-    content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 40 },
+    content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 135 },
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
     skeletonTitle: { width: '82%', height: 34, marginBottom: 12 },
-    skeletonSub: { width: '96%', height: 52, borderRadius: 16, marginBottom: 20 },
+    skeletonSub: { width: '96%', height: 52, borderRadius: 18, marginBottom: 20 },
     skeletonCardShell: {
-      borderRadius: 26,
+      borderRadius: 28,
       marginBottom: 16,
       shadowColor: '#000',
       shadowOpacity: 0.11,
@@ -1508,7 +1709,7 @@ const makeStyles = (C: any) =>
     },
     skeletonCard3d: {
       height: 158,
-      borderRadius: 26,
+      borderRadius: 28,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1518,7 +1719,7 @@ const makeStyles = (C: any) =>
     },
     skeletonListCard: {
       minHeight: 146,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1526,18 +1727,18 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       gap: 13,
     },
-    skeletonIcon: { width: 58, height: 58, borderRadius: 20 },
+    skeletonIcon: { width: 58, height: 58, borderRadius: 22 },
     skeletonRowIcon: { width: 48, height: 48, borderRadius: 17 },
     skeletonLineLarge: { width: '78%', height: 18, marginBottom: 12 },
     skeletonLine: { width: '92%', height: 13, marginBottom: 10 },
     skeletonLineShort: { width: '58%', height: 13 },
-    skeletonTabs: { width: '100%', height: 48, borderRadius: 18, marginBottom: 20 },
+    skeletonTabs: { width: '100%', height: 48, borderRadius: 20, marginBottom: 20 },
     skeletonChipRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
     skeletonChip: { width: 76, height: 30 },
     title: { color: C.text, fontSize: 32, fontWeight: '900', letterSpacing: -0.7 },
-    subtitle: { color: C.textSecondary, fontSize: 16, lineHeight: 24, marginTop: 8, marginBottom: 20 },
+    subtitle: { color: C.textSecondary, fontSize: 16, lineHeight: 3, marginTop: 3, marginBottom: 3 },
     heroShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 18,
       shadowColor: '#000',
       shadowOpacity: 0.15,
@@ -1546,7 +1747,7 @@ const makeStyles = (C: any) =>
       elevation: 8,
     },
     heroCard: {
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 19,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -1558,7 +1759,7 @@ const makeStyles = (C: any) =>
     heroIcon: {
       width: 58,
       height: 58,
-      borderRadius: 20,
+      borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.backgroundbutton,
@@ -1574,7 +1775,7 @@ const makeStyles = (C: any) =>
     tabBar: {
       flexDirection: 'row',
       padding: 4,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.backgroundSelected,
       borderWidth: 1,
       borderColor: C.border,
@@ -1593,7 +1794,7 @@ const makeStyles = (C: any) =>
     tabText: { color: C.textSecondary, fontSize: 12, fontWeight: '900' },
     tabTextActive: { color: '#fff' },
     planNotice: {
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
       marginBottom: 18,
       backgroundColor: `${C.warning}12`,
@@ -1636,7 +1837,7 @@ const makeStyles = (C: any) =>
     secondaryButtonText: { color: C.primary, fontSize: 14, fontWeight: '900' },
     buttonDisabled: { opacity: 0.55 },
     formShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 22,
       shadowColor: '#000',
       shadowOpacity: 0.13,
@@ -1644,7 +1845,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 12 },
       elevation: 7,
     },
-    formCard: { borderRadius: 28, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    formCard: { borderRadius: 30, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     formHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 8 },
     closeButton: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.backgroundSelected },
     sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 10 },
@@ -1653,7 +1854,7 @@ const makeStyles = (C: any) =>
     countBadge: { minWidth: 30, height: 28, paddingHorizontal: 9, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
     countText: { color: C.primary, fontSize: 12, fontWeight: '900' },
     label: { color: C.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1.05, marginTop: 16, marginBottom: 9 },
-    choiceList: { borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, overflow: 'hidden' },
+    choiceList: { borderRadius: 24, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, overflow: 'hidden' },
     choiceRow: { minHeight: 67, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 },
     choiceRowSelected: { backgroundColor: C.actionCard },
     divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
@@ -1663,24 +1864,25 @@ const makeStyles = (C: any) =>
     choiceSub: { color: C.textSecondary, fontSize: 11, lineHeight: 16, marginTop: 3 },
     avatar: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
     avatarText: { color: C.primary, fontSize: 16, fontWeight: '900' },
-    emptyCard: { borderRadius: 18, padding: 14, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundSelected, flexDirection: 'row', alignItems: 'center', gap: 10 },
+    emptyCard: { borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundSelected, flexDirection: 'row', alignItems: 'center', gap: 10 },
     emptyText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
     actionChoiceGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    actionChoice: { minHeight: 44, borderRadius: 16, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.backgroundElement },
+    actionChoice: { minHeight: 44, borderRadius: 18, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.backgroundElement },
     actionChoiceSelected: { backgroundColor: C.primary, borderColor: C.primary },
     actionChoiceText: { color: C.textSecondary, fontSize: 12, fontWeight: '900' },
     actionChoiceTextSelected: { color: '#fff' },
     helperText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 9 },
     triggerList: { gap: 9 },
-    triggerCard: { borderRadius: 18, padding: 13, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, flexDirection: 'row', alignItems: 'center', gap: 11 },
+    triggerCard: { borderRadius: 20, padding: 13, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, flexDirection: 'row', alignItems: 'center', gap: 11 },
     triggerCardSelected: { borderColor: `${C.primary}66`, backgroundColor: C.actionCard },
     triggerIcon: { width: 40, height: 40, borderRadius: 14, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
-    instructionsInput: { minHeight: 130, borderRadius: 18, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundSelected, color: C.text, padding: 14, fontSize: 13, lineHeight: 20 },
+    instructionsInput: { minHeight: 130, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundSelected, color: C.text, padding: 14, fontSize: 13, lineHeight: 20 },
     characterCount: { color: C.tabInactive, fontSize: 10, fontWeight: '800', textAlign: 'right', marginTop: 6 },
-    playbookShell: { borderRadius: 24, marginBottom: 13, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 4 },
-    playbookCard: { borderRadius: 24, padding: 15, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    playbookShell: { borderRadius: 26, marginBottom: 13, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 4 },
+    playbookCard: { borderRadius: 26, padding: 15, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    playbookCardSelected: { borderColor: C.primary, borderWidth: 2, backgroundColor: C.actionCard },
     cardTopRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-    itemIcon: { width: 46, height: 46, borderRadius: 16, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    itemIcon: { width: 46, height: 46, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     cardTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
     cardSub: { color: C.textSecondary, fontSize: 13, marginTop: 4 },
     statusBadge: { minHeight: 28, borderRadius: 999, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
@@ -1693,34 +1895,36 @@ const makeStyles = (C: any) =>
     warningRow: { borderRadius: 14, padding: 10, marginTop: 11, backgroundColor: `${C.warning}12`, borderWidth: 1, borderColor: `${C.warning}35`, flexDirection: 'row', alignItems: 'center', gap: 8 },
     warningRowText: { color: C.text, fontSize: 13, lineHeight: 20, flex: 1, fontWeight: '700' },
     cardActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 14 },
+    selectionHint: { color: C.primary, fontSize: 11, lineHeight: 17, marginTop: 13, fontWeight: '800' },
+    selectionStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 1 },
     smallAction: { minHeight: 38, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}30` },
     smallActionText: { color: C.primary, fontSize: 11, fontWeight: '900' },
     smallDangerAction: { minHeight: 38, borderRadius: 14, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: `${C.danger}10`, borderWidth: 1, borderColor: `${C.danger}28` },
     smallDangerText: { color: C.danger, fontSize: 11, fontWeight: '900' },
-    emptyStateShell: { borderRadius: 24, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
-    emptyStateCard: { borderRadius: 24, padding: 20, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
-    emptyStateIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard, marginBottom: 12 },
+    emptyStateShell: { borderRadius: 26, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
+    emptyStateCard: { borderRadius: 26, padding: 20, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    emptyStateIcon: { width: 58, height: 58, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard, marginBottom: 12 },
     emptyStateTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
     emptyStateText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 6 },
-    truthCard: { borderRadius: 18, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 8 },
+    truthCard: { borderRadius: 20, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 8 },
     truthText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
-    errorShell: { borderRadius: 28, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
-    errorCard: { borderRadius: 28, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    errorShell: { borderRadius: 30, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
+    errorCard: { borderRadius: 30, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     errorTitle: { color: C.text, fontSize: 21, fontWeight: '900', marginTop: 13 },
     errorText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 7, marginBottom: 18 },
     modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16, paddingVertical: 34 },
     modalFallback: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.72)' },
     modalOverlay: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(0,0,0,0.40)' },
-    modalCard: { maxHeight: '88%', borderRadius: 28, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 28, shadowOffset: { width: 0, height: 16 }, elevation: 16 },
+    modalCard: { maxHeight: '88%', borderRadius: 30, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, overflow: 'hidden', shadowColor: '#000', shadowOpacity: 0.28, shadowRadius: 28, shadowOffset: { width: 0, height: 16 }, elevation: 16 },
     modalHeader: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
     modalTitle: { color: C.text, fontSize: 19, fontWeight: '900' },
     modalSub: { color: C.textSecondary, fontSize: 11, marginTop: 4 },
     modalLoading: { minHeight: 260, alignItems: 'center', justifyContent: 'center', padding: 24 },
     modalLoadingText: { color: C.textSecondary, fontSize: 12, marginTop: 14 },
     modalContent: { padding: 16, paddingBottom: 30 },
-    instructionsCard: { borderRadius: 20, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, marginBottom: 14 },
+    instructionsCard: { borderRadius: 22, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, marginBottom: 14 },
     instructionsText: { color: C.text, fontSize: 13, lineHeight: 21 },
-    releasedDataCard: { borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, overflow: 'hidden', marginBottom: 14 },
+    releasedDataCard: { borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.backgroundElement, overflow: 'hidden', marginBottom: 14 },
     releasedRow: { padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
     releasedLabel: { color: C.textSecondary, fontSize: 10, fontWeight: '900', letterSpacing: 0.7 },
     releasedValue: { color: C.text, fontSize: 13, lineHeight: 20, marginTop: 4 },

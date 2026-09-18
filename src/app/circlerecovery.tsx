@@ -28,6 +28,7 @@ import {
   setSecureClipboard,
 } from '../utils/secureClipboard';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -215,11 +216,9 @@ export default function CircleRecoveryScreen() {
           <View style={styles.cardShell}>
             <View style={styles.card}>
               <Text style={styles.sectionTitle}>1. Start or resume recovery</Text>
-              <Text style={styles.label}>Account email</Text>
-              <TextInput
+              <FloatingLabelInput
                 style={styles.input}
-                placeholder="you@example.com"
-                placeholderTextColor={C.tabInactive}
+                label="Account email"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -260,11 +259,9 @@ export default function CircleRecoveryScreen() {
                 <View style={styles.orLine} />
               </View>
 
-              <Text style={styles.label}>Request ID</Text>
-              <TextInput
+              <FloatingLabelInput
                 style={styles.input}
-                placeholder="RC-..."
-                placeholderTextColor={C.tabInactive}
+                label="Request ID"
                 value={requestId}
                 onChangeText={setRequestId}
                 autoCapitalize="characters"
@@ -398,10 +395,9 @@ function SecretField({
     <>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.passwordWrap}>
-        <TextInput
+        <FloatingLabelInput
           style={styles.passwordInput}
-          placeholder={placeholder}
-          placeholderTextColor={C.tabInactive}
+          label={placeholder}
           value={value}
           onChangeText={onChangeText}
           secureTextEntry={!visible}
@@ -430,13 +426,13 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
     content: { paddingHorizontal: 20, paddingTop: 96, paddingBottom: 140 },
-    heroIcon: { width: 82, height: 82, borderRadius: 28, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', marginBottom: 22, shadowColor: C.primary, shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 6 },
+    heroIcon: { width: 82, height: 82, borderRadius: 30, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', marginBottom: 22, shadowColor: C.primary, shadowOpacity: 0.2, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 6 },
     title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.7 },
     subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 22, marginTop: 8, marginBottom: 18 },
-    securityCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 20, padding: 15, marginBottom: 18, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}35`, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
+    securityCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 22, padding: 15, marginBottom: 18, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}35`, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
     securityText: { flex: 1, color: C.text, fontSize: 12, lineHeight: 19, fontWeight: '700' },
-    cardShell: { borderRadius: 24, marginBottom: 17, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
-    card: { borderRadius: 24, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    cardShell: { borderRadius: 26, marginBottom: 17, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+    card: { borderRadius: 26, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     sectionTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginBottom: 16 },
     label: { color: C.text, fontSize: 13, fontWeight: '900', marginBottom: 8, marginLeft: 3 },
     input: { color: C.text, backgroundColor: C.background, borderRadius: 17, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 14, marginBottom: 14, fontSize: 14 },
@@ -449,7 +445,7 @@ const makeStyles = (C: any) =>
     actionRow: { flexDirection: 'row', gap: 10 },
     secondaryButton: { flex: 1, minHeight: 48, borderRadius: 999, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border },
     secondaryText: { color: C.primary, fontSize: 12, fontWeight: '900' },
-    statusCard: { borderRadius: 24, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    statusCard: { borderRadius: 26, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     statusHeader: { flexDirection: 'row', alignItems: 'center', gap: 9 },
     statusDot: { width: 10, height: 10, borderRadius: 5 },
     statusTitle: { color: C.text, fontSize: 16, fontWeight: '900' },

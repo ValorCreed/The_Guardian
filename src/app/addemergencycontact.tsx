@@ -23,6 +23,7 @@ import { encryptJson } from '../utils/vaultcrypto';
 import { hapticToggleOff, hapticToggleOn } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type Plan = 'FREE' | 'PREMIUM' | 'FAMILY';
 
@@ -233,11 +234,9 @@ export default function AddEmergencyContactScreen() {
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.label}>Contact email</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="trusted@example.com"
-              placeholderTextColor={C.tabInactive}
+              label="Contact email"
               value={contactEmail}
               onChangeText={setContactEmail}
               autoCapitalize="none"
@@ -245,20 +244,16 @@ export default function AddEmergencyContactScreen() {
               autoCorrect={false}
             />
 
-            <Text style={styles.label}>Contact name</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="Alex Smith"
-              placeholderTextColor={C.tabInactive}
+              label="Contact name"
               value={contactName}
               onChangeText={setContactName}
             />
 
-            <Text style={styles.label}>Relationship</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.input}
-              placeholder="Brother, sister, spouse, parent..."
-              placeholderTextColor={C.tabInactive}
+              label="Relationship"
               value={relationship}
               onChangeText={setRelationship}
             />
@@ -322,10 +317,9 @@ export default function AddEmergencyContactScreen() {
             Optional instructions for your contact.
           </Text>
 
-          <TextInput
+          <FloatingLabelInput
             style={styles.noteInput}
-            placeholder="Example: Call my brother first, check the family documents folder, and use the recovery note if needed..."
-            placeholderTextColor={C.tabInactive}
+            label="Emergency note"
             value={emergencyNote}
             onChangeText={setEmergencyNote}
             multiline
@@ -479,7 +473,7 @@ const makeStyles = (C: any) => StyleSheet.create({
 
     width: '100%',
     height: 48,
-    borderRadius: 16,
+    borderRadius: 18,
     marginBottom: 15,
   },
   loadingBox: {
@@ -544,7 +538,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   infoCard: {
     backgroundColor: C.actionCard,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.border,
     padding: 14,
@@ -566,7 +560,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   card: {
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: C.border,
     padding: 16,
@@ -591,7 +585,7 @@ const makeStyles = (C: any) => StyleSheet.create({
     shadowOffset: { width: 0, height: 7 },
 
     backgroundColor: C.background,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: C.border,
     color: C.text,
@@ -619,7 +613,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   waitOption: {
     flex: 1,
     backgroundColor: C.backgroundElement,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: C.border,
     alignItems: 'center',
@@ -664,7 +658,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   },
   noteInput: {
     backgroundColor: C.backgroundElement,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.border,
     color: C.text,

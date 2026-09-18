@@ -23,6 +23,7 @@ import { hapticLight, hapticMedium, hapticWarning, hapticSuccess } from '../util
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { api, isDuressSession } from '../services/api';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type SelectedFile = {
   name: string;
@@ -597,12 +598,9 @@ const UploadDocumentScreen = () => {
                 />
 
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.label}>Document Title</Text>
-
-                  <TextInput
+                  <FloatingLabelInput
                     style={styles.input}
-                    placeholder="Enter document title"
-                    placeholderTextColor={C.tabInactive}
+                    label="Document Title"
                     value={documentTitle}
                     onChangeText={setDocumentTitle}
                   />
@@ -711,7 +709,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 54, height: 54, borderRadius: 20 },
+ width: 54, height: 54, borderRadius: 22 },
     skeletonOptionTitle: { width: '58%', height: 15, marginBottom: 8 },
     skeletonOptionSub: { width: '42%', height: 11 },
     skeletonChevron: { width: 22, height: 22, borderRadius: 8 },
@@ -734,18 +732,18 @@ const makeStyles = (C: ThemeColors) =>
     loadingText: { marginTop: 10, color: C.textSecondary, fontSize: 14 },
     header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 92, paddingBottom: 20, gap: 12 },
     lockedHeader: { paddingHorizontal: 20, paddingTop: 94 },
-    backBtn: { width: 38, height: 38, backgroundColor: C.backgroundSelected, borderRadius: 16, justifyContent: 'center', alignItems: 'center' ,
+    backBtn: { width: 38, height: 38, backgroundColor: C.backgroundSelected, borderRadius: 18, justifyContent: 'center', alignItems: 'center' ,
       shadowColor: '#000',
       shadowOpacity: 0.25,
       shadowRadius: 18,
       shadowOffset: { width: 0, height: 11 },
       elevation: 10,},
-    title: { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.4 },
+    title: { fontSize: 28, fontWeight: '900', color: C.text, letterSpacing: -0.4,textAlign: 'center' },
     planText: { marginTop: 4, fontSize: 12, color: C.primary, fontWeight: '900' },
     options: { paddingHorizontal: 20, gap: 14 },
     optionCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 18,
       flexDirection: 'row',
       alignItems: 'center',
@@ -764,13 +762,13 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 54, height: 54, borderRadius: 20, backgroundColor: C.actionCard || C.backgroundSelected, justifyContent: 'center', alignItems: 'center' },
+ width: 54, height: 54, borderRadius: 22, backgroundColor: C.actionCard || C.backgroundSelected, justifyContent: 'center', alignItems: 'center' },
     optionText: { flex: 1 },
     optionTitle: { fontSize: 16, fontWeight: '900', color: C.text, marginBottom: 4 },
     optionSub: { fontSize: 13, color: C.textSecondary, fontWeight: '600' },
     previewCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 16,
       borderWidth: 1,
       borderColor: C.primary,
@@ -811,10 +809,10 @@ const makeStyles = (C: ThemeColors) =>
       fontWeight: '900',
       letterSpacing: 0.4,
     },
-    imagePreview: { width: '100%', height: 190, borderRadius: 16, marginTop: 8 },
+    imagePreview: { width: '100%', height: 190, borderRadius: 18, marginTop: 8 },
     statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12 },
     statusText: { color: C.primary, fontSize: 12, fontWeight: '800', flex: 1, lineHeight: 18 },
-    noticeBox: { backgroundColor: C.actionCard || C.backgroundSelected, borderRadius: 18, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, borderWidth: 1, borderColor: C.border ,
+    noticeBox: { backgroundColor: C.actionCard || C.backgroundSelected, borderRadius: 20, padding: 16, flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 8, borderWidth: 1, borderColor: C.border ,
       shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -833,7 +831,7 @@ const makeStyles = (C: ThemeColors) =>
       width: '100%',
       backgroundColor: C.alertDangerBg || C.backgroundSelected,
       paddingVertical: 13,
-      borderRadius: 18,
+      borderRadius: 20,
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
@@ -854,7 +852,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- backgroundColor: C.background, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
+ backgroundColor: C.background, borderRadius: 18, paddingHorizontal: 14, paddingVertical: 12, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 8, fontWeight: '700' },
     lockedContent: { flex: 1, justifyContent: 'center', paddingHorizontal: 24, paddingTop: 86, paddingBottom: 40 },
     premiumIcon: {
       shadowColor: '#000000',
@@ -862,10 +860,10 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 88, height: 88, borderRadius: 30, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
+ width: 88, height: 88, borderRadius: 32, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center', marginBottom: 22 },
     lockedTitle: { fontSize: 31, fontWeight: '900', color: C.text, marginBottom: 10, letterSpacing: -0.5 },
     lockedSubtitle: { fontSize: 15, color: C.textSecondary, lineHeight: 23, marginBottom: 20, fontWeight: '600' },
-    featureBox: { backgroundColor: C.backgroundElement, borderRadius: 24, padding: 17, borderWidth: 1, borderColor: C.border, marginBottom: 24, gap: 13 
+    featureBox: { backgroundColor: C.backgroundElement, borderRadius: 26, padding: 17, borderWidth: 1, borderColor: C.border, marginBottom: 24, gap: 13 
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,

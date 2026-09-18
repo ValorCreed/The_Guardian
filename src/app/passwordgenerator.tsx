@@ -24,6 +24,7 @@ import { hapticLight, hapticMedium, hapticSelection, hapticToggleOff, hapticTogg
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const HISTORY_KEY = 'guardian.passwordGenerator.history.v1';
 
@@ -299,14 +300,13 @@ export default function PasswordGeneratorScreen() {
 
         <View style={styles.outputCard}>
           <Text style={styles.outputLabel}>Generated password</Text>
-          <TextInput
+          <FloatingLabelInput
             style={styles.outputText}
             value={generated}
             onChangeText={setGenerated}
             multiline
             autoCapitalize="none"
-            placeholder="Tap generate"
-            placeholderTextColor={C.tabInactive}
+            label="Generated password"
           />
 
           <View style={styles.scoreRow}>
@@ -446,7 +446,7 @@ const stepStyles = StyleSheet.create({
 
     width: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -461,7 +461,7 @@ const makeStyles = (C: any) =>
     eyebrow: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
     title: { color: C.text, fontSize: 30, fontWeight: '900', marginTop: 2 },
     subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 20 },
-    outputCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 16 
+    outputCard: { backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 16, marginBottom: 16 
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -488,7 +488,7 @@ const makeStyles = (C: any) =>
       elevation: 6,},
     modeText: { color: C.textSecondary, fontSize: 12, fontWeight: '900', textTransform: 'capitalize' },
     modeTextActive: { color: '#fff' },
-    card: { backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, borderWidth: 1, borderColor: C.border, marginBottom: 16 
+    card: { backgroundColor: C.backgroundElement, borderRadius: 22, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4, borderWidth: 1, borderColor: C.border, marginBottom: 16 
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -496,7 +496,7 @@ const makeStyles = (C: any) =>
       elevation: 10,},
     controlRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingBottom: 12 },
     controlLabel: { color: C.text, fontSize: 15, fontWeight: '800' },
-    upgradeCard: { backgroundColor: C.securityScoreBg, borderRadius: 18, borderWidth: 1, borderColor: C.warning, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 
+    upgradeCard: { backgroundColor: C.securityScoreBg, borderRadius: 20, borderWidth: 1, borderColor: C.warning, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -518,7 +518,7 @@ const makeStyles = (C: any) =>
       shadowOffset: { width: 0, height: 11 },
       elevation: 10,},
     secondaryButtonText: { color: C.primary, fontSize: 14, fontWeight: '900' },
-    historyCard: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 14, borderWidth: 1, borderColor: C.border, marginTop: 8 
+    historyCard: { backgroundColor: C.backgroundElement, borderRadius: 22, padding: 14, borderWidth: 1, borderColor: C.border, marginTop: 8 
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,

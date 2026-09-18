@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     alignSelf: 'center',
-    borderRadius: 28,
+    borderRadius: 30,
     overflow: 'hidden',
   },
   scroll: {

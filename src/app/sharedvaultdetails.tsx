@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -11,14 +10,12 @@ import {
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import {
   Calendar,
   Copy,
-  Download,
   CreditCard,
-  Eye,
-  EyeOff,
   FileText,
   Globe,
   KeyRound,
@@ -31,6 +28,7 @@ import {
 import { api } from '../services/api';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import FloatingActionBar from '../components/FloatingActionBar';
 import { decryptJson } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
@@ -455,7 +453,6 @@ export default function SharedVaultDetailsScreen() {
           <SharedCardDetails
             item={item}
             showSecret={showSecret}
-            setShowSecret={setShowSecret}
             copyValue={copyValue}
             hideValue={hideValue}
             styles={styles}
@@ -467,8 +464,6 @@ export default function SharedVaultDetailsScreen() {
           <SharedDocumentDetails
             item={item}
             copyValue={copyValue}
-            downloadSharedDocument={downloadSharedDocument}
-            downloadingDocument={downloadingDocument}
             styles={styles}
             C={C}
           />
@@ -487,7 +482,7 @@ export default function SharedVaultDetailsScreen() {
           <SharedPasswordDetails
             item={item}
             showSecret={showSecret}
-            setShowSecret={setShowSecret}
+            onToggleSecret={() => setShowSecret((current) => !current)}
             copyValue={copyValue}
             hideValue={hideValue}
             styles={styles}
@@ -501,7 +496,66 @@ export default function SharedVaultDetailsScreen() {
             Only the owner can edit or delete this item.
           </Text>
         </View>
+
+        <View style={{ height: 80 }} />
       </ScrollView>
+
+      <FloatingActionBar
+        visible
+        actions={
+          itemType === 'PASSWORD'
+            ? [
+                {
+                  key: 'shared-copy-password',
+                  label: 'Copy',
+                  icon: 'copy-outline',
+                  tone: 'primary',
+                  onPress: () =>
+                    void copyValue(
+                      'Password',
+                      cleanSharedValue(item.encryptedPassword || item.encryptedData || '')
+                    ),
+                },
+              ]
+            : itemType === 'CARD'
+              ? [
+                  {
+                    key: 'shared-reveal-card',
+                    label: showSecret ? 'Hide' : 'Reveal',
+                    icon: showSecret ? 'eye-off-outline' : 'eye-outline',
+                    tone: 'primary',
+                    onPress: () => setShowSecret((current) => !current),
+                  },
+                  {
+                    key: 'shared-copy-card',
+                    label: 'Copy',
+                    icon: 'copy-outline',
+                    onPress: () => void copyValue('Card number', item.encryptedCardNumber),
+                  },
+                ]
+              : itemType === 'DOCUMENT'
+                ? [
+                    {
+                      key: 'shared-download-document',
+                      label: downloadingDocument ? 'Preparing' : 'Download',
+                      icon: 'download-outline',
+                      tone: 'primary',
+                      loading: downloadingDocument,
+                      onPress: () => void downloadSharedDocument(),
+                    },
+                  ]
+                : [
+                    {
+                      key: 'shared-copy-note',
+                      label: 'Copy',
+                      icon: 'copy-outline',
+                      tone: 'primary',
+                      onPress: () =>
+                        void copyValue('SecureNote', decryptSharedValue(item.encryptedContent)),
+                    },
+                  ]
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -509,7 +563,7 @@ export default function SharedVaultDetailsScreen() {
 function SharedPasswordDetails({
   item,
   showSecret,
-  setShowSecret,
+  onToggleSecret,
   copyValue,
   hideValue,
   styles,
@@ -517,7 +571,7 @@ function SharedPasswordDetails({
 }: {
   item: DisplayItem;
   showSecret: boolean;
-  setShowSecret: React.Dispatch<React.SetStateAction<boolean>>;
+  onToggleSecret: () => void;
   copyValue: (label: string, value?: string) => Promise<void>;
   hideValue: (value?: string) => string;
   styles: any;
@@ -546,7 +600,7 @@ function SharedPasswordDetails({
         value={passwordValue}
         hiddenValue={hideValue(passwordValue)}
         showSecret={showSecret}
-        setShowSecret={setShowSecret}
+        onToggleSecret={onToggleSecret}
         onCopy={() => copyValue('Password', passwordValue)}
         styles={styles}
         C={C}
@@ -585,7 +639,6 @@ function SharedPasswordDetails({
 function SharedCardDetails({
   item,
   showSecret,
-  setShowSecret,
   copyValue,
   hideValue,
   styles,
@@ -593,7 +646,6 @@ function SharedCardDetails({
 }: {
   item: DisplayItem;
   showSecret: boolean;
-  setShowSecret: React.Dispatch<React.SetStateAction<boolean>>;
   copyValue: (label: string, value?: string) => Promise<void>;
   hideValue: (value?: string) => string;
   styles: any;
@@ -626,7 +678,6 @@ function SharedCardDetails({
         value={cardNumber || 'No card number saved'}
         hiddenValue={hideValue(cardNumber)}
         showSecret={showSecret}
-        setShowSecret={setShowSecret}
         onCopy={() => copyValue('Card number', cardNumber)}
         styles={styles}
         C={C}
@@ -651,7 +702,6 @@ function SharedCardDetails({
         value={cvv || 'No CVV saved'}
         hiddenValue={hideValue(cvv)}
         showSecret={showSecret}
-        setShowSecret={setShowSecret}
         onCopy={() => copyValue('CVV', cvv)}
         styles={styles}
         C={C}
@@ -663,15 +713,11 @@ function SharedCardDetails({
 function SharedDocumentDetails({
   item,
   copyValue,
-  downloadSharedDocument,
-  downloadingDocument,
   styles,
   C,
 }: {
   item: DisplayItem;
   copyValue: (label: string, value?: string) => Promise<void>;
-  downloadSharedDocument: () => Promise<void>;
-  downloadingDocument: boolean;
   styles: any;
   C: any;
 }) {
@@ -690,25 +736,7 @@ function SharedDocumentDetails({
         C={C}
       />
 
-      <View style={styles.fullDivider} />
 
-      <View style={styles.documentActionArea}>
-        <TouchableOpacity
-          style={[styles.documentDownloadButton, downloadingDocument && styles.disabledButton]}
-          onPress={downloadSharedDocument}
-          disabled={downloadingDocument}
-          activeOpacity={0.85}
-        >
-          {downloadingDocument ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Download size={19} color="#fff" />
-          )}
-          <Text style={styles.documentDownloadText}>
-            {downloadingDocument ? 'Preparing document...' : 'Download / Share Document'}
-          </Text>
-        </TouchableOpacity>
-      </View>
     </View>
   );
 }
@@ -794,7 +822,7 @@ function SecretRow({
   value,
   hiddenValue,
   showSecret,
-  setShowSecret,
+  onToggleSecret,
   onCopy,
   styles,
   C,
@@ -804,7 +832,7 @@ function SecretRow({
   value: string;
   hiddenValue: string;
   showSecret: boolean;
-  setShowSecret: React.Dispatch<React.SetStateAction<boolean>>;
+  onToggleSecret?: () => void;
   onCopy: () => void;
   styles: any;
   C: any;
@@ -820,16 +848,20 @@ function SecretRow({
         </Text>
       </View>
 
-      <TouchableOpacity
-        style={styles.iconButton}
-        onPress={() => setShowSecret((current) => !current)}
-      >
-        {showSecret ? (
-          <EyeOff size={18} color={C.text} />
-        ) : (
-          <Eye size={18} color={C.text} />
-        )}
-      </TouchableOpacity>
+      {onToggleSecret ? (
+        <TouchableOpacity
+          style={styles.iconButton}
+          onPress={onToggleSecret}
+          accessibilityRole="button"
+          accessibilityLabel={showSecret ? `Hide ${label}` : `Reveal ${label}`}
+        >
+          <Ionicons
+            name={showSecret ? 'eye-off-outline' : 'eye-outline'}
+            size={20}
+            color={C.primary}
+          />
+        </TouchableOpacity>
+      ) : null}
 
       <TouchableOpacity style={styles.iconButton} onPress={onCopy}>
         <Copy size={18} color={C.text} />
@@ -846,7 +878,7 @@ const makeStyles = (C: any) =>
       shadowRadius: 14,
       shadowOffset: { width: 0, height: 7 },
       elevation: 2,},
-    skeletonHeaderIcon: { width: 76, height: 76, borderRadius: 24, alignSelf: 'center', marginBottom: 18 },
+    skeletonHeaderIcon: { width: 76, height: 76, borderRadius: 26, alignSelf: 'center', marginBottom: 18 },
     skeletonTitle: { width: '62%', height: 26, alignSelf: 'center', marginBottom: 10 },
     skeletonSubtitle: { width: '72%', height: 13, alignSelf: 'center', marginBottom: 22 },
     skeletonInfoIcon: { width: 40, height: 40, borderRadius: 14 },
@@ -864,7 +896,7 @@ const makeStyles = (C: any) =>
     scrollContent: {
       paddingHorizontal: 18,
       paddingTop: 100,
-      paddingBottom: 140,
+      paddingBottom: 165,
     },
 
     centered: {
@@ -882,7 +914,7 @@ const makeStyles = (C: any) =>
     headerIcon: {
       width: 74,
       height: 74,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -909,7 +941,7 @@ const makeStyles = (C: any) =>
 
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       overflow: 'hidden',
       borderWidth: 1,
       borderColor: C.border,
@@ -989,7 +1021,7 @@ const makeStyles = (C: any) =>
       minHeight: 52,
       paddingVertical: 14,
       paddingHorizontal: 16,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.primary,
       flexDirection: 'row',
       alignItems: 'center',
@@ -1017,7 +1049,7 @@ const makeStyles = (C: any) =>
     readOnlyBox: {
       marginTop: 18,
       backgroundColor: C.backgroundSelected,
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 16,
       borderWidth: 1,
       borderColor: C.border,

@@ -45,6 +45,7 @@ import { syncGuardianAutofillCache, syncPendingGuardianAutofillSaves } from '../
 import { safeLogError } from '../utils/asyncResilience';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const RECOVERY_ALERT_THROTTLE_MS = 10 * 60 * 1000;
 const HOME_NEEDS_SYNC_KEY = "homeNeedsInitialSync";
@@ -1347,12 +1348,12 @@ const HomeScreen = () => {
               </View>
             </View>
             <TouchableOpacity
-              style={styles.headerBtn}
+              style={[styles.headerBtn, styles.duressHeaderBtn]}
               activeOpacity={0.75}
-              accessibilityLabel="Lock vault"
+              accessibilityLabel="Exit duress session"
               onPress={() => void lockCurrentVault()}
             >
-              <Ionicons name="lock-closed-outline" size={19} color={C.text} />
+              <Ionicons name="power-outline" size={26} color={C.danger} />
             </TouchableOpacity>
           </View>
 
@@ -1384,10 +1385,9 @@ const HomeScreen = () => {
 
           <View style={styles.searchBar}>
             <Ionicons name="search-outline" size={18} color={C.tabInactive} />
-            <TextInput
+            <FloatingLabelInput
               style={styles.searchInput}
-              placeholder="Search vault"
-              placeholderTextColor={C.tabInactive}
+              label="Search vault"
               value={search}
               onChangeText={setSearch}
               returnKeyType="search"
@@ -1604,7 +1604,7 @@ const HomeScreen = () => {
                   ? "notifications"
                   : "notifications-outline"
               }
-              size={19}
+              size={25}
               color={C.text}
             />
 
@@ -1637,7 +1637,7 @@ const HomeScreen = () => {
             <View style={styles.heroTop}>
               <View style={styles.heroCopy}>
                 <View style={styles.planPill}>
-                  <Ionicons
+                  {/* <Ionicons
                     name={
                       subscriptionPlan === "FREE"
                         ? "leaf-outline"
@@ -1645,16 +1645,13 @@ const HomeScreen = () => {
                     }
                     size={13}
                     color="#fff"
-                  />
+                  /> */}
                   <Text style={styles.planPillText}>{subscriptionPlan} PLAN</Text>
                 </View>
 
                 <Text style={styles.heroKicker}>{scoreTitle}</Text>
                 <Text style={styles.heroTitle}>Vault overview</Text>
-                <Text style={styles.heroSubtitle}>
-                  {totalItems} encrypted item{totalItems === 1 ? "" : "s"}
-                  {/* {securityScoreUpdating ? "   Updating score" : ""} */}
-                </Text>
+                
               </View>
 
               <ScoreRing
@@ -1720,10 +1717,9 @@ const HomeScreen = () => {
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={C.tabInactive} />
 
-          <TextInput
+          <FloatingLabelInput
             style={styles.searchInput}
-            placeholder="Search vault"
-            placeholderTextColor={C.tabInactive}
+            label="Search vault"
             value={search}
             onChangeText={setSearch}
             returnKeyType="search"
@@ -2006,10 +2002,10 @@ const makeStyles = (C: any) =>
 
     headerBtn: {
       position: "relative",
-      width: 42,
-      height: 42,
+      width: 48,
+      height: 48,
       backgroundColor: C.backgroundElement,
-      borderRadius: 21,
+      borderRadius: 24,
       justifyContent: "center",
       alignItems: "center",
       borderWidth: 1,
@@ -2019,6 +2015,11 @@ const makeStyles = (C: any) =>
       shadowRadius: 16,
       shadowOffset: { width: 0, height: 8 },
       elevation: 2,
+    },
+
+    duressHeaderBtn: {
+      backgroundColor: `${C.danger}12`,
+      borderColor: `${C.danger}55`,
     },
 
     notificationBadge: {
@@ -2045,7 +2046,7 @@ const makeStyles = (C: any) =>
     heroCardShell: {
       marginHorizontal: 20,
       marginBottom: 18,
-      borderRadius: 30,
+      borderRadius: 32,
       shadowColor: "#000",
       shadowOffset: { width: 0, height: 16 },
       shadowOpacity: 0.16,
@@ -2056,7 +2057,7 @@ const makeStyles = (C: any) =>
     heroCard: {
       position: "relative",
       backgroundColor: C.primary,
-      borderRadius: 30,
+      borderRadius: 32,
       padding: 20,
       overflow: "hidden",
       borderWidth: 1,
@@ -2065,7 +2066,7 @@ const makeStyles = (C: any) =>
 
     privateVaultHero: {
       minHeight: 142,
-      borderRadius: 30,
+      borderRadius: 32,
       padding: 20,
       backgroundColor: C.primary,
       borderWidth: 1,
@@ -2094,7 +2095,7 @@ const makeStyles = (C: any) =>
 
     modeLoadingCard: {
       minHeight: 142,
-      borderRadius: 30,
+      borderRadius: 32,
       padding: 20,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -2207,7 +2208,7 @@ const makeStyles = (C: any) =>
 
     scoreNumber: {
       color: "#fff",
-      fontSize: 24,
+      fontSize: 26,
       fontWeight: "900",
     },
 
@@ -2222,7 +2223,7 @@ const makeStyles = (C: any) =>
     heroFooter: {
       marginTop: 18,
       backgroundColor: "rgba(255,255,255,0.12)",
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 12,
       flexDirection: "row",
       alignItems: "center",
@@ -2270,7 +2271,7 @@ const makeStyles = (C: any) =>
 
     recoveryWarningCard: {
       backgroundColor: C.danger,
-      borderRadius: 24,
+      borderRadius: 66,
       padding: 16,
       marginHorizontal: 20,
       marginTop: 14,
@@ -2287,7 +2288,7 @@ const makeStyles = (C: any) =>
     recoveryWarningIcon: {
       width: 46,
       height: 46,
-      borderRadius: 16,
+      borderRadius: 58,
       backgroundColor: 'rgba(255,255,255,0.18)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -2313,13 +2314,13 @@ const makeStyles = (C: any) =>
       marginHorizontal: 20,
       marginBottom: 16,
       paddingHorizontal: 16,
-      paddingVertical: 13,
+      paddingVertical: 3,
       gap: 8,
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
       shadowOpacity: 0.045,
-      shadowRadius: 16,
+      shadowRadius: 36,
       shadowOffset: { width: 0, height: 8 },
       elevation: 2,
     },
@@ -2335,7 +2336,7 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundElement,
       marginHorizontal: 20,
       marginBottom: 16,
-      borderRadius: 22,
+      borderRadius: 28,
       padding: 14,
       borderWidth: 1,
       borderColor: C.border,
@@ -2369,7 +2370,7 @@ const makeStyles = (C: any) =>
     compactIcon: {
       width: 40,
       height: 40,
-      borderRadius: 16,
+      borderRadius: 18,
       justifyContent: "center",
       alignItems: "center",
     },
@@ -2403,7 +2404,7 @@ const makeStyles = (C: any) =>
       width: "48%",
       minHeight: 118,
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 15,
       borderWidth: 1,
       borderColor: C.border,
@@ -2494,7 +2495,7 @@ const makeStyles = (C: any) =>
       width: "48%",
       minHeight: 110,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 13,
       alignItems: "center",
       justifyContent: "center",
@@ -2520,7 +2521,7 @@ const makeStyles = (C: any) =>
       height: 48,
       flexShrink: 0,
       backgroundColor: C.actionIconBg || C.primary,
-      borderRadius: 18,
+      borderRadius: 20,
       justifyContent: "center",
       alignItems: "center",
     },
@@ -2542,7 +2543,7 @@ const makeStyles = (C: any) =>
 
     recentCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 21,
+      borderRadius: 41,
       padding: 14,
       flexDirection: "row",
       alignItems: "center",
@@ -2561,7 +2562,7 @@ const makeStyles = (C: any) =>
     recentAvatar: {
       width: 44,
       height: 44,
-      borderRadius: 17,
+      borderRadius: 47,
       justifyContent: "center",
       alignItems: "center",
     },
@@ -2681,7 +2682,7 @@ const makeStyles = (C: any) =>
 
     loadingBox: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       marginHorizontal: 20,
       marginBottom: 14,
       padding: 22,
@@ -2704,7 +2705,7 @@ const makeStyles = (C: any) =>
 
     upgradeBanner: {
       backgroundColor: C.securityScoreBg,
-      borderRadius: 22,
+      borderRadius: 24,
       marginHorizontal: 20,
       marginTop: 2,
       marginBottom: 14,
@@ -2725,7 +2726,7 @@ const makeStyles = (C: any) =>
       width: 46,
       height: 46,
       backgroundColor: C.securityScore || C.warning,
-      borderRadius: 18,
+      borderRadius: 20,
       justifyContent: "center",
       alignItems: "center",
     },

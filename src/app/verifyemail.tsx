@@ -21,6 +21,7 @@ import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelab
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
 import { useAppAlert } from '../context/AppAlertContext';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const AUTO_VERIFY_DELAY_MS = 260;
 
@@ -362,22 +363,22 @@ export default function VerifyEmailScreen() {
             </View>
           </View>
 
-          <Text style={styles.label}>Verification code</Text>
-
-          <TextInput
+          <FloatingLabelInput
             ref={codeInputRef}
-            style={styles.codeInput}
+            label="Verification code"
             value={code}
             onChangeText={handleCodeChange}
             keyboardType="number-pad"
-            textContentType="oneTimeCode"
             autoComplete="one-time-code"
-            placeholder="000000"
-            placeholderTextColor={C.tabInactive}
+            importantForAutofill="yes"
             maxLength={6}
             textAlign="center"
             editable={!loading && !sending}
             autoFocus
+            containerStyle={styles.codeField}
+            inputStyle={styles.codeInputText}
+            accessibilityLabel="Verification code"
+            accessibilityHint="Enter the six digit code sent to your email"
           />
 
           <Text style={styles.autoVerifyText}>
@@ -468,7 +469,7 @@ const makeStyles = (C: any) =>
     iconBox: {
       width: 96,
       height: 96,
-      borderRadius: 30,
+      borderRadius: 32,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
@@ -507,7 +508,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       padding: 16,
@@ -542,25 +543,21 @@ const makeStyles = (C: any) =>
       lineHeight: 19,
     },
 
-    label: {
-      fontSize: 14,
-      color: C.text,
-      fontWeight: '800',
-      marginBottom: 8,
-      marginLeft: 4,
+    codeField: {
+      minHeight: 72,
+      borderRadius: 26,
+      backgroundColor: C.backgroundElement,
+      marginBottom: 0,
     },
 
-    codeInput: {
-      height: 72,
-      borderRadius: 24,
-      borderWidth: 1,
-      borderColor: C.border,
-      backgroundColor: C.backgroundElement,
-      color: C.text,
+    codeInputText: {
+      minHeight: 72,
       fontSize: 30,
       fontWeight: '900',
       letterSpacing: 10,
-      marginBottom: 0,
+      paddingHorizontal: 20,
+      paddingTop: 24,
+      paddingBottom: 5,
     },
 
     autoVerifyText: {
@@ -604,7 +601,7 @@ const makeStyles = (C: any) =>
     skeletonIconBox: {
       width: 96,
       height: 96,
-      borderRadius: 30,
+      borderRadius: 32,
       alignSelf: 'center',
       marginBottom: 28,
     },
@@ -650,7 +647,7 @@ const makeStyles = (C: any) =>
 
     skeletonCodeInput: {
       height: 72,
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 18,
     },
 

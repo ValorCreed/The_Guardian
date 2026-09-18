@@ -31,6 +31,7 @@ import {
   setBiometricEnabled,
 } from '../utils/secureAuth';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const getInitials = (name: string, email: string) => {
   const source = name || email || 'User';
@@ -620,12 +621,11 @@ export default function UserInfoScreen() {
             </Text> */}
 
             <Text style={styles.editInputLabel}>Username</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.editInput}
               value={draftName}
               onChangeText={setDraftName}
-              placeholder="Enter your username"
-              placeholderTextColor={C.tabInactive}
+              label="Username"
               autoCapitalize="words"
               autoCorrect={false}
               maxLength={60}
@@ -693,7 +693,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     profileCard: {
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 22,
       marginBottom: 24,
       borderWidth: 1,
@@ -759,7 +759,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       backgroundColor: C.securityScoreBg,
       paddingHorizontal: 14,
       paddingVertical: 7,
-      borderRadius: 16,
+      borderRadius: 18,
       marginTop: 14,
     },
     planBadgeText: {
@@ -783,7 +783,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     },
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       marginBottom: 24,
       overflow: 'hidden',
       borderWidth: 1,
@@ -888,7 +888,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     skeletonPlanBadge: {
       width: 92,
       height: 30,
-      borderRadius: 16,
+      borderRadius: 18,
     },
     skeletonSectionLabel: {
       width: 126,
@@ -898,7 +898,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     },
     skeletonCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       marginBottom: 24,
       overflow: 'hidden',
       borderWidth: 1,
@@ -968,7 +968,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     },
     editModalCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 28,
       borderWidth: 1,
       borderColor: C.border,
       padding: 20,
@@ -981,7 +981,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     editModalIcon: {
       width: 52,
       height: 52,
-      borderRadius: 20,
+      borderRadius: 22,
       backgroundColor: C.actionCard || C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',

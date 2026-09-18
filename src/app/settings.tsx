@@ -66,6 +66,8 @@ import {
   setHapticsEnabledPreference,
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
+import PulsingSkeleton from '../components/PulsingSkeleton';
 
 const AUTO_LOCK_ON_APP_CLOSE = -1;
 
@@ -619,13 +621,16 @@ export default function SettingsScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.title}>Settings</Text>
+        <Text style={styles.title}>Settings</Text>
+
 
           <TouchableOpacity
             style={styles.accountCard}
             activeOpacity={0.75}
             onPress={() => { hapticLight(); router.push('/userinfo'); }}
           >
+            <ChevronRight size={20} color={C.tabInactive} style={styles.accountChevron} />
+
             <View style={styles.avatar}>
               <Text style={styles.avatarText}>{getInitials(fullName, email)}</Text>
             </View>
@@ -633,11 +638,11 @@ export default function SettingsScreen() {
             <View style={styles.accountInfo}>
               <Text style={styles.accountName}>{fullName}</Text>
               <Text style={styles.accountEmail}>{email || 'No email found'}</Text>
+
+              <View style={styles.accountMetaRow}>
+                <PlanBadge plan={plan} loading={planLoading} C={C} isDark={isDark} />
+              </View>
             </View>
-
-            <PlanBadge plan={plan} loading={planLoading} C={C} isDark={isDark} />
-
-            <ChevronRight size={20} color={C.tabInactive} style={{ marginLeft: 8 }} />
           </TouchableOpacity>
 
           <Text style={styles.sectionLabel}>SECURITY</Text>
@@ -1114,24 +1119,22 @@ export default function SettingsScreen() {
             </Text>
 
             <Text style={styles.deleteInputLabel}>Account password</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.deleteInput}
               value={deletePassword}
               onChangeText={setDeletePassword}
-              placeholder="Enter your password"
-              placeholderTextColor={C.tabInactive}
+              label="Password"
               secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
             />
 
             <Text style={styles.deleteInputLabel}>Type DELETE</Text>
-            <TextInput
+            <FloatingLabelInput
               style={styles.deleteInput}
               value={deleteConfirmText}
               onChangeText={setDeleteConfirmText}
-              placeholder="DELETE"
-              placeholderTextColor={C.tabInactive}
+              label="Type DELETE to confirm"
               autoCapitalize="characters"
               autoCorrect={false}
             />
@@ -1175,14 +1178,14 @@ const localStyles = StyleSheet.create({
   loadingBadgeWrap: {
     minWidth: 88,
     height: 31,
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: 'hidden',
   },
 
   loadingBadge: {
     minWidth: 88,
     height: 31,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     overflow: 'hidden',
     paddingHorizontal: 11,
@@ -1218,6 +1221,8 @@ const localStyles = StyleSheet.create({
 const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
   StyleSheet.create({
     safeArea: { flex: 1, backgroundColor: C.background },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonPageTitle: { width: 150, height: 38, alignSelf: 'center', marginBottom: 18 },
     scrollContent: {
       marginTop: 35,
       paddingHorizontal: 18,
@@ -1230,13 +1235,16 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
       color: C.text,
       marginBottom: 18,
       letterSpacing: -0.7,
+      textAlign:"center"
     },
     accountCard: {
-      flexDirection: 'row',
+      position: 'relative',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
-      padding: 16,
+      borderRadius: 38,
+      paddingHorizontal: 20,
+      paddingTop: 22,
+      paddingBottom: 20,
       marginBottom: 18,
       borderWidth: 1,
       borderColor: C.border,
@@ -1247,18 +1255,51 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
       elevation: 2,
     },
     avatar: {
-      width: 50,
-      height: 50,
-      borderRadius: 20,
+      width: 78,
+      height: 78,
+      borderRadius: 69,
       backgroundColor: C.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      marginRight: 13,
+      marginBottom: 12,
+      flexShrink: 0,
     },
-    avatarText: { color: '#fff', fontWeight: '900', fontSize: 15 },
-    accountInfo: { flex: 1 },
-    accountName: { fontSize: 17, fontWeight: '900', color: C.text, letterSpacing: -0.2 },
-    accountEmail: { fontSize: 13, color: C.textSecondary, marginTop: 3, fontWeight: '600' },
+    avatarText: { color: '#fff', fontWeight: '900', fontSize: 17 },
+    accountInfo: {
+      width: '100%',
+      minWidth: 0,
+      alignItems: 'center',
+      paddingHorizontal: 6,
+    },
+    accountName: {
+      width: '100%',
+      fontSize: 18,
+      lineHeight: 23,
+      fontWeight: '900',
+      color: C.text,
+      letterSpacing: -0.2,
+      textAlign: 'center',
+    },
+    accountEmail: {
+      width: '100%',
+      fontSize: 13,
+      lineHeight: 19,
+      color: C.textSecondary,
+      marginTop: 5,
+      fontWeight: '600',
+      textAlign: 'center',
+      flexShrink: 1,
+    },
+    accountChevron: {
+      position: 'absolute',
+      top: 22,
+      right: 18,
+    },
+    accountMetaRow: {
+      marginTop: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     sectionLabel: {
       fontSize: 12,
       fontWeight: '900',
@@ -1270,7 +1311,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     },
     card: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 34,
       marginBottom: 26,
       overflow: 'hidden',
       borderWidth: 1,
@@ -1298,7 +1339,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     iconCircle: {
       width: 42,
       height: 42,
-      borderRadius: 17,
+      borderRadius: 37,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1329,13 +1370,13 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
       gap: 8,
       backgroundColor: C.background,
       padding: 5,
-      borderRadius: 18,
+      borderRadius: 38,
       borderWidth: 1,
       borderColor: C.border,
     },
     themeOption: {
       flex: 1,
-      borderRadius: 14,
+      borderRadius: 34,
       paddingVertical: 10,
       paddingHorizontal: 8,
       alignItems: 'center',
@@ -1385,7 +1426,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     deleteModalCard: {
       width: '100%',
       backgroundColor: C.backgroundElement,
-      borderRadius: 28,
+      borderRadius: 38,
       padding: 22,
       borderWidth: 1,
       borderColor: C.danger,
@@ -1398,7 +1439,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     deleteModalIcon: {
       width: 56,
       height: 56,
-      borderRadius: 22,
+      borderRadius: 32,
       backgroundColor: C.alertDangerBg,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1415,7 +1456,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     deleteInput: {
       backgroundColor: C.background,
       color: C.text,
-      borderRadius: 17,
+      borderRadius: 37,
       borderWidth: 1,
       borderColor: C.border,
       paddingHorizontal: 16,
@@ -1444,7 +1485,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     deleteCancelButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '900' },
     dangerCard: {
       backgroundColor: C.alertDangerBg,
-      borderRadius: 24,
+      borderRadius: 34,
       marginBottom: 26,
       overflow: 'hidden',
       borderWidth: 1,
@@ -1459,7 +1500,7 @@ const makeStyles = (C: ThemePalette, isDark: boolean, isOled: boolean) =>
     dangerIconCircle: {
       width: 42,
       height: 42,
-      borderRadius: 17,
+      borderRadius: 37,
       backgroundColor: C.background,
       alignItems: 'center',
       justifyContent: 'center',

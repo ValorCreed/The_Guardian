@@ -29,6 +29,7 @@ import {
   hapticWarning,
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const DELAYS = [5, 15, 30, 60] as const;
 
@@ -75,12 +76,11 @@ function PasswordField({
     <View style={styles.fieldBlock}>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.passwordWrap}>
-        <TextInput
+        <FloatingLabelInput
           style={styles.passwordInput}
           value={value}
           onChangeText={onChangeText}
-          placeholder={placeholder}
-          placeholderTextColor={C.tabInactive}
+          label={placeholder}
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
@@ -394,11 +394,7 @@ export default function DuressModeScreen() {
               <Text style={styles.heroTitle}>
                 {data?.enabled ? 'Protection is ready' : 'Not configured'}
               </Text>
-              <Text style={styles.heroText}>
-                {data?.enabled
-                  ? 'Your real and decoy vaults use separate sessions and encryption domains.'
-                  : 'Create a distinct password, then prepare believable decoy items.'}
-              </Text>
+              
             </View>
             <View style={[styles.statusPill, data?.enabled && styles.statusPillActive]}>
               <Text style={[styles.statusText, data?.enabled && styles.statusTextActive]}>
@@ -435,7 +431,7 @@ export default function DuressModeScreen() {
               onChangeText={setCurrentPassword}
               visible={showCurrent}
               onToggle={() => setShowCurrent((value) => !value)}
-              placeholder="Confirm your normal password"
+              placeholder="Normal password"
               C={C}
               styles={styles}
             />
@@ -451,7 +447,6 @@ export default function DuressModeScreen() {
                 </View>
                 <View style={styles.flex}>
                   <Text style={styles.setupButtonTitle}>Safe decoy setup</Text>
-                  <Text style={styles.setupButtonText}>Open the decoy vault without triggering an alert.</Text>
                 </View>
                 {openingPreview ? (
                   <ActivityIndicator color={C.primary} />
@@ -626,9 +621,7 @@ export default function DuressModeScreen() {
             </TouchableOpacity>
           )}
 
-          <Text style={styles.footerText}>
-            A duress login never displays a visible warning or exposes your real-vault item count.
-          </Text>
+          
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -683,7 +676,7 @@ const makeStyles = (C: any) =>
     heroCard: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-      borderRadius: 26,
+      borderRadius: 28,
       padding: 18,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -719,7 +712,7 @@ const makeStyles = (C: any) =>
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: 10,
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
       backgroundColor: C.alertWarningBg,
       borderWidth: 1,
@@ -729,7 +722,7 @@ const makeStyles = (C: any) =>
     warningText: { flex: 1, fontSize: 14, lineHeight: 20, color: C.text },
     sectionCard: {
       marginTop: 16,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 17,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -758,7 +751,7 @@ const makeStyles = (C: any) =>
     },
     passwordWrap: {
       minHeight: 54,
-      borderRadius: 16,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: C.border,
       backgroundColor: C.inputBackground || C.background,
@@ -794,7 +787,7 @@ const makeStyles = (C: any) =>
       backgroundColor: C.backgroundElement,
       ...CONTROL_3D,
     },
-    setupButtonTitle: { fontSize: 15, fontWeight: '900', color: C.text },
+    setupButtonTitle: { fontSize: 17, fontWeight: '900', color: C.text },
     setupButtonText: { marginTop: 2, fontSize: 13, lineHeight: 18, color: C.textSecondary },
     planNotice: {
       marginTop: 14,
@@ -802,7 +795,7 @@ const makeStyles = (C: any) =>
       alignItems: 'center',
       gap: 10,
       padding: 13,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.alertWarningBg,
       ...CONTROL_3D,
     },
@@ -838,7 +831,7 @@ const makeStyles = (C: any) =>
     contactEmail: { marginTop: 2, fontSize: 13, color: C.textSecondary },
     emptyContact: {
       minHeight: 58,
-      borderRadius: 16,
+      borderRadius: 18,
       borderWidth: 1,
       borderColor: C.border,
       paddingHorizontal: 14,
@@ -870,7 +863,7 @@ const makeStyles = (C: any) =>
     primaryButton: {
       minHeight: 55,
       marginTop: 17,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.primary,
       flexDirection: 'row',
       alignItems: 'center',
@@ -883,7 +876,7 @@ const makeStyles = (C: any) =>
     dangerButton: {
       minHeight: 52,
       marginTop: 12,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: `${C.danger}55`,
       flexDirection: 'row',
@@ -931,7 +924,7 @@ const makeStyles = (C: any) =>
     skeletonSubtitle: { width: '84%', height: 18, borderRadius: 8, marginTop: 12, marginBottom: 24 },
     skeletonCard: {
       minHeight: 130,
-      borderRadius: 26,
+      borderRadius: 28,
       padding: 18,
       flexDirection: 'row',
       gap: 13,
@@ -945,12 +938,12 @@ const makeStyles = (C: any) =>
     skeletonLineShort: { width: '52%', height: 14, borderRadius: 7, marginTop: 4 },
     skeletonForm: {
       marginTop: 16,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 17,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
       ...CARD_3D,
     },
-    skeletonInput: { width: '100%', height: 54, borderRadius: 16, marginTop: 14 },
+    skeletonInput: { width: '100%', height: 54, borderRadius: 18, marginTop: 14 },
   });

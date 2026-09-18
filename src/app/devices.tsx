@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
+  Pressable,
   StatusBar,
   StyleSheet,
   Text,
@@ -19,6 +20,8 @@ import { api, DeviceSession, logout } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi, useCancelableRequest } from '../hooks/useCancelableApi';
 import { clearBiometricCredentials, setBiometricEnabled } from '../utils/secureAuth';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
+import { hapticSelection } from '../utils/haptics';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -77,6 +80,7 @@ export default function DevicesScreen() {
   const [workingId, setWorkingId] = useState<number | null>(null);
   const [loggingOutAll, setLoggingOutAll] = useState(false);
   const [loggingOutOthers, setLoggingOutOthers] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
 
   const activeSessions = useMemo(
     () => sessions.filter((session) => session.active),
@@ -86,6 +90,11 @@ export default function DevicesScreen() {
   const currentSession = useMemo(
     () => activeSessions.find((session) => session.current),
     [activeSessions]
+  );
+
+  const selectedSession = useMemo(
+    () => activeSessions.find((session) => session.id === selectedSessionId) || null,
+    [activeSessions, selectedSessionId]
   );
 
   const otherActiveCount = useMemo(
@@ -234,10 +243,29 @@ export default function DevicesScreen() {
 
   const renderSession = (session: DeviceSession) => {
     const iconName = getDeviceIcon(session.deviceType);
-    const isWorking = workingId === session.id;
+    const selected = selectedSessionId === session.id;
 
     return (
-      <View key={session.id} style={styles.deviceCard}>
+      <Pressable
+        key={session.id}
+        delayLongPress={500}
+        onLongPress={() => {
+          hapticSelection();
+          setSelectedSessionId(session.id);
+        }}
+        onPress={() => {
+          if (selectedSessionId !== null) {
+            setSelectedSessionId(selected ? null : session.id);
+          }
+        }}
+        accessibilityRole="button"
+        accessibilityLabel={`${session.deviceName || 'Trusted device'}${session.current ? ', current device' : ''}`}
+        accessibilityHint="Press and hold to select session actions"
+        style={[
+          styles.deviceCard,
+          selected && { borderColor: C.primary, borderWidth: 2 },
+        ]}
+      >
         <View style={styles.deviceTopRow}>
           <View style={styles.deviceIcon}>
             <Ionicons name={iconName as any} size={22} color={C.primary} />
@@ -261,22 +289,11 @@ export default function DevicesScreen() {
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={styles.removeButton}
-            activeOpacity={0.75}
-            onPress={() => revokeSession(session)}
-            disabled={isWorking}
-          >
-            {isWorking ? (
-              <ActivityIndicator size="small" color={C.danger} />
-            ) : (
-              <Ionicons
-                name={session.current ? 'log-out-outline' : 'trash-outline'}
-                size={19}
-                color={C.danger}
-              />
-            )}
-          </TouchableOpacity>
+          {selected ? (
+            <View style={[styles.removeButton, { backgroundColor: C.actionCard }]}> 
+              <Ionicons name="checkmark" size={19} color={C.primary} />
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.metaRow}>
@@ -290,7 +307,7 @@ export default function DevicesScreen() {
             <Text style={styles.metaText}>Added {formatDate(session.createdAt)}</Text>
           </View>
         </View>
-      </View>
+      </Pressable>
     );
   };
 
@@ -404,6 +421,29 @@ export default function DevicesScreen() {
 
         <View style={{ height: 110 }} />
       </ScrollView>
+
+      <FloatingActionBar
+        visible={Boolean(selectedSession)}
+        onDismiss={() => setSelectedSessionId(null)}
+        actions={
+          selectedSession
+            ? [
+                {
+                  key: 'revoke-session',
+                  label: selectedSession.current ? 'Log out' : 'Remove',
+                  icon: selectedSession.current ? 'log-out-outline' : 'trash-outline',
+                  tone: 'danger',
+                  loading: workingId === selectedSession.id,
+                  onPress: () => {
+                    const selected = selectedSession;
+                    setSelectedSessionId(null);
+                    revokeSession(selected);
+                  },
+                },
+              ]
+            : []
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -437,7 +477,7 @@ const makeStyles = (C: any) =>
 
       width: 45,
       height: 45,
-      borderRadius: 16,
+      borderRadius: 18,
     },
 
     skeletonDeviceTitle: {
@@ -513,7 +553,7 @@ const makeStyles = (C: any) =>
 
     heroCard: {
       backgroundColor: C.primary,
-      borderRadius: 26,
+      borderRadius: 28,
       padding: 18,
       flexDirection: 'row',
       gap: 14,
@@ -564,7 +604,7 @@ const makeStyles = (C: any) =>
     actionCard: {
       flex: 1,
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 15,
       borderWidth: 1,
       borderColor: C.border,
@@ -610,7 +650,7 @@ const makeStyles = (C: any) =>
 
     deviceCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 15,
       marginBottom: 12,
       borderWidth: 1,
@@ -730,7 +770,7 @@ const makeStyles = (C: any) =>
 
     emptyCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 24,
       alignItems: 'center',
       marginBottom: 12,

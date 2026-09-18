@@ -49,7 +49,7 @@ const makeStyles = (C: any) =>
       marginHorizontal: 20,
       marginBottom: 14,
       padding: 14,
-      borderRadius: 20,
+      borderRadius: 22,
       backgroundColor: C.securityScoreBg || C.backgroundElement,
       borderWidth: 1,
       borderColor: C.warning,

@@ -37,6 +37,7 @@ import {
 } from '../utils/asyncResilience';
 
 const API_BASE_URL = 'https://guardian-vault-gateway.onrender.com';
+//const API_BASE_URL = 'http://10.251.178.37:8080'; // Local development gateway for testing with a local backend.
 /**\
  * REQUEST TIMEOUT SETTINGS
  *

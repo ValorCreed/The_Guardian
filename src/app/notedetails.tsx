@@ -16,7 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
-import { api, SecureNoteResponse } from '../services/api';
+import FloatingActionBar from '../components/FloatingActionBar';
+import { api, isDuressSession, SecureNoteResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
 import { findOfflineNote, isOfflineReadableError, loadOfflineVaultSnapshot } from '../services/offlineVault';
@@ -24,6 +25,7 @@ import { decryptJson, encryptJson } from '../utils/vaultcrypto';
 import { getSecureClipboardMessage, setSecureClipboard } from '../utils/secureClipboard';
 import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtection';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const CATEGORIES = ['General', 'Recovery Codes', 'Banking', 'School', 'Work', 'Family', 'Private'];
 
@@ -60,6 +62,31 @@ export default function NoteDetailsScreen() {
   const [saving, setSaving] = useState(false);
   const [offlineMode, setOfflineMode] = useState(false);
   const [offlineSavedAt, setOfflineSavedAt] = useState<string | null>(null);
+  const [duressMode, setDuressMode] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+
+    void isDuressSession().then((value) => {
+      if (mounted) setDuressMode(value);
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const openEstatePlaybook = () => {
+    if (!note || offlineMode || duressMode) return;
+
+    router.push({
+      pathname: '/estateplaybooks',
+      params: {
+        itemId: String(note.id),
+        itemType: 'NOTE',
+      },
+    });
+  };
 
   const decryptNoteContent = (value?: string) => {
     if (!value) return '';
@@ -268,12 +295,11 @@ export default function NoteDetailsScreen() {
 
           {editing ? (
             <View style={styles.form}>
-              <Text style={styles.label}>Title</Text>
-              <TextInput
+              <FloatingLabelInput
+                label="Title"
                 style={styles.input}
                 value={editTitle}
                 onChangeText={setEditTitle}
-                placeholderTextColor={C.tabInactive}
                 autoFocus={mode === 'edit'}
               />
 
@@ -305,8 +331,7 @@ export default function NoteDetailsScreen() {
                 />
               </View>
 
-              <Text style={styles.label}>SecureNote</Text>
-              <TextInput style={styles.noteInput} value={editContent} onChangeText={setEditContent} multiline textAlignVertical="top" />
+              <FloatingLabelInput label="SecureNote" style={styles.noteInput} value={editContent} onChangeText={setEditContent} multiline textAlignVertical="top" />
 
               <TouchableOpacity style={styles.mainBtn} onPress={saveChanges} disabled={saving}>
                 {saving ? <ActivityIndicator color="#fff" /> : <Ionicons name="save-outline" size={18} color="#fff" />}
@@ -323,26 +348,48 @@ export default function NoteDetailsScreen() {
                 <Text style={styles.noteText}>{content}</Text>
               </View>
 
-              <TouchableOpacity style={styles.mainBtn} onPress={offlineMode ? showOfflineWriteWarning : () => setEditing(true)}>
-                <Ionicons name="create-outline" size={18} color="#fff" />
-                <Text style={styles.mainBtnText}>{offlineMode ? 'Read-only offline mode' : 'Edit Note'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.secondaryBtn} onPress={copyContent}>
-                <Ionicons name="copy-outline" size={18} color={C.primary} />
-                <Text style={styles.secondaryBtnText}>Copy Note</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={[styles.secondaryBtn, { borderColor: C.danger }]} onPress={offlineMode ? showOfflineWriteWarning : deleteNote}>
-                <Ionicons name="trash-outline" size={18} color={C.danger} />
-                <Text style={[styles.secondaryBtnText, { color: C.danger }]}>Delete Note</Text>
-              </TouchableOpacity>
             </View>
           )}
 
           <View style={{ height: 80 }} />
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <FloatingActionBar
+        visible={!editing}
+        actions={[
+          {
+            key: 'edit-note',
+            label: 'Edit',
+            icon: 'create-outline',
+            tone: 'primary',
+            onPress: offlineMode ? showOfflineWriteWarning : () => setEditing(true),
+          },
+          {
+            key: 'copy-note',
+            label: 'Copy',
+            icon: 'copy-outline',
+            onPress: () => void copyContent(),
+          },
+          ...(!offlineMode && !duressMode
+            ? [
+                {
+                  key: 'estate-note',
+                  label: 'Estate',
+                  icon: 'book-outline' as const,
+                  onPress: openEstatePlaybook,
+                },
+              ]
+            : []),
+          {
+            key: 'delete-note',
+            label: 'Delete',
+            icon: 'trash-outline',
+            tone: 'danger',
+            onPress: offlineMode ? showOfflineWriteWarning : deleteNote,
+          },
+        ]}
+      />
     </SafeAreaView>
   );
 }
@@ -364,7 +411,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 74, height: 74, borderRadius: 24, marginBottom: 16 },
+ width: 74, height: 74, borderRadius: 26, marginBottom: 16 },
     skeletonTitle: { width: '62%', height: 26, marginBottom: 10 },
     skeletonSubtitle: { width: '48%', height: 13 },
     skeletonNoteLine: { width: '82%', height: 14, marginBottom: 12 },
@@ -385,7 +432,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowOffset: { width: 0, height: 11 },
  width: '100%', height: 52, borderRadius: 999, marginTop: 12 },
 
-    scrollContent: { paddingBottom: 30 },
+    scrollContent: { paddingBottom: 140 },
     loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
     loadingText: { color: C.textSecondary, marginTop: 12, fontSize: 15 },
     header: { paddingHorizontal: 20, paddingTop: 96, paddingBottom: 20, alignItems: 'center' },
@@ -407,7 +454,7 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
+ backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 18 },
     categoryRow: { gap: 8, paddingBottom: 18 },
     categoryChip: {
       shadowColor: '#000000',
@@ -425,7 +472,7 @@ const makeStyles = (C: ThemeColors) =>
  backgroundColor: C.primary, borderColor: C.primary },
     categoryText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     categoryTextActive: { color: '#fff' },
-    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
+    pinnedRow: { backgroundColor: C.backgroundElement, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', marginBottom: 18
       ,shadowColor: '#000',
       shadowOpacity: 0.035,
       shadowRadius: 14,
@@ -439,8 +486,8 @@ const makeStyles = (C: ThemeColors) =>
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
-    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18
+ minHeight: 220, backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 16, color: C.text, fontSize: 15, borderWidth: 1, borderColor: C.border, marginBottom: 16, lineHeight: 21 },
+    noteCard: { backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, padding: 18, marginBottom: 18
       ,shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,

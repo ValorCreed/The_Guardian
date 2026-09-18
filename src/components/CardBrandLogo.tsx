@@ -174,7 +174,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 31,
     height: 31,
-    borderRadius: 16,
+    borderRadius: 18,
   },
   masterLeft: { left: 7, backgroundColor: '#EB001B' },
   masterRight: { right: 7, backgroundColor: '#F79E1B', opacity: 0.92 },

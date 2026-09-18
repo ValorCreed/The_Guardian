@@ -26,6 +26,7 @@ import {
   hapticWarning,
 } from '../utils/haptics';
 import SecurityIssueModal from '../components/SecurityIssueModal';
+import PulsingSkeleton from '../components/PulsingSkeleton';
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 const RING_SIZE = 138;
@@ -543,13 +544,17 @@ export default function SecurityScreen() {
       >
         <View style={styles.headerRow}>
           <View style={styles.headerCopy}>
-            <Text style={styles.title}>Security center</Text>
-            <Text style={styles.headerSub}>
+            {loading ? (
+              <PulsingSkeleton styles={styles} style={styles.skeletonPageTitle} />
+            ) : (
+              <Text style={styles.title}>Security Center</Text>
+            )}
+            {/* <Text style={styles.headerSub}>
               Review risks and essential protection tools.
-            </Text>
+            </Text> */}
           </View>
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={styles.iconButton}
             onPress={() => {
               hapticLight();
@@ -562,7 +567,7 @@ export default function SecurityScreen() {
             ) : (
               <Ionicons name="refresh" size={20} color={C.primary} />
             )}
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
 
         <View style={styles.heroCard}>
@@ -869,6 +874,8 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       flex: 1,
       backgroundColor: C.background,
     },
+    skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
+    skeletonPageTitle: { width: 210, height: 34, alignSelf: 'center' },
     scrollContent: {
       paddingHorizontal: 20,
       paddingTop: 22,
@@ -890,6 +897,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       fontSize: 30,
       fontWeight: '900',
       letterSpacing: -0.7,
+      textAlign:"center"
     },
     headerSub: {
       color: C.textSecondary,
@@ -901,7 +909,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     iconButton: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -910,7 +918,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     heroCard: {
       backgroundColor: C.primary,
-      borderRadius: 30,
+      borderRadius: 32,
       padding: 18,
       overflow: 'hidden',
       marginBottom: 16,
@@ -976,8 +984,10 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     recoveryWarningCard: {
       backgroundColor: C.danger,
-      borderRadius: 21,
+      borderRadius: 41,
       padding: 14,
+      paddingBottom: 16,
+      paddingTop: 4,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 11,
@@ -991,7 +1001,8 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     recoveryIcon: {
       width: 42,
       height: 42,
-      borderRadius: 15,
+      top:6,
+      borderRadius: 55,
       backgroundColor: 'rgba(255,255,255,0.17)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1048,7 +1059,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     setupCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1114,7 +1125,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     recommendationCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1134,7 +1145,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     gainPill: {
       minWidth: 82,
-      borderRadius: 20,
+      borderRadius: 22,
       paddingHorizontal: 10,
       paddingVertical: 10,
       backgroundColor: C.primary,
@@ -1176,7 +1187,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     issueSummaryCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 24,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1235,7 +1246,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
       gap: 10,
     },
     toolGroupShell: {
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 16,
       shadowColor: '#000',
       shadowOpacity: 0.075,
@@ -1245,7 +1256,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     toolGroupCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       borderWidth: 1,
       borderColor: C.border,
       overflow: 'hidden',
@@ -1263,7 +1274,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     toolGroupHeaderIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.actionCard,
@@ -1296,7 +1307,7 @@ function makeStyles(C: ThemePalette, isDark: boolean) {
     },
     actionCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 22,
       paddingHorizontal: 14,
       paddingVertical: 11,
       borderWidth: 1,

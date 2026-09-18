@@ -1,6 +1,5 @@
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -18,6 +17,7 @@ import { api, EmergencyContactResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { decryptJson } from '../utils/vaultcrypto';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
 
 export default function EmergencyDetailsScreen() {
   const screenAlert = useScreenAlert();
@@ -190,11 +190,21 @@ export default function EmergencyDetailsScreen() {
           <Text style={styles.mainButtonText}>Add another contact</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.deleteButton} onPress={deleteContact} disabled={deleting}>
-          {deleting ? <ActivityIndicator color={C.danger} /> : <Ionicons name="trash-outline" size={20} color={C.danger} />}
-          <Text style={styles.deleteButtonText}>{deleting ? 'Removing...' : 'Remove Contact'}</Text>
-        </TouchableOpacity>
       </ScrollView>
+
+      <FloatingActionBar
+        visible={Boolean(contact)}
+        actions={[
+          {
+            key: 'remove-emergency-contact',
+            label: deleting ? 'Removing' : 'Remove',
+            icon: 'trash-outline',
+            tone: 'danger',
+            loading: deleting,
+            onPress: deleteContact,
+          },
+        ]}
+      />
     </SafeAreaView>
   );
 }
@@ -232,7 +242,7 @@ const makeStyles = (C: any) => StyleSheet.create({
 
     width: 78,
     height: 78,
-    borderRadius: 24,
+    borderRadius: 26,
     marginBottom: 14,
     shadowOpacity: 0.16,
     shadowRadius: 16,
@@ -244,7 +254,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   skeletonCard: {
     width: '100%',
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: 16,
@@ -312,7 +322,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: C.background },
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 },
   loadingText: { color: C.textSecondary, marginTop: 12, fontSize: 15, fontWeight: '700' },
-  content: { paddingHorizontal: 20, paddingTop: 96, paddingBottom: 120, alignItems: 'center' },
+  content: { paddingHorizontal: 20, paddingTop: 96, paddingBottom: 160, alignItems: 'center' },
   avatar: {
     width: 78,
     height: 78,
@@ -334,7 +344,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   card: {
     width: '100%',
     backgroundColor: C.backgroundElement,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: C.border,
     paddingHorizontal: 16,
@@ -348,7 +358,7 @@ const makeStyles = (C: any) => StyleSheet.create({
   noteCard: {
     width: '100%',
     backgroundColor: C.backgroundElement,
-    borderRadius: 18,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: C.border,
     padding: 16,

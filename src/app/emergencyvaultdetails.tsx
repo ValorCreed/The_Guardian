@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -16,6 +15,7 @@ import * as Sharing from 'expo-sharing';
 
 import { useAppTheme } from '../context/ThemeContext';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import FloatingActionBar from '../components/FloatingActionBar';
 import { api, EmergencyVaultItemResponse } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import { decryptJson, decryptPassword, maskCardNumber, maskPassword } from '../utils/vaultcrypto';
@@ -281,8 +281,6 @@ export default function EmergencyVaultDetailsScreen() {
               onCopy={() => copyValue('Password', password)}
               styles={styles}
               C={C}
-              secretToggle={() => setShowSecret((current) => !current)}
-              showSecret={showSecret}
             />
             {!!item.notes && <InfoRow label="Notes" value={decryptStoredText(item.notes)} onCopy={() => copyValue('Notes', decryptStoredText(item.notes))} styles={styles} C={C} last />}
           </View>
@@ -294,7 +292,7 @@ export default function EmergencyVaultDetailsScreen() {
             <InfoRow label="Cardholder" value={card.cardholderName} onCopy={() => copyValue('Cardholder name', card.cardholderName)} styles={styles} C={C} />
             <InfoRow label="Card number" value={showSecret ? formatCard(card.cardNumber) : maskCardNumber(card.cardNumber)} onCopy={() => copyValue('Card number', card.cardNumber)} styles={styles} C={C} />
             <InfoRow label="Expiry" value={card.expiry} onCopy={() => copyValue('Expiry', card.expiry)} styles={styles} C={C} />
-            <InfoRow label="CVV" value={showSecret ? card.cvv : '•••'} onCopy={() => copyValue('CVV', card.cvv)} styles={styles} C={C} secretToggle={() => setShowSecret((current) => !current)} showSecret={showSecret} last />
+            <InfoRow label="CVV" value={showSecret ? card.cvv : '•••'} onCopy={() => copyValue('CVV', card.cvv)} styles={styles} C={C} last />
           </View>
         )}
 
@@ -313,56 +311,87 @@ export default function EmergencyVaultDetailsScreen() {
           </View>
         )}
 
-        {item.itemType === 'DOCUMENT' && (
-          <TouchableOpacity
-            style={[styles.mainButton, downloading && styles.mainButtonDisabled]}
-            activeOpacity={0.85}
-            onPress={downloadDocument}
-            disabled={downloading}
-          >
-            {downloading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Ionicons name="download-outline" size={18} color="#fff" />
-            )}
-            <Text style={styles.mainButtonText}>{downloading ? 'Preparing document...' : 'Download document'}</Text>
-          </TouchableOpacity>
-        )}
-
         {item.itemType === 'NOTE' && (
           <View style={styles.card}>
             <InfoRow label="Category" value={item.category || 'General'} onCopy={() => copyValue('Category', item.category || 'General')} styles={styles} C={C} />
             <View style={styles.noteContentBox}>
               <Text style={styles.infoLabel}>Note</Text>
               <Text style={styles.noteContent}>{noteContent || 'No note content.'}</Text>
-              {!!noteContent && (
-                <TouchableOpacity style={styles.copyNoteButton} onPress={() => copyValue('Note', noteContent)}>
-                  <Ionicons name="copy-outline" size={17} color={C.primary} />
-                  <Text style={styles.copyNoteText}>Copy note</Text>
-                </TouchableOpacity>
-              )}
             </View>
           </View>
         )}
 
-        <View style={{ height: 90 }} />
+        <View style={{ height: 120 }} />
       </ScrollView>
+
+      <FloatingActionBar
+        visible
+        actions={
+          item.itemType === 'PASSWORD'
+            ? [
+                {
+                  key: 'emergency-reveal-password',
+                  label: showSecret ? 'Hide' : 'Reveal',
+                  icon: showSecret ? 'eye-off-outline' : 'eye-outline',
+                  tone: 'primary',
+                  onPress: () => setShowSecret((current) => !current),
+                },
+                {
+                  key: 'emergency-copy-password',
+                  label: 'Copy',
+                  icon: 'copy-outline',
+                  onPress: () => void copyValue('Password', password),
+                },
+              ]
+            : item.itemType === 'CARD'
+              ? [
+                  {
+                    key: 'emergency-reveal-card',
+                    label: showSecret ? 'Hide' : 'Reveal',
+                    icon: showSecret ? 'eye-off-outline' : 'eye-outline',
+                    tone: 'primary',
+                    onPress: () => setShowSecret((current) => !current),
+                  },
+                  {
+                    key: 'emergency-copy-card',
+                    label: 'Copy card',
+                    icon: 'copy-outline',
+                    onPress: () => void copyValue('Card number', card.cardNumber),
+                  },
+                ]
+              : item.itemType === 'DOCUMENT'
+                ? [
+                    {
+                      key: 'emergency-download-document',
+                      label: downloading ? 'Preparing' : 'Download',
+                      icon: 'download-outline',
+                      tone: 'primary',
+                      loading: downloading,
+                      onPress: () => void downloadDocument(),
+                    },
+                  ]
+                : [
+                    {
+                      key: 'emergency-copy-note',
+                      label: 'Copy note',
+                      icon: 'copy-outline',
+                      tone: 'primary',
+                      onPress: () => void copyValue('Note', noteContent),
+                    },
+                  ]
+        }
+      />
     </SafeAreaView>
   );
 }
 
-function InfoRow({ label, value, onCopy, styles, C, secretToggle, showSecret, last }: any) {
+function InfoRow({ label, value, onCopy, styles, C, last }: any) {
   return (
     <View style={[styles.infoRow, !last && styles.divider]}>
       <View style={{ flex: 1 }}>
         <Text style={styles.infoLabel}>{label}</Text>
         <Text style={styles.infoValue} selectable>{value || 'Not saved'}</Text>
       </View>
-      {secretToggle && (
-        <TouchableOpacity style={styles.iconButton} onPress={secretToggle}>
-          <Ionicons name={showSecret ? 'eye-off-outline' : 'eye-outline'} size={19} color={C.primary} />
-        </TouchableOpacity>
-      )}
       {!!value && (
         <TouchableOpacity style={styles.iconButton} onPress={onCopy}>
           <Ionicons name="copy-outline" size={19} color={C.primary} />
@@ -383,15 +412,15 @@ const makeStyles = (C: any) => StyleSheet.create({
   eyebrow: { color: C.textSecondary, fontSize: 13, fontWeight: '800' },
   title: { color: C.text, fontSize: 29, fontWeight: '900', marginTop: 2 },
   subtitle: { color: C.textSecondary, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 18 },
-  warningCard: { backgroundColor: C.securityScoreBg, borderRadius: 18, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.warning, marginBottom: 14 },
+  warningCard: { backgroundColor: C.securityScoreBg, borderRadius: 20, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.warning, marginBottom: 14 },
   warningText: { color: C.text, flex: 1, fontSize: 12, lineHeight: 18, fontWeight: '800' },
-  card: { backgroundColor: C.backgroundElement, borderRadius: 22, borderWidth: 1, borderColor: C.border, overflow: 'hidden', marginBottom: 16 },
+  card: { backgroundColor: C.backgroundElement, borderRadius: 24, borderWidth: 1, borderColor: C.border, overflow: 'hidden', marginBottom: 16 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 15 },
   divider: { borderBottomWidth: 1, borderBottomColor: C.border },
   infoLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '800', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.3 },
   infoValue: { color: C.text, fontSize: 15, fontWeight: '800', lineHeight: 21 },
   iconButton: { width: 38, height: 38, borderRadius: 19, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
-  documentPreviewPlaceholder: { margin: 15, padding: 18, borderRadius: 16, backgroundColor: C.actionCard, alignItems: 'center', gap: 7 },
+  documentPreviewPlaceholder: { margin: 15, padding: 18, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', gap: 7 },
   documentPreviewTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   documentPreviewText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, textAlign: 'center' },
   mainButton: { backgroundColor: C.backgroundbutton || C.primary, borderRadius: 999, paddingVertical: 15, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, marginBottom: 14 },

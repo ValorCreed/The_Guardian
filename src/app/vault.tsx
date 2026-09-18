@@ -49,6 +49,7 @@ import { syncGuardianAutofillCache } from '../services/autofillSync';
 import { safeLogError } from '../utils/asyncResilience';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const { width } = Dimensions.get('window');
 const CARD_GAP = 12;
@@ -1327,26 +1328,27 @@ const VaultScreen = () => {
                   <View style={styles.documentIcon}>
                     <Ionicons
                       name={isImageDocumentFile(item.mimeType, item.fileName || item.title) ? 'image-outline' : 'document-text-outline'}
-                      size={23}
+                      size={34}
                       color={C.primary}
                     />
                   </View>
-                  <Ionicons name="lock-closed-outline" size={15} color={C.tabInactive} />
                 </View>
 
-                <Text
-                  style={styles.documentName}
-                  numberOfLines={2}
-                  ellipsizeMode="tail"
-                >
-                  {item.fileName || item.title || 'Document'}
-                </Text>
-                <Text style={styles.documentCategory} numberOfLines={1}>
-                  {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
-                </Text>
-                <Text style={styles.documentSize} numberOfLines={1}>
-                  {formatSize(item.sizeBytes)}
-                </Text>
+                <View style={styles.documentMeta}>
+                  <Text
+                    style={styles.documentName}
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                  >
+                    {item.fileName || item.title || 'Document'}
+                  </Text>
+                  <Text style={styles.documentCategory} numberOfLines={1}>
+                    {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
+                  </Text>
+                  <Text style={styles.documentSize} numberOfLines={1}>
+                    {formatSize(item.sizeBytes)}
+                  </Text>
+                </View>
               </TouchableOpacity>
               </Animated.View>
             );
@@ -1614,10 +1616,9 @@ const VaultScreen = () => {
 
         <View style={styles.searchBar}>
           <Ionicons name="search-outline" size={18} color={C.tabInactive} />
-          <TextInput
+          <FloatingLabelInput
             style={styles.searchInput}
-            placeholder={`Search ${activeTab.toLowerCase()}`}
-            placeholderTextColor={C.tabInactive}
+            label={`Search ${activeTab.toLowerCase()}`}
             value={search}
             onChangeText={setSearch}
             returnKeyType="search"
@@ -1755,7 +1756,7 @@ const makeStyles = (C: ThemeColors) =>
       width: 48,
       height: 48,
       backgroundColor: C.primary,
-      borderRadius: 20,
+      borderRadius: 22,
       justifyContent: 'center',
       alignItems: 'center',
       shadowColor: C.primary,
@@ -1770,7 +1771,7 @@ const makeStyles = (C: ThemeColors) =>
       minWidth: 104,
       height: 48,
       backgroundColor: C.primary,
-      borderRadius: 20,
+      borderRadius: 22,
       justifyContent: 'center',
       alignItems: 'center',
       flexDirection: 'row',
@@ -1796,7 +1797,7 @@ const makeStyles = (C: ThemeColors) =>
       marginHorizontal: 20,
       marginBottom: 16,
       backgroundColor: C.primary,
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 18,
       shadowColor: '#000',
       shadowOpacity: 0.045,
@@ -1808,7 +1809,7 @@ const makeStyles = (C: ThemeColors) =>
     overviewIcon: {
       width: 54,
       height: 54,
-      borderRadius: 20,
+      borderRadius: 22,
       backgroundColor: 'rgba(255,255,255,0.16)',
       alignItems: 'center',
       justifyContent: 'center',
@@ -1840,17 +1841,17 @@ const makeStyles = (C: ThemeColors) =>
       flexDirection: 'row',
       alignItems: 'center',
       backgroundColor: C.backgroundElement,
-      borderRadius: 20,
+      borderRadius: 52,
       marginHorizontal: 20,
       marginBottom: 14,
       paddingHorizontal: 16,
-      paddingVertical: 13,
+      paddingVertical: 3,
       gap: 8,
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
       shadowOpacity: 0.045,
-      shadowRadius: 16,
+      shadowRadius: 36,
       shadowOffset: { width: 0, height: 8 },
       elevation: 2,
     },
@@ -1867,7 +1868,7 @@ const makeStyles = (C: ThemeColors) =>
       marginHorizontal: 20,
       marginBottom: 16,
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 50,
       padding: 5,
       borderWidth: 1,
       borderColor: C.border,
@@ -1884,7 +1885,7 @@ const makeStyles = (C: ThemeColors) =>
       justifyContent: 'center',
       alignItems: 'center',
       paddingVertical: 9,
-      borderRadius: 18,
+      borderRadius: 50,
       gap: 4,
     },
 
@@ -1909,7 +1910,7 @@ const makeStyles = (C: ThemeColors) =>
 
     itemCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 34,
       padding: 14,
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -1925,7 +1926,7 @@ const makeStyles = (C: ThemeColors) =>
 
     noteCard: {
       backgroundColor: C.backgroundElement,
-      borderRadius: 22,
+      borderRadius: 34,
       padding: 14,
       flexDirection: 'row',
       alignItems: 'flex-start',
@@ -1942,7 +1943,7 @@ const makeStyles = (C: ThemeColors) =>
     avatar: {
       width: 46,
       height: 46,
-      borderRadius: 18,
+      borderRadius: 40,
       justifyContent: 'center',
       alignItems: 'center',
     },
@@ -2000,8 +2001,9 @@ const makeStyles = (C: ThemeColors) =>
       width: DOC_CARD_WIDTH,
       height: DOC_CARD_HEIGHT,
       backgroundColor: C.backgroundElement,
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 16,
+      justifyContent: 'space-between',
       borderWidth: 1,
       borderColor: C.border,
       shadowColor: '#000',
@@ -2013,22 +2015,26 @@ const makeStyles = (C: ThemeColors) =>
 
     documentTop: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
-      alignItems: 'center',
-      marginBottom: 14,
+      justifyContent: 'flex-start',
+      alignItems: 'flex-start',
+      marginBottom: 8,
     },
 
     documentIcon: {
-      width: 48,
-      height: 48,
-      borderRadius: 18,
+      width: 66,
+      height: 66,
+      borderRadius: 24,
       backgroundColor: C.actionCard,
       justifyContent: 'center',
       alignItems: 'center',
     },
 
+    documentMeta: {
+      marginTop: 'auto',
+    },
+
     documentName: {
-      height: 38,
+      minHeight: 38,
       fontSize: 14,
       fontWeight: '900',
       color: C.text,
@@ -2054,7 +2060,7 @@ const makeStyles = (C: ThemeColors) =>
     documentUpgradeCard: {
       marginHorizontal: 3,
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 28,
       borderWidth: 1,
       borderColor: C.border,
       padding: 22,
@@ -2069,7 +2075,7 @@ const makeStyles = (C: ThemeColors) =>
     documentUpgradeIcon: {
       width: 74,
       height: 74,
-      borderRadius: 26,
+      borderRadius: 28,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -2114,7 +2120,7 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     creditCard: {
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 22,
       minHeight: 190,
       justifyContent: 'space-between',
@@ -2269,7 +2275,7 @@ const makeStyles = (C: ThemeColors) =>
     },
 
     creditCardSkeleton: {
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 20,
       height: 176,
       justifyContent: 'space-between',
@@ -2314,7 +2320,7 @@ const makeStyles = (C: ThemeColors) =>
     emptyIcon: {
       width: 76,
       height: 76,
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',

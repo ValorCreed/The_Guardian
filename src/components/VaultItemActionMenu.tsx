@@ -725,7 +725,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       flexDirection: 'row',
       alignItems: 'flex-start',
       gap: 12,
-      borderRadius: 22,
+      borderRadius: 24,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -739,7 +739,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     previewAvatar: {
       width: 46,
       height: 46,
-      borderRadius: 18,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
       flexShrink: 0,
@@ -801,7 +801,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       flex: 1,
       width: '100%',
       padding: 16,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -822,7 +822,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     previewDocumentIcon: {
       width: 48,
       height: 48,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.actionCard || C.backgroundSelected,
       alignItems: 'center',
       justifyContent: 'center',
@@ -853,7 +853,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
       flex: 1,
       width: '100%',
       padding: 22,
-      borderRadius: 28,
+      borderRadius: 30,
       justifyContent: 'space-between',
       overflow: 'hidden',
       gap: 18,
@@ -934,7 +934,7 @@ const makeStyles = (C: any, isDark: boolean, isOled: boolean) =>
     menuCard: {
       position: 'absolute',
       width: MENU_WIDTH,
-      borderRadius: 22,
+      borderRadius: 24,
       overflow: 'hidden',
       backgroundColor: isOled
         ? 'rgba(0,0,0,0.97)'

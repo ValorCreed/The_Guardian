@@ -43,6 +43,7 @@ import {
   hapticWarning,
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const INCIDENT_TYPES: Array<{
   value: SecurityIncidentType;
@@ -722,13 +723,11 @@ export default function IncidentLockdownScreen() {
                 styles={styles}
               />
 
-              <Text style={styles.label}>OPTIONAL INCIDENT NOTE</Text>
-              <TextInput
+              <FloatingLabelInput
                 style={[styles.input, styles.noteInput]}
                 value={note}
                 onChangeText={setNote}
-                placeholder="Example: Phone lost near campus at 10:30 PM"
-                placeholderTextColor={C.tabInactive}
+                label="OPTIONAL INCIDENT NOTE"
                 multiline
                 maxLength={1000}
                 textAlignVertical="top"
@@ -1182,12 +1181,11 @@ function PasswordEntry({
     <>
       <Text style={styles.label}>{label}</Text>
       <View style={styles.passwordField}>
-        <TextInput
+        <FloatingLabelInput
           style={styles.passwordFieldInput}
           value={value}
           onChangeText={onChangeText}
-          placeholder={placeholder}
-          placeholderTextColor={C.tabInactive}
+          label={placeholder}
           secureTextEntry={!visible}
           autoCapitalize="none"
           autoCorrect={false}
@@ -1691,9 +1689,9 @@ const makeStyles = (C: any) =>
     content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 40 },
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
     skeletonTitle: { width: '76%', height: 35, marginBottom: 12 },
-    skeletonSub: { width: '96%', height: 50, borderRadius: 16, marginBottom: 20 },
+    skeletonSub: { width: '96%', height: 50, borderRadius: 18, marginBottom: 20 },
     skeletonShell: {
-      borderRadius: 26,
+      borderRadius: 28,
       marginBottom: 16,
       shadowColor: '#000',
       shadowOpacity: 0.11,
@@ -1703,7 +1701,7 @@ const makeStyles = (C: any) =>
     },
     skeletonHero: {
       minHeight: 168,
-      borderRadius: 26,
+      borderRadius: 28,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1713,7 +1711,7 @@ const makeStyles = (C: any) =>
     },
     skeletonTask: {
       minHeight: 145,
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1722,7 +1720,7 @@ const makeStyles = (C: any) =>
       gap: 13,
     },
     skeletonIcon: { width: 60, height: 60, borderRadius: 21 },
-    skeletonTaskIcon: { width: 46, height: 46, borderRadius: 16 },
+    skeletonTaskIcon: { width: 46, height: 46, borderRadius: 18 },
     skeletonLineLarge: { width: '78%', height: 18, marginBottom: 12 },
     skeletonLine: { width: '94%', height: 13, marginBottom: 10 },
     skeletonLineShort: { width: '58%', height: 13 },
@@ -1736,7 +1734,7 @@ const makeStyles = (C: any) =>
       marginBottom: 20,
     },
     heroShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 20,
       shadowColor: '#000',
       shadowOpacity: 0.15,
@@ -1745,7 +1743,7 @@ const makeStyles = (C: any) =>
       elevation: 8,
     },
     heroCard: {
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 19,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -1776,7 +1774,7 @@ const makeStyles = (C: any) =>
     heroTitle: { color: C.text, fontSize: 19, fontWeight: '900', marginTop: 4 },
     heroText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 6 },
     planNotice: {
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
       marginBottom: 20,
       backgroundColor: `${C.warning}12`,
@@ -1790,7 +1788,7 @@ const makeStyles = (C: any) =>
     sectionTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 10 },
     sectionSub: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 4, marginBottom: 11 },
     choiceShell: {
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 18,
       shadowColor: '#000',
       shadowOpacity: 0.08,
@@ -1799,7 +1797,7 @@ const makeStyles = (C: any) =>
       elevation: 4,
     },
     choiceList: {
-      borderRadius: 24,
+      borderRadius: 26,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -1810,7 +1808,7 @@ const makeStyles = (C: any) =>
     choiceIcon: {
       width: 46,
       height: 46,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.actionCard,
@@ -1829,7 +1827,7 @@ const makeStyles = (C: any) =>
     },
     input: {
       minHeight: 52,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: C.border,
       backgroundColor: C.backgroundElement,
@@ -1841,7 +1839,7 @@ const makeStyles = (C: any) =>
     },
     passwordField: {
       minHeight: 52,
-      borderRadius: 18,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: C.border,
       backgroundColor: C.backgroundElement,
@@ -1902,7 +1900,7 @@ const makeStyles = (C: any) =>
     primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '900' },
     buttonDisabled: { opacity: 0.5 },
     truthCard: {
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
       backgroundColor: C.actionCard,
       borderWidth: 1,
@@ -1914,7 +1912,7 @@ const makeStyles = (C: any) =>
     },
     truthText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
     activeHeroShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       marginBottom: 18,
       shadowColor: '#000',
       shadowOpacity: 0.2,
@@ -1923,7 +1921,7 @@ const makeStyles = (C: any) =>
       elevation: 10,
     },
     activeHero: {
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 19,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -1952,7 +1950,7 @@ const makeStyles = (C: any) =>
     statRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
     stat: {
       flex: 1,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.backgroundSelected,
       padding: 10,
       alignItems: 'center',
@@ -1960,7 +1958,7 @@ const makeStyles = (C: any) =>
     statValue: { color: C.text, fontSize: 17, fontWeight: '900' },
     statLabel: { color: C.textSecondary, fontSize: 11, textAlign: 'center', marginTop: 3 },
     lockNotice: {
-      borderRadius: 18,
+      borderRadius: 20,
       padding: 14,
       backgroundColor: C.actionCard,
       borderWidth: 1,
@@ -1972,7 +1970,7 @@ const makeStyles = (C: any) =>
     },
     lockNoticeText: { color: C.text, fontSize: 13, lineHeight: 20, flex: 1, fontWeight: '700' },
     exitOptionsCard: {
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 15,
       marginBottom: 18,
       backgroundColor: C.backgroundElement,
@@ -1993,7 +1991,7 @@ const makeStyles = (C: any) =>
     exitOptionsIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -2042,7 +2040,7 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
     },
     safetyGuardCard: {
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 15,
       marginBottom: 20,
       backgroundColor: C.backgroundElement,
@@ -2060,7 +2058,7 @@ const makeStyles = (C: any) =>
     safetyGuardIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.actionCard,
@@ -2096,7 +2094,7 @@ const makeStyles = (C: any) =>
       fontWeight: '900',
     },
     taskShell: {
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 13,
       shadowColor: '#000',
       shadowOpacity: 0.09,
@@ -2105,7 +2103,7 @@ const makeStyles = (C: any) =>
       elevation: 4,
     },
     taskCard: {
-      borderRadius: 24,
+      borderRadius: 26,
       padding: 15,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -2181,7 +2179,7 @@ const makeStyles = (C: any) =>
     timelineText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 4 },
     timelineDate: { color: C.tabInactive, fontSize: 11, marginTop: 5 },
     formShell: {
-      borderRadius: 26,
+      borderRadius: 28,
       marginTop: 8,
       marginBottom: 18,
       shadowColor: '#000',
@@ -2191,7 +2189,7 @@ const makeStyles = (C: any) =>
       elevation: 6,
     },
     formCard: {
-      borderRadius: 26,
+      borderRadius: 28,
       padding: 17,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -2200,7 +2198,7 @@ const makeStyles = (C: any) =>
     formTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
     formText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 5, marginBottom: 13 },
     cancelCard: {
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 16,
       backgroundColor: `${C.danger}0D`,
       borderWidth: 1,
@@ -2209,7 +2207,7 @@ const makeStyles = (C: any) =>
     },
     smallDangerButton: {
       minHeight: 46,
-      borderRadius: 16,
+      borderRadius: 18,
       paddingHorizontal: 13,
       backgroundColor: `${C.danger}10`,
       borderWidth: 1,
@@ -2262,7 +2260,7 @@ const makeStyles = (C: any) =>
       marginTop: 4,
     },
     historyCard: {
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 14,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -2275,7 +2273,7 @@ const makeStyles = (C: any) =>
     historyIcon: {
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.actionCard,
@@ -2312,7 +2310,7 @@ const makeStyles = (C: any) =>
     modalCard: {
       width: '100%',
       maxHeight: Platform.OS === 'ios' ? '88%' : '82%',
-      borderRadius: 28,
+      borderRadius: 30,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
       borderColor: C.border,
@@ -2349,7 +2347,7 @@ const makeStyles = (C: any) =>
     modalContent: { padding: 16, paddingBottom: 26 },
     modalText: { color: C.textSecondary, fontSize: 14, lineHeight: 22 },
     guidanceCard: {
-      borderRadius: 20,
+      borderRadius: 22,
       padding: 14,
       marginTop: 16,
       marginBottom: 8,
@@ -2402,7 +2400,7 @@ const makeStyles = (C: any) =>
       marginTop: 8,
     },
     errorShell: {
-      borderRadius: 28,
+      borderRadius: 30,
       shadowColor: '#000',
       shadowOpacity: 0.12,
       shadowRadius: 20,
@@ -2410,7 +2408,7 @@ const makeStyles = (C: any) =>
       elevation: 6,
     },
     errorCard: {
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 22,
       alignItems: 'center',
       backgroundColor: C.backgroundElement,

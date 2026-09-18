@@ -21,8 +21,9 @@ import * as Sharing from 'expo-sharing';
 import { BlurView } from 'expo-blur';
 import { useAppTheme } from '../context/ThemeContext';
 import { useBlurTarget } from '../context/BlurTargetContext';
-import { hapticLight, hapticMedium, hapticWarning, hapticDelete, hapticSuccess } from '../utils/haptics';
+import { hapticLight, hapticMedium, hapticWarning, hapticSuccess } from '../utils/haptics';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import FloatingActionBar from '../components/FloatingActionBar';
 import { api, isDuressSession, VaultItem } from '../services/api';
 import { isScreenRequestCancelled, useCancelableApi } from '../hooks/useCancelableApi';
 import OfflineBanner from '../components/OfflineBanner';
@@ -49,6 +50,7 @@ import { useSensitiveScreenProtection } from '../hooks/useSensitiveScreenProtect
 import { syncGuardianAutofillCache } from '../services/autofillSync';
 import { useScreenAlert } from '../hooks/useScreenAlert';
 import { getFriendlyVaultSubtitle, getFriendlyVaultTitle } from '../utils/vaultPresentation';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 type CardPayload = {
   cardholderName: string;
@@ -807,28 +809,17 @@ const loadItem = async () => {
   };
 
 
-  const renderDeleteButton = (label: string) => (
-    <TouchableOpacity
-      style={[
-        styles.secondaryBtn,
-        styles.deleteBtn,
-        { borderColor: C.danger },
-        deleting && styles.mainBtnDisabled,
-      ]}
-      onPress={offlineMode ? () => { hapticWarning(); showOfflineWriteWarning(); } : () => { hapticDelete(); deleteCurrentItem(); }}
-      disabled={deleting}
-      activeOpacity={0.85}
-    >
-      {deleting ? (
-        <ActivityIndicator size="small" color={C.danger} />
-      ) : (
-        <Ionicons name="trash-outline" size={18} color={C.danger} />
-      )}
-      <Text style={[styles.secondaryBtnText, { color: C.danger }]}>
-        {deleting ? 'Deleting...' : label}
-      </Text>
-    </TouchableOpacity>
-  );
+  const openEstatePlaybook = () => {
+    if (!item || offlineMode || duressMode) return;
+
+    router.push({
+      pathname: '/estateplaybooks',
+      params: {
+        itemId: String(item.id),
+        itemType: type || item.itemType,
+      },
+    });
+  };
 
   const renderDetailsSkeleton = () => (
     <SafeAreaView style={styles.container}>
@@ -890,7 +881,7 @@ const loadItem = async () => {
   const editing = editingPassword || editingCard;
   const keyboardScrollPadding = editing
     ? Math.max(190, keyboardHeight + 130)
-    : 80;
+    : 150;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -912,7 +903,7 @@ const loadItem = async () => {
         nestedScrollEnabled
       >
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Vault Details</Text>
+          {/* <Text style={styles.headerTitle}>Vault Details</Text> */}
           <View style={{ width: 36 }} />
         </View>
 
@@ -935,48 +926,44 @@ const loadItem = async () => {
 
             {editingPassword ? (
               <>
-                <Text style={styles.label}>Website / App</Text>
-                <TextInput
+                <FloatingLabelInput
+                  label="Website / App"
                   style={styles.input}
                   value={editWebsite}
                   onChangeText={setEditWebsite}
-                  placeholderTextColor={C.tabInactive}
                   autoFocus={mode === 'edit'}
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
                   }
                 />
 
-                <Text style={styles.label}>Username</Text>
-                <TextInput
+                <FloatingLabelInput
+                  label="Username"
                   style={styles.input}
                   value={editUsername}
                   onChangeText={setEditUsername}
-                  placeholderTextColor={C.tabInactive}
                   autoCapitalize="none"
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
                   }
                 />
 
-                <Text style={styles.label}>Password</Text>
-                <TextInput
+                <FloatingLabelInput
+                  label="Password"
                   style={styles.input}
                   value={editPassword}
                   onChangeText={setEditPassword}
-                  placeholderTextColor={C.tabInactive}
                   autoCapitalize="none"
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
                   }
                 />
 
-                <Text style={styles.label}>Notes</Text>
-                <TextInput
+                <FloatingLabelInput
+                  label="Notes"
                   style={styles.notesInput}
                   value={editNotes}
                   onChangeText={setEditNotes}
-                  placeholderTextColor={C.tabInactive}
                   multiline
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
@@ -1008,8 +995,6 @@ const loadItem = async () => {
                     label="Password"
                     value={showSecret ? plainPassword : maskPassword(plainPassword)}
                     onCopy={() => copyValue('Password', plainPassword)}
-                    rightIcon={showSecret ? 'eye-off-outline' : 'eye-outline'}
-                    onRightPress={() => setShowSecret((v) => !v)}
                     styles={styles}
                     C={C}
                   />
@@ -1017,12 +1002,6 @@ const loadItem = async () => {
                   {!!item.notes && <InfoRow label="Notes" value={item.notes} onCopy={() => copyValue('Notes', item.notes)} styles={styles} C={C} />}
                 </View>
 
-                <TouchableOpacity style={styles.mainBtn} onPress={offlineMode ? showOfflineWriteWarning : () => setEditingPassword(true)}>
-                  <Ionicons name="create-outline" size={18} color="#fff" />
-                  <Text style={styles.mainBtnText}>{offlineMode ? 'Read-only offline mode' : 'Edit Password / Notes'}</Text>
-                </TouchableOpacity>
-
-                {renderDeleteButton('Delete Password')}
               </>
             )}
           </View>
@@ -1036,38 +1015,32 @@ const loadItem = async () => {
                   <Ionicons name="card-outline" size={28} color={C.primary} />
                 </View>
 
-                <Text style={styles.label}>Card name / Bank</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
                   value={editCardName}
                   onChangeText={setEditCardName}
-                  placeholder="Card name"
-                  placeholderTextColor={C.tabInactive}
+                  label="Card name / Bank"
                   autoFocus={mode === 'edit'}
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
                   }
                 />
 
-                <Text style={styles.label}>Cardholder name</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
                   value={editCardholderName}
                   onChangeText={setEditCardholderName}
-                  placeholder="Cardholder name"
-                  placeholderTextColor={C.tabInactive}
+                  label="Cardholder name"
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
                   }
                 />
 
-                <Text style={styles.label}>Card number</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
                   value={editCardNumber}
                   onChangeText={(value) => setEditCardNumber(formatCardNumber(value))}
-                  placeholder="Card number"
-                  placeholderTextColor={C.tabInactive}
+                  label="Card number"
                   keyboardType="number-pad"
                   maxLength={19}
                   onFocus={(event) =>
@@ -1075,13 +1048,11 @@ const loadItem = async () => {
                   }
                 />
 
-                <Text style={styles.label}>Expiry</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={styles.input}
                   value={editCardExpiry}
                   onChangeText={(value) => setEditCardExpiry(formatExpiryInput(value))}
-                  placeholder="MM/YY"
-                  placeholderTextColor={C.tabInactive}
+                  label="Expiry"
                   maxLength={7}
                   onFocus={(event) =>
                     keepFocusedInputVisible(event.nativeEvent.target)
@@ -1090,14 +1061,13 @@ const loadItem = async () => {
 
                 <Text style={styles.label}>CVV</Text>
                 <View style={styles.secureInputWrap}>
-                  <TextInput
+                  <FloatingLabelInput
                     style={styles.secureInput}
                     value={editCardCvv}
                     onChangeText={(value) =>
                       setEditCardCvv(value.replace(/\D/g, '').slice(0, 4))
                     }
-                    placeholder="CVV"
-                    placeholderTextColor={C.tabInactive}
+                    label="CVV"
                     keyboardType="number-pad"
                     maxLength={4}
                     secureTextEntry={!showEditCvv}
@@ -1125,13 +1095,11 @@ const loadItem = async () => {
                   </TouchableOpacity>
                 </View>
 
-                <Text style={styles.label}>Notes</Text>
-                <TextInput
+                <FloatingLabelInput
                   style={[styles.input, styles.multilineInput]}
                   value={editCardNotes}
                   onChangeText={setEditCardNotes}
-                  placeholder="Add optional notes"
-                  placeholderTextColor={C.tabInactive}
+                  label="Notes"
                   multiline
                   textAlignVertical="top"
                   onFocus={(event) =>
@@ -1210,27 +1178,6 @@ const loadItem = async () => {
                   )}
                 </View>
 
-                <TouchableOpacity
-                  style={styles.mainBtn}
-                  onPress={
-                    offlineMode
-                      ? showOfflineWriteWarning
-                      : () => {
-                          setShowEditCvv(false);
-                          setEditingCard(true);
-                        }
-                  }
-                >
-                  <Ionicons name="create-outline" size={18} color="#fff" />
-                  <Text style={styles.mainBtnText}>{offlineMode ? 'Read-only offline mode' : 'Edit Card'}</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.secondaryBtn} onPress={() => { hapticMedium(); setShowSecret((v) => !v); }}>
-                  <Ionicons name={showSecret ? 'eye-off-outline' : 'eye-outline'} size={18} color={C.primary} />
-                  <Text style={[styles.secondaryBtnText, { color: C.primary }]}>{showSecret ? 'Hide Card Info' : 'Reveal Card Info'}</Text>
-                </TouchableOpacity>
-
-                {renderDeleteButton('Delete Card')}
               </>
             )}
           </View>
@@ -1246,49 +1193,12 @@ const loadItem = async () => {
               />
             </View>
 
-            <Text style={styles.title}>{item.fileName || item.title}</Text>
-            <Text style={styles.subtitle}>
-              {getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
-            </Text>
-
-            {isImageDocument && (
-              <TouchableOpacity
-                style={[
-                  styles.documentPreviewPlaceholder,
-                  (previewingImage || offlineMode) && styles.documentPreviewDisabled,
-                ]}
-                activeOpacity={0.82}
-                onPress={previewImageDocument}
-                disabled={previewingImage}
-                accessibilityRole="button"
-                accessibilityLabel={`Preview ${getImageDocumentFormat(item.mimeType, item.fileName || item.title)} image`}
-                accessibilityState={{ busy: previewingImage, disabled: previewingImage }}
-              >
-                <View style={styles.documentPreviewIconWrap}>
-                  {previewingImage ? (
-                    <ActivityIndicator size="small" color={C.primary} />
-                  ) : (
-                    <Ionicons name="image-outline" size={25} color={C.primary} />
-                  )}
-                </View>
-                <View style={styles.documentPreviewCopy}>
-                  <Text style={styles.documentPreviewTitle}>
-                    {previewingImage
-                      ? 'Preparing secure preview...'
-                      : `Preview ${getImageDocumentFormat(item.mimeType, item.fileName || item.title)} image`}
-                  </Text>
-                </View>
-                {!previewingImage && (
-                  <Ionicons name="expand-outline" size={20} color={C.primary} />
-                )}
-              </TouchableOpacity>
-            )}
+            <Text style={[styles.title, styles.documentTitle]}>{item.fileName || item.title}</Text>
 
             <View style={styles.infoCard}>
               <InfoRow
                 label="File name"
                 value={item.fileName || item.title}
-                onCopy={() => copyValue('File name', item.fileName || item.title)}
                 styles={styles}
                 C={C}
               />
@@ -1296,12 +1206,6 @@ const loadItem = async () => {
               <InfoRow
                 label="Type"
                 value={getFriendlyDocumentType(item.mimeType, item.fileName || item.title)}
-                onCopy={() =>
-                  copyValue(
-                    'File type',
-                    getFriendlyDocumentType(item.mimeType, item.fileName || item.title)
-                  )
-                }
                 styles={styles}
                 C={C}
               />
@@ -1309,67 +1213,150 @@ const loadItem = async () => {
               <InfoRow
                 label="Size"
                 value={formatSize(item.sizeBytes)}
-                onCopy={() => copyValue('Size', formatSize(item.sizeBytes))}
                 styles={styles}
                 C={C}
               />
             </View>
 
-            <TouchableOpacity
-              style={[styles.secondaryBtn, downloading && styles.mainBtnDisabled]}
-              onPress={() => {
-                hapticMedium();
-                downloadDocument();
-              }}
-              disabled={downloading}
-            >
-              {downloading ? (
-                <ActivityIndicator size="small" color={C.primary} />
-              ) : (
-                <Ionicons name="download-outline" size={18} color={C.primary} />
-              )}
-              <Text style={[styles.secondaryBtnText, { color: C.primary }]}>
-                {downloading ? 'Preparing document...' : 'Download / Share Document'}
-              </Text>
-            </TouchableOpacity>
-
-            {renderDeleteButton('Delete Document')}
-          </View>
-        )}
-
-        {!offlineMode && !duressMode && item && !editingPassword && !editingCard && (
-          <View style={styles.estateActionWrap}>
-            <TouchableOpacity
-              style={styles.estateActionButton}
-              activeOpacity={0.84}
-              onPress={() => {
-                hapticLight();
-                router.push({
-                  pathname: '/estateplaybooks',
-                  params: {
-                    itemId: String(item.id),
-                    itemType: type || item.itemType,
-                  },
-                });
-              }}
-            >
-              <View style={styles.estateActionIcon}>
-                <Ionicons name="book-outline" size={20} color={C.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.estateActionTitle}>Digital Estate Playbook</Text>
-                <Text style={styles.estateActionText}>
-                  Control whether this item is released and provide trusted instructions.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={C.tabInactive} />
-            </TouchableOpacity>
           </View>
         )}
 
         <View style={{ height: 50 }} />
       </ScrollView>
       </KeyboardAvoidingView>
+
+      <FloatingActionBar
+        visible={!editing && !imagePreviewVisible}
+        actions={
+          item.itemType === 'PASSWORD'
+            ? [
+                {
+                  key: 'edit-password',
+                  label: 'Edit',
+                  icon: 'create-outline',
+                  tone: 'primary',
+                  onPress: offlineMode
+                    ? showOfflineWriteWarning
+                    : () => setEditingPassword(true),
+                },
+                {
+                  key: 'toggle-password',
+                  label: showSecret ? 'Hide' : 'Reveal',
+                  icon: showSecret ? 'eye-off-outline' : 'eye-outline',
+                  onPress: () => setShowSecret((current) => !current),
+                },
+                ...(!offlineMode && !duressMode
+                  ? [
+                      {
+                        key: 'estate-password',
+                        label: 'Estate',
+                        icon: 'book-outline' as const,
+                        onPress: openEstatePlaybook,
+                      },
+                    ]
+                  : []),
+                {
+                  key: 'delete-password',
+                  label: deleting ? 'Deleting' : 'Delete',
+                  icon: 'trash-outline',
+                  tone: 'danger',
+                  loading: deleting,
+                  onPress: offlineMode
+                    ? showOfflineWriteWarning
+                    : () => {
+                        void deleteCurrentItem();
+                      },
+                },
+              ]
+            : item.itemType === 'CARD'
+              ? [
+                  {
+                    key: 'edit-card',
+                    label: 'Edit',
+                    icon: 'create-outline',
+                    tone: 'primary',
+                    onPress: offlineMode
+                      ? showOfflineWriteWarning
+                      : () => {
+                          setShowEditCvv(false);
+                          setEditingCard(true);
+                        },
+                  },
+                  {
+                    key: 'toggle-card-info',
+                    label: showSecret ? 'Hide' : 'Reveal',
+                    icon: showSecret ? 'eye-off-outline' : 'eye-outline',
+                    onPress: () => setShowSecret((current) => !current),
+                  },
+                  ...(!offlineMode && !duressMode
+                    ? [
+                        {
+                          key: 'estate-card',
+                          label: 'Estate',
+                          icon: 'book-outline' as const,
+                          onPress: openEstatePlaybook,
+                        },
+                      ]
+                    : []),
+                  {
+                    key: 'delete-card',
+                    label: deleting ? 'Deleting' : 'Delete',
+                    icon: 'trash-outline',
+                    tone: 'danger',
+                    loading: deleting,
+                    onPress: offlineMode
+                      ? showOfflineWriteWarning
+                      : () => {
+                          void deleteCurrentItem();
+                        },
+                  },
+                ]
+              : [
+                  ...(isImageDocument
+                    ? [
+                        {
+                          key: 'preview-document',
+                          label: previewingImage ? 'Preparing' : 'Preview',
+                          icon: 'expand-outline' as const,
+                          tone: 'primary' as const,
+                          loading: previewingImage,
+                          onPress: () => void previewImageDocument(),
+                        },
+                      ]
+                    : []),
+                  {
+                    key: 'download-document',
+                    label: downloading ? 'Preparing' : 'Download',
+                    icon: 'download-outline',
+                    tone: 'default',
+                    loading: downloading,
+                    onPress: () => void downloadDocument(),
+                  },
+                  ...(!offlineMode && !duressMode
+                    ? [
+                        {
+                          key: 'estate-document',
+                          label: 'Estate',
+                          icon: 'book-outline' as const,
+                          onPress: openEstatePlaybook,
+                        },
+                      ]
+                    : []),
+                  {
+                    key: 'delete-document',
+                    label: deleting ? 'Deleting' : 'Delete',
+                    icon: 'trash-outline',
+                    tone: 'danger',
+                    loading: deleting,
+                    onPress: offlineMode
+                      ? showOfflineWriteWarning
+                      : () => {
+                          void deleteCurrentItem();
+                        },
+                  },
+                ]
+        }
+      />
 
       <Modal
         visible={imagePreviewVisible}
@@ -1481,9 +1468,11 @@ const InfoRow = ({
         <Ionicons name={rightIcon} size={19} color={C.primary} />
       </TouchableOpacity>
     )}
-    <TouchableOpacity style={styles.iconBtn} onPress={() => { hapticLight(); onCopy(); }}>
-      <Ionicons name="copy-outline" size={19} color={C.primary} />
-    </TouchableOpacity>
+    {onCopy ? (
+      <TouchableOpacity style={styles.iconBtn} onPress={() => { hapticLight(); onCopy(); }}>
+        <Ionicons name="copy-outline" size={19} color={C.primary} />
+      </TouchableOpacity>
+    ) : null}
   </View>
 );
 
@@ -1547,7 +1536,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
 
       width: 72,
       height: 72,
-      borderRadius: 24,
+      borderRadius: 26,
       marginBottom: 18,
     },
     skeletonTitle: {
@@ -1584,7 +1573,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
 
       width: 36,
       height: 36,
-      borderRadius: 18,
+      borderRadius: 20,
     },
     skeletonMainButton: {
       shadowColor: '#000000',
@@ -1611,7 +1600,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       marginTop: 10,
     },
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 96, paddingBottom: 16 },
-    backBtn: { width: 36, height: 36, backgroundColor: C.backgroundSelected, borderRadius: 18, justifyContent: 'center', alignItems: 'center'
+    backBtn: { width: 36, height: 36, backgroundColor: C.backgroundSelected, borderRadius: 20, justifyContent: 'center', alignItems: 'center'
      , shadowColor: '#000',
       shadowOpacity: 0.25,
       shadowRadius: 18,
@@ -1626,7 +1615,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     estateActionButton: {
       width: '100%',
       minHeight: 82,
-      borderRadius: 22,
+      borderRadius: 24,
       padding: 15,
       flexDirection: 'row',
       alignItems: 'center',
@@ -1649,7 +1638,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
 
       width: 44,
       height: 44,
-      borderRadius: 16,
+      borderRadius: 18,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1671,10 +1660,11 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       shadowRadius: 12,
       elevation: 6,
       shadowOffset: { width: 0, height: 6 },
- width: 72, height: 72, borderRadius: 36, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
+ width: 100, height: 100, borderRadius: 76, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center', marginBottom: 18 },
     title: { fontSize: 24, fontWeight: '800', color: C.text, textAlign: 'center' },
+    documentTitle: { marginBottom: 22 },
     subtitle: { fontSize: 14, color: C.textSecondary, textAlign: 'center', marginTop: 4, marginBottom: 22 },
-    infoCard: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 18
+    infoCard: { width: '100%', backgroundColor: C.backgroundElement, borderRadius: 20, padding: 16, borderWidth: 1, borderColor: C.border, marginBottom: 18
     ,  shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -1684,7 +1674,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     infoLabel: { fontSize: 12, color: C.textSecondary, marginBottom: 4 },
     infoValue: { fontSize: 15, color: C.text, fontWeight: '600' },
     divider: { height: 1, backgroundColor: C.border, marginVertical: 12 },
-    iconBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center'
+    iconBtn: { width: 36, height: 36, borderRadius: 20, backgroundColor: C.actionCard, justifyContent: 'center', alignItems: 'center'
     ,  shadowColor: '#000',
       shadowOpacity: 0.25,
       shadowRadius: 18,
@@ -1723,7 +1713,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     deleteOverlayCard: {
       width: '100%',
       backgroundColor: C.backgroundElement,
-      borderRadius: 26,
+      borderRadius: 28,
       padding: 24,
       alignItems: 'center',
       borderWidth: 1,
@@ -1755,7 +1745,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- width: '100%', backgroundColor: C.backgroundElement, borderRadius: 20, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
+ width: '100%', backgroundColor: C.backgroundElement, borderRadius: 22, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
     multilineInput: {
       minHeight: 96,
       paddingTop: 14,
@@ -1812,8 +1802,8 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       shadowRadius: 14,
       elevation: 6,
       shadowOffset: { width: 0, height: 7 },
- width: '100%', backgroundColor: C.backgroundElement, borderRadius: 16, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16, minHeight: 90, textAlignVertical: 'top' },
-    cardPreview: { width: '100%', backgroundColor: C.primary, borderRadius: 22, padding: 24, height: 200, justifyContent: 'space-between', marginBottom: 20
+ width: '100%', backgroundColor: C.backgroundElement, borderRadius: 18, paddingHorizontal: 18, paddingVertical: 15, color: C.text, borderWidth: 1, borderColor: C.border, marginBottom: 16, minHeight: 90, textAlignVertical: 'top' },
+    cardPreview: { width: '100%', backgroundColor: C.primary, borderRadius: 24, padding: 24, height: 200, justifyContent: 'space-between', marginBottom: 20
      , shadowColor: '#000',
       shadowOpacity: 0.2,
       shadowRadius: 22,
@@ -1846,7 +1836,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
  color: '#fff', fontWeight: '800', fontSize: 14 },
     documentPreviewPlaceholder: {
       width: '100%',
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
       borderColor: C.border,
       backgroundColor: C.backgroundElement,
@@ -1865,7 +1855,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     documentPreviewIconWrap: {
       width: 48,
       height: 48,
-      borderRadius: 18,
+      borderRadius: 20,
       backgroundColor: C.actionCard,
       alignItems: 'center',
       justifyContent: 'center',
@@ -1910,7 +1900,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
     imagePreviewModalCard: {
       width: '100%',
       maxHeight: '88%',
-      borderRadius: 28,
+      borderRadius: 30,
       padding: 14,
       backgroundColor: C.backgroundElement,
       borderWidth: 1,
@@ -1957,7 +1947,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
 
       width: 40,
       height: 40,
-      borderRadius: 20,
+      borderRadius: 22,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.actionCard,
@@ -1966,7 +1956,7 @@ const makeStyles = (C: ThemeColors, isDark: boolean) => {
       width: '100%',
       height: 430,
       maxHeight: '72%',
-      borderRadius: 20,
+      borderRadius: 22,
       backgroundColor: C.background,
     },
   });

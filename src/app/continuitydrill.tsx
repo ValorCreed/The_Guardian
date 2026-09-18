@@ -26,6 +26,7 @@ import {
   useCancelableApi,
 } from '../hooks/useCancelableApi';
 import PulsingSkeleton from '../components/PulsingSkeleton';
+import FloatingActionBar from '../components/FloatingActionBar';
 import {
   hapticDelete,
   hapticLight,
@@ -70,6 +71,12 @@ export default function ContinuityDrillScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [working, setWorking] = useState<string | number | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+
+  const selectedRequest = useMemo(
+    () => (overview?.receivedRequests || []).find((item) => item.publicId === selectedRequestId) || null,
+    [overview, selectedRequestId]
+  );
 
   const load = useCallback(
     async (showLoader = false) => {
@@ -295,6 +302,7 @@ export default function ContinuityDrillScreen() {
             style={[styles.tabButton, tab === 'MINE' && styles.tabButtonActive]}
             onPress={() => {
               hapticSelection();
+              setSelectedRequestId(null);
               setTab('MINE');
             }}
           >
@@ -368,10 +376,7 @@ export default function ContinuityDrillScreen() {
                 drill={active}
                 C={C}
                 styles={styles}
-                working={working}
                 active
-                onComplete={() => completeDrill(active)}
-                onCancel={() => cancelDrill(active)}
               />
             ) : (
               <EmptyState
@@ -393,10 +398,7 @@ export default function ContinuityDrillScreen() {
                     drill={drill}
                     C={C}
                     styles={styles}
-                    working={working}
                     active={false}
-                    onComplete={() => undefined}
-                    onCancel={() => undefined}
                   />
                 ))
             ) : (
@@ -417,7 +419,17 @@ export default function ContinuityDrillScreen() {
               C={C}
               styles={styles}
               working={working === request.publicId}
-              onAcknowledge={() => void acknowledge(request)}
+              selected={selectedRequestId === request.publicId}
+              onLongPress={() => {
+                if (!request.canAcknowledge) return;
+                hapticSelection();
+                setSelectedRequestId(request.publicId);
+              }}
+              onPress={() => {
+                if (selectedRequestId === request.publicId) {
+                  setSelectedRequestId(null);
+                }
+              }}
             />
           ))
         ) : (
@@ -430,19 +442,66 @@ export default function ContinuityDrillScreen() {
           />
         )}
 
-        <View style={styles.truthCard}>
+        {/* <View style={styles.truthCard}>
           <Ionicons name="lock-closed-outline" size={21} color={C.primary} />
           <Text style={styles.truthText}>
             A drill records readiness and contact acknowledgements only. It never releases secrets.
           </Text>
-        </View>
-        <View style={{ height: 80 }} />
+        </View> */}
+        <View style={{ height: 120 }} />
       </ScrollView>
+
+      <FloatingActionBar
+        visible={
+          (tab === 'MINE' && Boolean(active)) ||
+          (tab === 'REQUESTS' && Boolean(selectedRequest?.canAcknowledge))
+        }
+        onDismiss={
+          tab === 'REQUESTS' ? () => setSelectedRequestId(null) : undefined
+        }
+        actions={
+          tab === 'REQUESTS' && selectedRequest?.canAcknowledge
+            ? [
+                {
+                  key: 'acknowledge-drill-request',
+                  label: working === selectedRequest.publicId ? 'Acknowledging' : 'Acknowledge',
+                  icon: 'checkmark-circle-outline',
+                  tone: 'primary',
+                  loading: working === selectedRequest.publicId,
+                  onPress: () => {
+                    const request = selectedRequest;
+                    setSelectedRequestId(null);
+                    void acknowledge(request);
+                  },
+                },
+              ]
+            : tab === 'MINE' && active
+              ? [
+                  {
+                    key: 'finish-active-drill',
+                    label: working === active.id ? 'Finishing' : 'Finish',
+                    icon: 'checkmark-done-outline',
+                    tone: 'primary',
+                    loading: working === active.id,
+                    onPress: () => completeDrill(active),
+                  },
+                  {
+                    key: 'cancel-active-drill',
+                    label: working === `cancel-${active.id}` ? 'Cancelling' : 'Cancel',
+                    icon: 'close-circle-outline',
+                    tone: 'danger',
+                    loading: working === `cancel-${active.id}`,
+                    onPress: () => cancelDrill(active),
+                  },
+                ]
+              : []
+        }
+      />
     </SafeAreaView>
   );
 }
 
-function DrillReport({ drill, C, styles, working, active, onComplete, onCancel }: any) {
+function DrillReport({ drill, C, styles, active }: any) {
   return (
     <View style={styles.reportShell}>
       <View style={styles.reportCard}>
@@ -523,35 +582,40 @@ function DrillReport({ drill, C, styles, working, active, onComplete, onCancel }
           </View>
         ))}
 
-        {active && (
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              disabled={working === drill.id}
-              onPress={onComplete}
-            >
-              {working === drill.id ? <ActivityIndicator size="small" color={C.primary} /> : <Ionicons name="checkmark-done-outline" size={18} color={C.primary} />}
-              <Text style={styles.secondaryButtonText}>Finish report</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.dangerButton}
-              disabled={working === `cancel-${drill.id}`}
-              onPress={onCancel}
-            >
-              {working === `cancel-${drill.id}` ? <ActivityIndicator size="small" color={C.danger} /> : <Ionicons name="close-circle-outline" size={18} color={C.danger} />}
-              <Text style={styles.dangerButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
     </View>
   );
 }
 
-function RequestCard({ request, C, styles, working, onAcknowledge }: any) {
+function RequestCard({
+  request,
+  C,
+  styles,
+  working,
+  selected,
+  onLongPress,
+  onPress,
+}: any) {
   return (
-    <View style={styles.reportShell}>
-      <View style={styles.reportCard}>
+    <TouchableOpacity
+      activeOpacity={request.canAcknowledge ? 0.82 : 1}
+      delayLongPress={500}
+      onLongPress={onLongPress}
+      onPress={onPress}
+      disabled={working}
+      accessibilityRole={request.canAcknowledge ? 'button' : undefined}
+      accessibilityState={{ selected, disabled: working }}
+      accessibilityLabel={
+        request.canAcknowledge
+          ? `${request.ownerName || request.ownerEmail}. Press and hold for drill actions.`
+          : request.ownerName || request.ownerEmail
+      }
+      style={[
+        styles.reportShell,
+        selected && styles.selectedShell,
+      ]}
+    >
+      <View style={[styles.reportCard, selected && styles.selectedCard]}>
         <View style={styles.reportHeader}>
           <View style={styles.avatarLarge}>
             <Text style={styles.avatarText}>{String(request.ownerName || request.ownerEmail).slice(0, 1).toUpperCase()}</Text>
@@ -561,7 +625,11 @@ function RequestCard({ request, C, styles, working, onAcknowledge }: any) {
             <Text style={styles.reportSub}>{request.ownerEmail}</Text>
           </View>
           <View style={styles.statusBadge}>
-            <Text style={styles.statusText}>{request.status}</Text>
+            {selected ? (
+              <Ionicons name="checkmark" size={15} color={C.primary} />
+            ) : (
+              <Text style={styles.statusText}>{request.status}</Text>
+            )}
           </View>
         </View>
         <View style={styles.infoStrip}>
@@ -571,18 +639,13 @@ function RequestCard({ request, C, styles, working, onAcknowledge }: any) {
           </Text>
         </View>
         <Text style={styles.requestMeta}>Respond before {formatDate(request.expiresAt)}</Text>
-        {request.canAcknowledge && (
-          <TouchableOpacity
-            style={[styles.primaryButton, working && styles.disabled]}
-            disabled={working}
-            onPress={onAcknowledge}
-          >
-            {working ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark-circle-outline" size={20} color="#fff" />}
-            <Text style={styles.primaryButtonText}>{working ? 'Acknowledging...' : 'I received this drill notice'}</Text>
-          </TouchableOpacity>
-        )}
+        {request.canAcknowledge ? (
+          <Text style={styles.selectionHint}>
+            Press and hold for drill actions.
+          </Text>
+        ) : null}
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -647,37 +710,39 @@ const makeStyles = (C: any) => StyleSheet.create({
   content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 40 },
   skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
   skeletonTitle: { width: '84%', height: 34, marginBottom: 12 },
-  skeletonSub: { width: '96%', height: 54, borderRadius: 16, marginBottom: 20 },
+  skeletonSub: { width: '96%', height: 54, borderRadius: 18, marginBottom: 20 },
   skeletonShell: { borderRadius: 27, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.11, shadowRadius: 19, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
   skeletonHero: { minHeight: 158, borderRadius: 27, padding: 18, flexDirection: 'row', gap: 14, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
   skeletonCard: { minHeight: 145, borderRadius: 25, padding: 17, flexDirection: 'row', gap: 13, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
-  skeletonIcon: { width: 58, height: 58, borderRadius: 20 },
+  skeletonIcon: { width: 58, height: 58, borderRadius: 22 },
   skeletonRowIcon: { width: 48, height: 48, borderRadius: 17 },
   skeletonLineLarge: { width: '80%', height: 18, marginBottom: 12 },
   skeletonLine: { width: '92%', height: 13, marginBottom: 10 },
   skeletonLineShort: { width: '58%', height: 13 },
-  skeletonTabs: { width: '100%', height: 48, borderRadius: 18, marginBottom: 20 },
+  skeletonTabs: { width: '100%', height: 48, borderRadius: 20, marginBottom: 20 },
   title: { color: C.text, fontSize: 32, fontWeight: '900', letterSpacing: -0.7 },
   subtitle: { color: C.textSecondary, fontSize: 16, lineHeight: 24, marginTop: 8, marginBottom: 20 },
-  heroShell: { borderRadius: 28, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 24, shadowOffset: { width: 0, height: 13 }, elevation: 8 },
-  heroCard: { borderRadius: 28, padding: 19, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, flexDirection: 'row', gap: 14, alignItems: 'center' },
-  heroIcon: { width: 58, height: 58, borderRadius: 20, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
+  heroShell: { borderRadius: 30, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 24, shadowOffset: { width: 0, height: 13 }, elevation: 8 },
+  heroCard: { borderRadius: 30, padding: 19, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, flexDirection: 'row', gap: 14, alignItems: 'center' },
+  heroIcon: { width: 58, height: 58, borderRadius: 22, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 12, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
   heroEyebrow: { color: C.textSecondary, fontSize: 10, fontWeight: '900', letterSpacing: 1.1 },
   heroTitle: { color: C.text, fontSize: 19, fontWeight: '900', marginTop: 4 },
   heroText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 6 },
-  tabBar: { flexDirection: 'row', padding: 4, borderRadius: 18, backgroundColor: C.backgroundSelected, borderWidth: 1, borderColor: C.border, marginBottom: 20 },
+  tabBar: { flexDirection: 'row', padding: 4, borderRadius: 20, backgroundColor: C.backgroundSelected, borderWidth: 1, borderColor: C.border, marginBottom: 20 },
   tabButton: { flex: 1, minHeight: 44, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   tabButtonActive: { backgroundColor: C.primary },
   tabText: { color: C.textSecondary, fontSize: 12, fontWeight: '900' },
   tabTextActive: { color: '#fff' },
-  planNotice: { borderRadius: 20, padding: 15, marginBottom: 18, backgroundColor: `${C.warning}12`, borderWidth: 1, borderColor: `${C.warning}38`, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  planNotice: { borderRadius: 22, padding: 15, marginBottom: 18, backgroundColor: `${C.warning}12`, borderWidth: 1, borderColor: `${C.warning}38`, flexDirection: 'row', alignItems: 'center', gap: 11 },
   noticeTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   noticeText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 4 },
   primaryButton: { minHeight: 54, borderRadius: 999, paddingHorizontal: 18, backgroundColor: C.backgroundbutton, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, marginBottom: 18, shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
   primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '900' },
   disabled: { opacity: 0.55 },
-  reportShell: { borderRadius: 26, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
-  reportCard: { borderRadius: 26, padding: 16, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+  reportShell: { borderRadius: 28, marginBottom: 16, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+  selectedShell: { shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 20, elevation: 7 },
+  selectedCard: { borderColor: C.primary, borderWidth: 1.5 },
+  reportCard: { borderRadius: 28, padding: 16, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
   reportHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   scoreRing: { width: 64, height: 64, borderRadius: 32, borderWidth: 5, alignItems: 'center', justifyContent: 'center', backgroundColor: C.backgroundSelected },
   scoreValue: { color: C.text, fontSize: 19, fontWeight: '900' },
@@ -695,31 +760,32 @@ const makeStyles = (C: any) => StyleSheet.create({
   divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
   personRow: { paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 11 },
   avatar: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
-  avatarLarge: { width: 50, height: 50, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
+  avatarLarge: { width: 50, height: 50, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
   avatarText: { color: C.primary, fontSize: 16, fontWeight: '900' },
   personName: { color: C.text, fontSize: 13, fontWeight: '900' },
   personSub: { color: C.textSecondary, fontSize: 10, marginTop: 3 },
   actionRow: { flexDirection: 'row', gap: 9, marginTop: 16 },
-  secondaryButton: { flex: 1, minHeight: 46, borderRadius: 16, borderWidth: 1, borderColor: `${C.primary}40`, backgroundColor: C.actionCard, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  secondaryButton: { flex: 1, minHeight: 46, borderRadius: 18, borderWidth: 1, borderColor: `${C.primary}40`, backgroundColor: C.actionCard, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   secondaryButtonText: { color: C.primary, fontSize: 12, fontWeight: '900' },
-  dangerButton: { minWidth: 105, minHeight: 46, borderRadius: 16, borderWidth: 1, borderColor: `${C.danger}35`, backgroundColor: `${C.danger}10`, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  dangerButton: { minWidth: 105, minHeight: 46, borderRadius: 18, borderWidth: 1, borderColor: `${C.danger}35`, backgroundColor: `${C.danger}10`, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   dangerButtonText: { color: C.danger, fontSize: 12, fontWeight: '900' },
   infoStrip: { marginTop: 15, borderRadius: 17, padding: 12, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}30`, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   infoText: { color: C.text, fontSize: 12, lineHeight: 18, flex: 1 },
-  requestMeta: { color: C.textSecondary, fontSize: 11, marginTop: 12, marginBottom: 14 },
+  requestMeta: { color: C.textSecondary, fontSize: 11, marginTop: 12, marginBottom: 8 },
+  selectionHint: { color: C.primary, fontSize: 11, fontWeight: '800', marginBottom: 4 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8, marginBottom: 10 },
   sectionTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
   countBadge: { minWidth: 30, height: 28, borderRadius: 14, paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard },
   countText: { color: C.primary, fontSize: 12, fontWeight: '900' },
-  emptyShell: { borderRadius: 24, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
-  emptyCard: { borderRadius: 24, padding: 20, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
-  emptyIcon: { width: 58, height: 58, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard, marginBottom: 12 },
+  emptyShell: { borderRadius: 26, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
+  emptyCard: { borderRadius: 26, padding: 20, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+  emptyIcon: { width: 58, height: 58, borderRadius: 22, alignItems: 'center', justifyContent: 'center', backgroundColor: C.actionCard, marginBottom: 12 },
   emptyTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
   emptyText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 6 },
-  truthCard: { borderRadius: 18, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 8 },
+  truthCard: { borderRadius: 20, padding: 14, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}28`, flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginTop: 8 },
   truthText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
-  errorShell: { borderRadius: 28, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
-  errorCard: { borderRadius: 28, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+  errorShell: { borderRadius: 30, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
+  errorCard: { borderRadius: 30, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
   errorTitle: { color: C.text, fontSize: 21, fontWeight: '900', marginTop: 13 },
   errorText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 7, marginBottom: 18 },
 });

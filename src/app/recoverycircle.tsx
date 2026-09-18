@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  Pressable,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -41,6 +42,8 @@ import {
   hapticWarning,
 } from '../utils/haptics';
 import { useScreenAlert } from '../hooks/useScreenAlert';
+import FloatingActionBar from '../components/FloatingActionBar';
+import FloatingLabelInput from '../components/FloatingLabelInput';
 
 const formatDate = (value?: string | null) => {
   if (!value) return 'Unknown';
@@ -73,6 +76,10 @@ export default function RecoveryCircleScreen() {
   const [workingRequestId, setWorkingRequestId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [newRecoveryCode, setNewRecoveryCode] = useState<string | null>(null);
+  const [selectedRequest, setSelectedRequest] = useState<{
+    kind: 'approval' | 'owned';
+    requestId: string;
+  } | null>(null);
 
   useSensitiveScreenProtection(Boolean(newRecoveryCode));
 
@@ -106,6 +113,7 @@ export default function RecoveryCircleScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setSelectedRequest(null);
       void load(true);
     }, [load])
   );
@@ -133,6 +141,26 @@ export default function RecoveryCircleScreen() {
   const allowedThresholds = Array.from(
     { length: Math.max(0, selectedIds.length - 1) },
     (_, index) => index + 2
+  );
+
+  const selectedApprovalRequest = useMemo(
+    () =>
+      selectedRequest?.kind === 'approval'
+        ? overview?.approvalRequests.find(
+            (request) => request.requestId === selectedRequest.requestId
+          ) || null
+        : null,
+    [overview, selectedRequest]
+  );
+
+  const selectedOwnedRequest = useMemo(
+    () =>
+      selectedRequest?.kind === 'owned'
+        ? overview?.ownedRequests.find(
+            (request) => request.requestId === selectedRequest.requestId
+          ) || null
+        : null,
+    [overview, selectedRequest]
   );
 
   const toggleCandidate = (candidate: RecoveryCircleCandidate) => {
@@ -384,7 +412,7 @@ export default function RecoveryCircleScreen() {
                 <Ionicons name="people-circle-outline" size={30} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.heroEyebrow}>MULTI-PERSON RECOVERY</Text>
+                {/* <Text style={styles.heroEyebrow}>MULTI-PERSON RECOVERY</Text> */}
                 <Text style={styles.heroTitle}>
                   {overview?.enabled ? `${overview.threshold} approvals required` : 'Protection is off'}
                 </Text>
@@ -393,13 +421,8 @@ export default function RecoveryCircleScreen() {
                 <Text style={styles.statusBadgeText}>{overview?.enabled ? 'Active' : 'Off'}</Text>
               </View>
             </View>
-            <Text style={styles.heroText}>{overview?.message}</Text>
-            <View style={styles.securityStrip}>
-              <Ionicons name="shield-checkmark-outline" size={19} color={C.primary} />
-              <Text style={styles.securityStripText}>
-                Recovery needs member approval and your private setup code.
-              </Text>
-            </View>
+            {/* <Text style={styles.heroText}>{overview?.message}</Text> */}
+            
           </View>
         </View>
 
@@ -449,8 +472,24 @@ export default function RecoveryCircleScreen() {
                 key={request.requestId}
                 request={request}
                 working={workingRequestId === request.requestId}
-                onApprove={() => vote(request, 'APPROVE')}
-                onDeny={() => vote(request, 'DENY')}
+                selected={
+                  selectedRequest?.kind === 'approval' &&
+                  selectedRequest.requestId === request.requestId
+                }
+                selectionModeActive={Boolean(selectedRequest)}
+                onLongPress={() => {
+                  if (!request.canVote || workingRequestId === request.requestId) return;
+                  hapticSelection();
+                  setSelectedRequest({ kind: 'approval', requestId: request.requestId });
+                }}
+                onPress={() => {
+                  if (!selectedRequest || !request.canVote) return;
+                  setSelectedRequest((current) =>
+                    current?.kind === 'approval' && current.requestId === request.requestId
+                      ? null
+                      : { kind: 'approval', requestId: request.requestId }
+                  );
+                }}
                 C={C}
                 styles={styles}
               />
@@ -500,7 +539,7 @@ export default function RecoveryCircleScreen() {
             <View style={styles.sectionRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.sectionTitle}>Circle protection</Text>
-                <Text style={styles.sectionSubtitle}>Turn multi-person recovery on or off.</Text>
+                
               </View>
               <TouchableOpacity
                 style={[styles.toggle, enabled && styles.toggleActive]}
@@ -615,10 +654,9 @@ export default function RecoveryCircleScreen() {
 
                 <Text style={styles.label}>CONFIRM WITH PASSWORD</Text>
                 <View style={styles.passwordWrap}>
-                  <TextInput
+                  <FloatingLabelInput
                     style={styles.passwordInput}
-                    placeholder="Current account password"
-                    placeholderTextColor={C.tabInactive}
+                    label="Current account password"
                     value={password}
                     onChangeText={setPassword}
                     secureTextEntry={!showPassword}
@@ -672,7 +710,26 @@ export default function RecoveryCircleScreen() {
                 key={request.requestId}
                 request={request}
                 working={workingRequestId === request.requestId}
-                onCancel={() => cancelRequest(request)}
+                selected={
+                  selectedRequest?.kind === 'owned' &&
+                  selectedRequest.requestId === request.requestId
+                }
+                selectionModeActive={Boolean(selectedRequest)}
+                onLongPress={() => {
+                  const active = request.status === 'PENDING' || request.status === 'APPROVED';
+                  if (!active || workingRequestId === request.requestId) return;
+                  hapticSelection();
+                  setSelectedRequest({ kind: 'owned', requestId: request.requestId });
+                }}
+                onPress={() => {
+                  const active = request.status === 'PENDING' || request.status === 'APPROVED';
+                  if (!selectedRequest || !active) return;
+                  setSelectedRequest((current) =>
+                    current?.kind === 'owned' && current.requestId === request.requestId
+                      ? null
+                      : { kind: 'owned', requestId: request.requestId }
+                  );
+                }}
                 C={C}
                 styles={styles}
               />
@@ -680,14 +737,59 @@ export default function RecoveryCircleScreen() {
           </>
         )}
 
-        <View style={styles.infoCard}>
-          <Ionicons name="information-circle-outline" size={22} color={C.primary} />
-          <Text style={styles.infoText}>
-            Circle members approve recovery; they never see your vault.
-          </Text>
-        </View>
+        
       </ScrollView>
       </KeyboardAvoidingView>
+
+      <FloatingActionBar
+        visible={Boolean(selectedApprovalRequest || selectedOwnedRequest)}
+        onDismiss={() => setSelectedRequest(null)}
+        actions={
+          selectedApprovalRequest
+            ? [
+                {
+                  key: 'approve-recovery-request',
+                  label: 'Approve',
+                  icon: 'checkmark-circle-outline',
+                  tone: 'primary',
+                  loading: workingRequestId === selectedApprovalRequest.requestId,
+                  onPress: () => {
+                    const request = selectedApprovalRequest;
+                    setSelectedRequest(null);
+                    vote(request, 'APPROVE');
+                  },
+                },
+                {
+                  key: 'deny-recovery-request',
+                  label: 'Deny',
+                  icon: 'close-circle-outline',
+                  tone: 'danger',
+                  loading: workingRequestId === selectedApprovalRequest.requestId,
+                  onPress: () => {
+                    const request = selectedApprovalRequest;
+                    setSelectedRequest(null);
+                    vote(request, 'DENY');
+                  },
+                },
+              ]
+            : selectedOwnedRequest
+              ? [
+                  {
+                    key: 'cancel-owned-recovery-request',
+                    label: 'Cancel request',
+                    icon: 'close-circle-outline',
+                    tone: 'danger',
+                    loading: workingRequestId === selectedOwnedRequest.requestId,
+                    onPress: () => {
+                      const request = selectedOwnedRequest;
+                      setSelectedRequest(null);
+                      cancelRequest(request);
+                    },
+                  },
+                ]
+              : []
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -703,10 +805,32 @@ function SectionHeader({ title, count, styles }: any) {
   );
 }
 
-function ApprovalCard({ request, working, onApprove, onDeny, C, styles }: any) {
+function ApprovalCard({
+  request,
+  working,
+  selected,
+  selectionModeActive,
+  onLongPress,
+  onPress,
+  C,
+  styles,
+}: any) {
   return (
-    <View style={styles.requestShell}>
-      <View style={styles.requestCard}>
+    <Pressable
+      delayLongPress={500}
+      onLongPress={onLongPress}
+      onPress={selectionModeActive ? onPress : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={`Recovery request from ${request.ownerName}`}
+      accessibilityHint={
+        request.canVote
+          ? 'Press and hold to show approve or deny actions.'
+          : 'This recovery request is not currently actionable.'
+      }
+      accessibilityState={{ selected, disabled: working || !request.canVote }}
+      style={styles.requestShell}
+    >
+      <View style={[styles.requestCard, selected && styles.requestCardSelected]}>
         <View style={styles.requestTop}>
           <View style={styles.rowIcon}>
             <Ionicons name="person-circle-outline" size={22} color={C.primary} />
@@ -719,7 +843,7 @@ function ApprovalCard({ request, working, onApprove, onDeny, C, styles }: any) {
         </View>
         <Text style={styles.requestId}>Request {request.requestId}</Text>
         <Text style={styles.progressText}>
-          {request.approvalCount} of {request.threshold} approvals · expires {formatDate(request.expiresAt)}
+          {request.approvalCount} of {request.threshold} {"approvals  \nExpires"} {formatDate(request.expiresAt)}
         </Text>
         <View style={styles.verifyWarning}>
           <Ionicons name="warning-outline" size={18} color={C.warning} />
@@ -734,32 +858,42 @@ function ApprovalCard({ request, working, onApprove, onDeny, C, styles }: any) {
               : 'Voting is unavailable until Guardian can verify that you are still an active recovery contact.'}
           </Text>
         )}
-        <View style={styles.voteRow}>
-          <TouchableOpacity
-            style={[styles.denyButton, !request.canVote && styles.disabled]}
-            disabled={working || !request.canVote}
-            onPress={onDeny}
-          >
-            <Text style={styles.denyText}>Deny</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.approveButton, !request.canVote && styles.disabled]}
-            disabled={working || !request.canVote}
-            onPress={onApprove}
-          >
-            {working ? <ActivityIndicator color="#fff" /> : <Text style={styles.approveText}>Approve</Text>}
-          </TouchableOpacity>
-        </View>
+        {request.canVote && !selected && (
+          <Text style={styles.selectionHint}>Press and hold for recovery actions.</Text>
+        )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
-function OwnedRequestCard({ request, working, onCancel, C, styles }: any) {
+function OwnedRequestCard({
+  request,
+  working,
+  selected,
+  selectionModeActive,
+  onLongPress,
+  onPress,
+  C,
+  styles,
+}: any) {
   const active = request.status === 'PENDING' || request.status === 'APPROVED';
+
   return (
-    <View style={styles.requestShell}>
-      <View style={styles.requestCard}>
+    <Pressable
+      delayLongPress={500}
+      onLongPress={onLongPress}
+      onPress={selectionModeActive ? onPress : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={`Recovery request ${request.requestId}`}
+      accessibilityHint={
+        active
+          ? 'Press and hold to show request actions.'
+          : 'This recovery request is no longer active.'
+      }
+      accessibilityState={{ selected, disabled: working || !active }}
+      style={styles.requestShell}
+    >
+      <View style={[styles.requestCard, selected && styles.requestCardSelected]}>
         <View style={styles.requestTop}>
           <View style={styles.rowIcon}>
             <Ionicons name="key-outline" size={20} color={C.primary} />
@@ -771,15 +905,13 @@ function OwnedRequestCard({ request, working, onCancel, C, styles }: any) {
           <StatusPill status={request.status} C={C} styles={styles} />
         </View>
         <Text style={styles.progressText}>
-          {request.approvalCount} of {request.threshold} approvals · expires {formatDate(request.expiresAt)}
+          {request.approvalCount} of {request.threshold} {"approvals  \nExpires"} {formatDate(request.expiresAt)}
         </Text>
-        {active && (
-          <TouchableOpacity style={styles.cancelButton} disabled={working} onPress={onCancel}>
-            {working ? <ActivityIndicator color={C.danger} /> : <Text style={styles.cancelText}>Cancel request</Text>}
-          </TouchableOpacity>
+        {active && !selected && (
+          <Text style={styles.selectionHint}>Press and hold for request actions.</Text>
         )}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -846,20 +978,20 @@ const makeStyles = (C: any) =>
   StyleSheet.create({
     skeletonBlock: { backgroundColor: C.backgroundSelected, borderRadius: 999 },
     safeArea: { flex: 1, backgroundColor: C.background },
-    content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 140 },
+    content: { paddingHorizontal: 18, paddingTop: 92, paddingBottom: 175 },
     title: { color: C.text, fontSize: 34, fontWeight: '900', letterSpacing: -0.7 },
     subtitle: { color: C.textSecondary, fontSize: 16, lineHeight: 24, marginTop: 8, marginBottom: 22 },
-    heroShell: { borderRadius: 28, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.13, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 7 },
-    heroCard: { borderRadius: 28, padding: 19, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    heroShell: { borderRadius: 30, marginBottom: 24, shadowColor: '#000', shadowOpacity: 0.13, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 7 },
+    heroCard: { borderRadius: 30, padding: 19, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     heroTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    heroIcon: { width: 56, height: 56, borderRadius: 20, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
+    heroIcon: { width: 56, height: 56, borderRadius: 22, backgroundColor: C.backgroundbutton, alignItems: 'center', justifyContent: 'center', shadowColor: C.primary, shadowOpacity: 0.2, shadowRadius: 12, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
     heroEyebrow: { color: C.textSecondary, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
     heroTitle: { color: C.text, fontSize: 19, fontWeight: '900', marginTop: 4 },
     heroText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginTop: 15 },
     statusBadge: { borderRadius: 999, paddingHorizontal: 11, paddingVertical: 7, backgroundColor: C.backgroundSelected, borderWidth: 1, borderColor: C.border },
     statusBadgeActive: { backgroundColor: `${C.success}14`, borderColor: `${C.success}45` },
     statusBadgeText: { color: C.text, fontSize: 11, fontWeight: '900' },
-    securityStrip: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderRadius: 16, padding: 12, marginTop: 15, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}35` },
+    securityStrip: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderRadius: 18, padding: 12, marginTop: 15, backgroundColor: C.actionCard, borderWidth: 1, borderColor: `${C.primary}35` },
     securityStripText: { flex: 1, color: C.text, fontSize: 12, lineHeight: 18, fontWeight: '700' },
     sectionRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 18 },
     sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4, marginBottom: 10 },
@@ -867,46 +999,48 @@ const makeStyles = (C: any) =>
     sectionSubtitle: { color: C.textSecondary, fontSize: 12, marginTop: 4 },
     countBadge: { minWidth: 26, height: 26, borderRadius: 13, backgroundColor: C.backgroundSelected, alignItems: 'center', justifyContent: 'center' },
     countText: { color: C.text, fontSize: 11, fontWeight: '900' },
-    toggle: { width: 56, height: 32, borderRadius: 18, padding: 3, backgroundColor: C.backgroundSelected, borderWidth: 1, borderColor: C.border, justifyContent: 'center' },
+    toggle: { width: 56, height: 32, borderRadius: 20, padding: 3, backgroundColor: C.backgroundSelected, borderWidth: 1, borderColor: C.border, justifyContent: 'center' },
     toggleActive: { backgroundColor: C.primary, borderColor: C.primary },
     toggleKnob: { width: 24, height: 24, borderRadius: 12, backgroundColor: C.backgroundElement, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 5, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
     toggleKnobActive: { alignSelf: 'flex-end', backgroundColor: '#fff' },
     label: { color: C.textSecondary, fontSize: 11, fontWeight: '900', letterSpacing: 1, marginTop: 8, marginBottom: 7 },
     helperText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 11 },
-    cardShell: { borderRadius: 24, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 17, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
-    listCard: { borderRadius: 24, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+    cardShell: { borderRadius: 26, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 17, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+    listCard: { borderRadius: 26, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
     contactRow: { minHeight: 78, paddingHorizontal: 14, paddingVertical: 13, flexDirection: 'row', alignItems: 'center', gap: 11 },
     divider: { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border },
     checkCircle: { width: 25, height: 25, borderRadius: 13, borderWidth: 2, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
     checkCircleSelected: { backgroundColor: C.primary, borderColor: C.primary },
-    avatar: { width: 43, height: 43, borderRadius: 16, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    avatar: { width: 43, height: 43, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     avatarText: { color: C.primary, fontSize: 16, fontWeight: '900' },
     rowIcon: { width: 42, height: 42, borderRadius: 15, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     rowTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
     rowSubtitle: { color: C.textSecondary, fontSize: 12, marginTop: 3 },
     relationship: { color: C.primary, fontSize: 10, fontWeight: '800', marginTop: 4 },
     controlDisabled: { opacity: 0.55 },
-    emptyContact: { borderRadius: 22, padding: 15, marginBottom: 18, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
+    emptyContact: { borderRadius: 24, padding: 15, marginBottom: 18, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center', gap: 12, shadowColor: '#000', shadowOpacity: 0.07, shadowRadius: 15, shadowOffset: { width: 0, height: 8 }, elevation: 3 },
     thresholdRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
     thresholdChip: { minHeight: 42, borderRadius: 999, paddingHorizontal: 15, alignItems: 'center', justifyContent: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
     thresholdChipActive: { backgroundColor: C.primary, borderColor: C.primary, shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 9, shadowOffset: { width: 0, height: 5 }, elevation: 3 },
     thresholdText: { color: C.textSecondary, fontSize: 12, fontWeight: '800' },
     thresholdTextActive: { color: '#fff' },
     warningText: { color: C.warning, fontSize: 13, lineHeight: 20, marginBottom: 16, fontWeight: '700' },
-    passwordWrap: { flexDirection: 'row', alignItems: 'center', borderRadius: 20, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
+    passwordWrap: { flexDirection: 'row', alignItems: 'center', borderRadius: 22, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, marginBottom: 16 },
     passwordInput: { flex: 1, color: C.text, paddingHorizontal: 16, paddingVertical: 15, fontSize: 14 },
     eyeButton: { width: 52, height: 54, alignItems: 'center', justifyContent: 'center' },
     primaryButton: { minHeight: 55, borderRadius: 999, paddingHorizontal: 18, backgroundColor: C.backgroundbutton, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, shadowColor: C.primary, shadowOpacity: 0.18, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 5 },
     primaryButtonText: { color: '#fff', fontSize: 14, fontWeight: '900' },
     disabled: { opacity: 0.5 },
-    requestShell: { borderRadius: 24, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 17, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
-    requestCard: { borderRadius: 24, padding: 15, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    requestShell: { borderRadius: 26, marginBottom: 15, shadowColor: '#000', shadowOpacity: 0.09, shadowRadius: 17, shadowOffset: { width: 0, height: 9 }, elevation: 5 },
+    requestCard: { borderRadius: 26, padding: 15, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    requestCardSelected: { borderColor: C.primary, borderWidth: 2, backgroundColor: C.actionCard },
     requestTop: { flexDirection: 'row', alignItems: 'center', gap: 11 },
     requestId: { color: C.text, fontSize: 12, fontWeight: '900', marginTop: 14 },
     progressText: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 7, fontWeight: '700' },
     verifyWarning: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 11, borderRadius: 15, marginTop: 13, backgroundColor: `${C.warning}10`, borderWidth: 1, borderColor: `${C.warning}35` },
     verifyWarningText: { flex: 1, color: C.text, fontSize: 11, lineHeight: 17, fontWeight: '700' },
     voteStatusText: { color: C.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 12, fontWeight: '700' },
+    selectionHint: { color: C.primary, fontSize: 11, lineHeight: 17, marginTop: 12, fontWeight: '800' },
     voteRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
     denyButton: { flex: 1, minHeight: 47, borderRadius: 999, borderWidth: 1, borderColor: C.danger, alignItems: 'center', justifyContent: 'center' },
     denyText: { color: C.danger, fontSize: 13, fontWeight: '900' },
@@ -916,10 +1050,10 @@ const makeStyles = (C: any) =>
     cancelText: { color: C.danger, fontSize: 11, fontWeight: '900' },
     pill: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 6 },
     pillText: { fontSize: 9, fontWeight: '900' },
-    codeShell: { borderRadius: 24, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
-    codeCard: { borderRadius: 24, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: `${C.primary}55` },
+    codeShell: { borderRadius: 26, marginBottom: 20, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6 },
+    codeCard: { borderRadius: 26, padding: 17, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: `${C.primary}55` },
     codeHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-    codeIcon: { width: 44, height: 44, borderRadius: 16, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
+    codeIcon: { width: 44, height: 44, borderRadius: 18, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center' },
     codeTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
     codeSubtitle: { color: C.textSecondary, fontSize: 12, lineHeight: 18, marginTop: 4 },
     codeValue: { color: C.text, backgroundColor: C.background, borderWidth: 1, borderColor: C.border, borderRadius: 17, paddingHorizontal: 12, paddingVertical: 15, marginTop: 15, textAlign: 'center', fontSize: 15, lineHeight: 23, fontWeight: '900', letterSpacing: 0.7 },
@@ -929,25 +1063,25 @@ const makeStyles = (C: any) =>
     codeDismissButton: { flex: 1, minHeight: 48, borderRadius: 999, backgroundColor: C.actionCard, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
     codeDismissText: { color: C.primary, fontSize: 12, fontWeight: '900' },
     codeWarning: { color: C.warning, fontSize: 11, lineHeight: 17, textAlign: 'center', marginTop: 12 },
-    infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 22, padding: 15, marginTop: 8, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
+    infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, borderRadius: 24, padding: 15, marginTop: 8, backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 3 },
     infoText: { flex: 1, color: C.textSecondary, fontSize: 12, lineHeight: 19, fontWeight: '700' },
-    centerCard: { borderRadius: 28, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
-    largeIcon: { width: 68, height: 68, borderRadius: 24, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
+    centerCard: { borderRadius: 30, padding: 22, alignItems: 'center', backgroundColor: C.backgroundElement, borderWidth: 1, borderColor: C.border },
+    largeIcon: { width: 68, height: 68, borderRadius: 26, backgroundColor: C.actionCard, alignItems: 'center', justifyContent: 'center', marginBottom: 15 },
     centerTitle: { color: C.text, fontSize: 21, fontWeight: '900', textAlign: 'center', marginTop: 12 },
     centerText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, textAlign: 'center', marginTop: 8, marginBottom: 18 },
     skeletonTitle: { width: '62%', height: 34, marginBottom: 12 },
-    skeletonSubtitle: { width: '94%', height: 55, borderRadius: 16, marginBottom: 22 },
+    skeletonSubtitle: { width: '94%', height: 55, borderRadius: 18, marginBottom: 22 },
     skeletonHeroRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    skeletonHeroIcon: { width: 56, height: 56, borderRadius: 20 },
+    skeletonHeroIcon: { width: 56, height: 56, borderRadius: 22 },
     skeletonLineMedium: { width: '64%', height: 13, marginBottom: 9 },
     skeletonLineLarge: { width: '88%', height: 20 },
     skeletonLineSmall: { width: '48%', height: 11, marginTop: 8 },
     skeletonPill: { width: 55, height: 31 },
     skeletonParagraph: { width: '93%', height: 44, borderRadius: 14, marginTop: 16 },
-    skeletonStrip: { width: '100%', height: 56, borderRadius: 16, marginTop: 15 },
+    skeletonStrip: { width: '100%', height: 56, borderRadius: 18, marginTop: 15 },
     skeletonSection: { width: '45%', height: 20, marginBottom: 12 },
     skeletonCheck: { width: 25, height: 25 },
-    skeletonAvatar: { width: 43, height: 43, borderRadius: 16 },
+    skeletonAvatar: { width: 43, height: 43, borderRadius: 18 },
     skeletonChipRow: { flexDirection: 'row', gap: 8, marginBottom: 18 },
     skeletonChip: { width: 88, height: 42 },
     skeletonButton: { width: '100%', height: 55, marginTop: 4 },
